@@ -5,8 +5,9 @@ NAME = "spyndle"
 DESCRIPTION = "Toolbox for analyzing sleep spindles."
 AUTHOR = "Christian O'Reilly"
 AUTHOR_EMAIL = "christian.oreilly@umontreal.ca"
-URL = "http://sourceforge.net/p/spyndle/"
 VERSION = __import__(PACKAGE).__version__
+URL = "https://bitbucket.org/christian_oreilly/spyndle/"
+DOWNLOAD_URL = URL + "downloads/" + NAME + "-" + VERSION + ".zip"
 
 setup(
     name=NAME,
@@ -17,7 +18,7 @@ setup(
     author_email=AUTHOR_EMAIL,
     url=URL,
     license='LICENSE.txt',
-    download_url='https://github.com/USER/PROJECT/tarball/master',
+    download_url=DOWNLOAD_URL,
     packages=['spyndle'],
     install_requires=[],
 )
