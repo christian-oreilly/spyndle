@@ -1,4 +1,4 @@
 include *.txt
 include *.txt
-recursive-include docs *.txt
-recursive-include *.edf
+recursive-include spyndle/DevuystDB *.txt
+recursive-include spyndle/DevuystDB *.edf

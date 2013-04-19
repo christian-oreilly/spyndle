@@ -1,4 +1,4 @@
-from distutils.core import setup
+from setuptools import setup
 
 PACKAGE = "spyndle"
 NAME = "spyndle"
@@ -7,7 +7,7 @@ AUTHOR = "Christian O'Reilly"
 AUTHOR_EMAIL = "christian.oreilly@umontreal.ca"
 VERSION = __import__(PACKAGE).__version__
 URL = "https://bitbucket.org/christian_oreilly/spyndle/"
-DOWNLOAD_URL = URL + "downloads/" + NAME + "-" + VERSION + ".zip"
+#DOWNLOAD_URL = URL + "downloads/" + NAME + "-" + VERSION + ".zip"
 
 setup(
     name=NAME,
@@ -16,9 +16,9 @@ setup(
     long_description=open("README.txt").read(),
     author=AUTHOR,
     author_email=AUTHOR_EMAIL,
-    url=URL,
     license='LICENSE.txt',
-    download_url=DOWNLOAD_URL,
     packages=['spyndle'],
-    install_requires=[],
-)
+    url=URL,
+    setup_requires=['bitbucket-distutils >= 0.1.2'])
+
+#, install_requires=[], download_url=DOWNLOAD_URL,
