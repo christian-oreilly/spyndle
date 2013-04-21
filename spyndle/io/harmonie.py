@@ -266,12 +266,15 @@ class HarmonieReader(EEGDBReaderBase):
         # TODO: Implémenter le code pour obtenir la valeur de sigStart
         sigStart = (pageNo-1)*self.pageDuration     
     
-        recordedSignals = [array([]) for i in range(self.nbChannels)]
+        recordedSignals = [array([]) for i in range(len(signalNames))]
         indS = 0
         # TODO: Évaluer la possibilité d'utiliser GetRecordBuffer pour augmenter l'efficacité...
         record = ISignalRecord.GetRecordData()
+        i2 = 0
         for i in range(self.nbChannels):
-            recordedSignals[i] = array(record[indS:int(indS+self.pageNbSamples[i])])
+            if self.getChannelLabels()[i] in signalNames:
+                recordedSignals[i2] = array(record[indS:int(indS+self.pageNbSamples[i])])
+                i2 += 1
             indS += int(self.pageNbSamples[i])
 
         return (self.samplingRates, sigStart, recordedSignals)
@@ -575,7 +578,7 @@ class HarmonieReader(EEGDBReaderBase):
      Convert and save the .sig/.sts files in .edf/.ann files with the .ann file
      being a custom format file used to save complex annotations.
     """
-    def saveAsEDFA(self, filename):
+    def saveAsEDFA(self, filename, fileType = "EDF"):
         
         def subjectFields(field):
             return field if field else "X"
@@ -589,8 +592,11 @@ class HarmonieReader(EEGDBReaderBase):
         
         with open(filename, 'wb') as f:
 
-             #8 ascii : version of this data format (0) 
-            f.write("0       ")
+            #8 ascii : version of this data format (0) 
+            if fileType == "EDF":
+                f.write("0       ")
+            elif fileType == "BDF":
+                f.write("\xFFBIOSEMI")
             
             #80 ascii : local patient identification 
             #The 'local patient identification' field must start with the subfields 
@@ -653,7 +659,11 @@ class HarmonieReader(EEGDBReaderBase):
             f.write("%08d" % headerSize)   
             
             # 44 ascii : reserved
-            f.write(" "*44) 
+            if fileType == "EDF":
+                f.write(" "*44) 
+            elif fileType == "BDF":
+                f.write("24BIT" + " "*39)            
+            
             
             # 8 ascii : number of data records (-1 if unknown)
             #  The 'number of data records' can only be -1 during recording. 
@@ -662,7 +672,7 @@ class HarmonieReader(EEGDBReaderBase):
             f.write("%08d" % nbPages)  
             
             # 8 ascii : duration of a data record, in seconds
-            f.write("%08d" % self.pageDuration )  
+            f.write(("%8.6f" % self.pageDuration)[:8] )  
             
             # 4 ascii : number of signals (ns) in data record
             f.write("%04d" % (ns +1))
@@ -686,14 +696,16 @@ class HarmonieReader(EEGDBReaderBase):
             #     print "channel ", i, ":", self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)
             #     print "channel ", i, ":", self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATE)
             
+            
             # ns * 8 ascii : ns * physical minimum (e.g. -500 or 34)
             for i in range(ns): 
-                f.write("%08d" %  self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)[0])
+                f.write(("%8.6f" %  self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)[0])[:8])
             f.write("%08d" %  -1)     
+
 
             # ns * 8 ascii : ns * physical maximum (e.g. 500 or 40)
             for i in range(ns): 
-                f.write("%08d" %  self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)[2])
+                f.write(("%8.6f" %  self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)[2])[:8])
             f.write("%08d" %  1)     
 
 
@@ -709,13 +721,15 @@ class HarmonieReader(EEGDBReaderBase):
             f.write("%08d" %  32767)
 
 
+
+
             # ns * 80 ascii : ns * prefiltering (e.g. HP:0.1Hz LP:75Hz)
             for i in range(ns+1): f.write(" "*80)
 
             # ns * 8 ascii : ns * nr of samples in each data record
             for i in range(ns): 
                 f.write("%08d" % self.pageNbSamples[i])
-            annotationFieldLength = 80      
+            annotationFieldLength = 400      
             f.write("%08d" % annotationFieldLength)
             
             
@@ -729,17 +743,12 @@ class HarmonieReader(EEGDBReaderBase):
             # ..
             # nr of samples[ns] * integer : last signal
             
-            
-            
-            
-            
-            
-            
-            print f.tell(), headerSize
-            
-
             ISignalRecord = self.ISignalFile.CreateSignalRecord(self.basePageNbSamples)
             for noPage in range(nbPages):
+                
+                # The last page is not necessary complete in Harmony so we need to 
+                # define a record of a correct size to read the last samples without
+                # overflowing.
                 if noPage  == nbPages -1:
                     ISignalRecord = self.ISignalFile.CreateSignalRecord(self.nbSamples - self.basePageNbSamples*(nbPages-1))
                     
@@ -749,32 +758,61 @@ class HarmonieReader(EEGDBReaderBase):
                 
                 indS = 0
                 # TODO: Évaluer la possibilité d'utiliser GetRecordBuffer pour augmenter l'efficacité...
-                record = ISignalRecord.GetRecordData()
+                record = ISignalRecord.GetRecordData()       
+                
                 for i in range(self.nbChannels):
                     
                     recordedSignal = array(record[indS:(indS+self.pageNbSamples[i])])
                     if noPage  == nbPages -1:
                         recordedSignal = append(recordedSignal, zeros(self.samplingRates[i]*self.pageDuration - len(recordedSignal)))
-                        
-                    print recordedSignal
 
                     # WRITE RECORDED SIGNAL....
-                    f.write(recordedSignal.astype(numpy.int16).tostring())
+                    physical_min = self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)[0]
+                    physical_max = self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)[2]
+                    digital_min  = self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATE)[0]
+                    digital_max  = self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATE)[2]
+
+                    phys_range = physical_max - physical_min
+                    dig_range = digital_max - digital_min
+                    assert numpy.all(phys_range > 0)
+                    assert numpy.all(dig_range > 0)
+                    gain = phys_range / dig_range                          
+                    
+                    recordedSignal = (recordedSignal - physical_min)/gain + digital_min       
+
+                    if fileType == "EDF":
+                        f.write(recordedSignal.astype('<h').tostring())
+                    elif fileType == "BDF": 
+                        #print "writing BDF..."
+                        # Writing in a string of 32-bit integers and removing every fourth byte
+                        # to obtain a string of 24-bit integers
+                        recordedSignal = recordedSignal.astype('<i').tostring()
+                        recordedSignal = "".join([recordedSignal[noBit] for noBit in range(len(recordedSignal)) if (noBit+1)%4])
+                        f.write(recordedSignal)
+                    
+                    #dig = np.fromstring(samples, '<i2').astype(float)
+                    #phys = (dig - self.header.dig_min[i]) * self.header.gain[i] + self.header.phys_min[i]
+                    #signals.append(phys)                    
+                    
+                    
 
                     indS += int(self.pageNbSamples[i])
                 
                 # Annotation channel
-                f.write("\0"*annotationFieldLength*2)
+                timeDiff = ole2datetime(ISignalRecord.GetStartTime()) - self.recordingStartDateTime
+                timeKeepingStr = "+" + str(timeDiff.seconds + timeDiff.days * 86400) + "\x14\x14"
                 
-    
-            ds = 0
-            for i in range(ns): 
-                 ds += self.pageNbSamples[i]*2
-            ds += annotationFieldLength*2        
+                if fileType == "EDF":
+                    f.write(timeKeepingStr +  "\0"*(annotationFieldLength*2-len(timeKeepingStr)))
+                elif fileType == "BDF":
+                    f.write(timeKeepingStr +  "\0"*(annotationFieldLength*3-len(timeKeepingStr)))                   
             
-            print headerSize + ds*nbPages, ds, f.tell()     
+                #print timeKeepingStr +  "\0"*(annotationFieldLength*2-len(timeKeepingStr))
                 
-    
+            #ds = 0
+            #for i in range(ns): 
+            #     ds += self.pageNbSamples[i]*2
+            #ds += annotationFieldLength*2        
     
         f.closed
 

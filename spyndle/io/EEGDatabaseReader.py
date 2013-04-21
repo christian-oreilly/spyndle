@@ -24,27 +24,46 @@ import time
 from abc import ABCMeta, abstractmethod
     
 
+
+class ErrPureVirtualCall(Exception): 
+    
+#    def __init__(self, err):
+ #       self.value = value
+        
+    def __str__(self):
+        return "Trying to access a pure virtual function."
+
+
+
+"""
+ Abstract class describing an EEG reader.
+"""
 class EEGDBReaderBase :
     __metaclass__ = ABCMeta
     
+    # Abstract accessor functions   
+    
+    """
+     Implementation of subclasses must return a list of channel labels (names).
+    """
     @abstractmethod
     def getChannelLabels(self):
-        return
+        raise ErrPureVirtualCall
         
     @abstractmethod
     def getEvents(self):
-        return
+        raise ErrPureVirtualCall
     
-    def __init__(self):
-        self.pageDuration = 30 # en secondes
-
-        
+    def __init__(self, pageDuration = 30): # en secondes
+        self.setPageDuration(pageDuration) 
+  
     def setPageDuration(self, duration):
         self.pageDuration = duration
-    
-    
-
-    
+        
+    def getPageDuration(self):
+        return self.pageDuration
+        
+        
   
 class RecordedChannel:
     def __init__(self): #, ISignalFile):
