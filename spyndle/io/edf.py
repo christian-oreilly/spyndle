@@ -81,6 +81,59 @@ def tal(tal_str):
 
 
 
+from lxml import etree
+from spyndle.io import Event
+  
+class EDFEvent(Event):
+    def __init__(self, talEvent): #, ISignalFile):
+        Event.__init__(self)
+        self.startTime   = talEvent[0]
+        self.timeLength  = talEvent[1]        # Duration in seconds  
+        #self.dateTime    = ""          
+        #self.startSample = ""
+        #self.sampleLength= ""
+        #self.color       = ""
+
+
+        self.properties  = {}
+        # XML event
+        if talEvent[2][:6] == "<Event" :
+            root = etree.fromstring(talEvent[2])
+            for name, value in sorted(root.items()):
+                if name == "name":
+                    self.name = value
+                elif name == "groupeName":
+                    self.groupeName = value
+                elif name == "channel":
+                    self.channel = value
+                else :
+                    self.properties[name] = value                    
+        else:
+            self.name = talEvent[2]
+
+
+
+    def getXml(self):
+        # create XML 
+        root = etree.Element('Event', name=self.name, groupeName=self.groupeName)
+        for propKey in self.properties:
+            propertyElem = etree.Element('Property')
+            propertyElem.set(propKey, self.properties[propKey])            
+            root.append(propertyElem)
+            
+        # pretty string
+        return etree.tostring(root) #, pretty_print=True)        
+
+            
+        
+
+
+
+
+
+
+
+
 class EDFHeader :
     # BDF is a 24-bit version of the 16-bit EDF format, so we read it with the
     # the same re
@@ -178,8 +231,11 @@ class EDFReader(EEGDBReaderBase) :
         self.read_header()    
         self.pageSize = sum(self.header.n_samples_per_record)*self.header.nbBytes  # in bytes
         
+        self.readEvents()        
+        
+        
     def getNbPages(self):    
-        return int(ceil(self.header.n_records*self.header.record_length/self.pageDuration))          
+        return int(ceil(self.header.n_records*self.header.record_length/self.getPageDuration()))          
                 
     def getChannelLabels(self):
         # Le -1 prend en compte que le signal EDF Annotation est exclus du record.   
@@ -187,9 +243,38 @@ class EDFReader(EEGDBReaderBase) :
         # dernier signal.
         return self.header.label[0:-1]
         
-    def getEvents(self):
+    def readEvents(self):
         # TODO: À implémenter.
-        return        
+        
+        self.events = []
+        self.file.seek(self.header.header_nbytes)        
+        indEventChannel = self.header.label.index(EVENT_CHANNEL)
+        for noPage in range(self.getNbPages()):        
+            raw_record = self.read_raw_record()  
+            
+            # The first index is the mendatory time keeping event. We don't need it.
+            for talEvent in tal(raw_record[indEventChannel] )[1:] : 
+                # One TAL can contain many events wit the same startTime/Duration properties
+                for noEventStr in talEvent[2]:
+                    self.events.append(EDFEvent((talEvent[0], talEvent[1], noEventStr)))
+
+
+
+
+
+    def readChannel(self, signalName, usePickled=False):
+        if usePickled:
+            raise NotImplementedError
+        else:
+            raise NotImplementedError
+
+
+
+
+
+    def getEvents(self): 
+        return self.events
+     
         
         
     def setPageDuration(self, duration):

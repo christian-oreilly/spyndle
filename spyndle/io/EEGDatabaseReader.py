@@ -21,6 +21,7 @@ from scipy import array
 from scipy.io import loadmat
 
 import time
+from lxml import etree  
 from abc import ABCMeta, abstractmethod
     
 
@@ -47,13 +48,21 @@ class EEGDBReaderBase :
      Implementation of subclasses must return a list of channel labels (names).
     """
     @abstractmethod
-    def getChannelLabels(self):
-        raise ErrPureVirtualCall
+    def getChannelLabels(self): raise ErrPureVirtualCall
         
     @abstractmethod
-    def getEvents(self):
-        raise ErrPureVirtualCall
-    
+    def getEvents(self): raise ErrPureVirtualCall
+        
+    @abstractmethod        
+    def getNbPages(self): raise ErrPureVirtualCall
+        
+    @abstractmethod              
+    def readChannel(self, channel, usePickled=False) :  raise ErrPureVirtualCall     
+        
+        
+        
+        
+        
     def __init__(self, pageDuration = 30): # en secondes
         self.setPageDuration(pageDuration) 
   
@@ -86,8 +95,7 @@ class RecordedChannel:
         self.type           = data["type"][0][0]  
         self.startTime      = time.strptime(data["startTime"][0], "%a, %d %b %Y %H:%M:%S +0000")
 
-        
-        
+            
         
 class Event:
     def __init__(self): #, ISignalFile):
@@ -97,7 +105,7 @@ class Event:
         self.name        = ""
         self.startTime   = ""
         self.dateTime    = ""      
-        self.timeLength  = ""              
+        self.timeLength  = ""        # Duration in seconds      
         self.startSample = ""
         self.sampleLength= ""
         self.color       = ""
@@ -115,7 +123,16 @@ class Event:
         return( str(self.no) + " " + str(self.groupeName) + " " + str(self.channel)
                 + " " + str(self.name) + " " + str(self.startTime) + " " + str(self.timeLength))
 
-
+    def getXml(self):
+        # create XML 
+        root = etree.Element('Event', name=self.name, groupeName=self.groupeName)
+        for propKey in self.properties:
+            propertyElem = etree.Element('Property')
+            propertyElem.set(propKey, self.properties[propKey])            
+            root.append(propertyElem)
+            
+        # pretty string
+        return etree.tostring(root) #, pretty_print=True)        
 
             
         

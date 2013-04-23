@@ -52,9 +52,9 @@ from scipy.fftpack import fftfreq
 from scipy.io import savemat, loadmat
 from scipy.integrate import trapz
 
-from filters import Filter
-from sleepCycles import cycleDefinitions, computeDreamCycles
-from STransform import computeMST
+from spyndle import Filter
+from spyndle import cycleDefinitions, computeDreamCycles
+from spyndle import computeMST
 
 import os, gc, copy
 
@@ -355,8 +355,14 @@ class SpindleDectectorRMS(SpindleDectector):
 
   
     # Detect every spindle in the channels listChannels of the file opened by the reader.
-    def detectSpindles(self, reader, listChannels, verbose=True) :
+    def detectSpindles(self, reader, listChannels, verbose=True, usePickled=False) :
 
+        if isinstance(listChannels, str) :
+            listChannels = [listChannels]
+
+        if not type(listChannels) is list and not type(listChannels) is tuple:
+            raise TypeError
+            
         # List of detected spindles
         self.detectedSpindles = []
 
@@ -368,16 +374,18 @@ class SpindleDectectorRMS(SpindleDectector):
         if verbose:   print "Start reading datafile..."
    
 
-        listChannels = [channel for channel in listChannels if channel in reader.getAvailableChannels()] 
+        listChannels = [channel for channel in listChannels if channel in reader.getChannelLabels()] 
+        print listChannels
 
         # Pickle data for each channel separatelly so simplify and accelerate
-        # the reading of large files.       
-        reader.pickleCompleteRecord(listChannels)   
+        # the reading of large files.    
+        if usePickled :
+            reader.pickleCompleteRecord(listChannels)   
    
         for channel in listChannels:    
             if verbose:   print "Channel " + channel + "..."           
             
-            data        = reader.readPickledChannel(channel)
+            data        = reader.readChannel(channel, usePickled=usePickled)
 
             signal      = data.signal
             fs          = data.samplingRate                      # sampling rate    
