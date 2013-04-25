@@ -133,8 +133,7 @@ class HarmonieReader(EEGDBReaderBase):
         try:
             self.ISignalFile.Open(str(fname), SIGNALFILE_FLAGS_READONLY)
         except:
-            # TODO: Penser à un systeme de gestion des erreurs...
-            print "Erreur ouverture"
+            print "An error has occured when trying to open " + str(fname)
             self.ISignalFile    = None
             self.labels         = None
             self.samplingRates  = None
@@ -142,7 +141,7 @@ class HarmonieReader(EEGDBReaderBase):
             self.pageNbSamples  = None
             self.basePageNbSamples = None
             self.channelType        = None
-            raise
+            raise IOError(fname)
             
             
         #	Lecture de l'objet 'ISignalInfo'
@@ -250,8 +249,13 @@ class HarmonieReader(EEGDBReaderBase):
     def getDuration(self):    # en secondes
         return self.ISignalFile.GetRecordCount(int(self.baseFreq))       
 
-    def getNbSample(self):    # en secondes
-        return self.nbSamples
+    def getNbSample(self, channel=None):
+        if channel is None:
+            return self.nbSamples
+        else:
+            if not isinstance(channel, str):
+                raise TypeError 
+            return self.getDuration()*self.samplingRates[self.labels.index(channel)] 
         
     def getElectrodesLabels(self):
         return self.labels

@@ -1,29 +1,19 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Tue Jan 08 16:54:05 2013
-
-@author: REVESTECH
-"""
 
 """
     Implementation of spindle detectors. 
 
     Copyright (C) 2013  Christian O'Reilly
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-
     For personnal, educationnal, and research purpose, this software is 
     provided under the GNU GPL (V.3) license: you can redistribute it and/or
     modify it under the terms of the version 3 of the GNU General Public 
     License as published by the Free Software Foundation.
           
-    To use this software in commercial application, please contact the author. 
-    If used for research purpose, the reference [1] should be cited in the
-    derived publication to refere the reader to the description 
+    To use this software in commercial application, please contact the author.
+    
+    If this code is used for research purpose, the reference [1] should be
+    cited in the derived publication to refer the reader to the description 
     of the methodology.
 
     This program is distributed in the hope that it will be useful,
@@ -44,6 +34,9 @@ Created on Tue Jan 08 16:54:05 2013
 
 """
 
+import os, gc, copy
+
+from abc import ABCMeta, abstractmethod
 
 from scipy import concatenate, zeros, mean, sqrt, mod, diff, where, fft
 from scipy import array, arange, ones, unique
@@ -52,12 +45,13 @@ from scipy.fftpack import fftfreq
 from scipy.io import savemat, loadmat
 from scipy.integrate import trapz
 
+
+
 from spyndle import Filter
 from spyndle import cycleDefinitions, computeDreamCycles
 from spyndle import computeMST
-
-import os, gc, copy
-
+from spyndle.errorMng import ErrPureVirtualCall
+from spyndle.io import EEGDBReaderBase
 
 
 # Class representing a detected spindle.
@@ -143,9 +137,9 @@ class DetectedSpindle:
 
 # Generic spindle detector.
 class SpindleDectector:
+    __metaclass__ = ABCMeta    
     
-    
-    def __init__(self):
+    def __init__(self, reader=None, usePickled=False):
         ###############################################################################
         # Detection patameters
         ###############################################################################
@@ -171,15 +165,29 @@ class SpindleDectector:
         # List of detected spindles
         self.detectedSpindles = []
 
-        ###############################################################################
+        # EEG data reader
+        self.reader = reader
 
+        # Pickling data allow faster spindle detection for some reader such
+        # as the HarmonieReader but might not be implemented on other readers.
+        # If self.usePickled, the spindle detection uses pickled data.
+        self.usePickled = usePickled
+
+    def setReader(self, reader):
+        self.reader = reader
+
+
+    """
+     This function could be more elegantly written as :
+         
+        def simpleComputeRMS(self, reader, fmin=11, fmax=16):
+            for spindle in self.detectedSpindles:        
+                spindle.computeRMS(reader, fmin, fmax)
+    
+      but such an implementation is 40 times slower at execution than the 
+      proposed version.
+    """
     def computeRMS(self, reader, fmin=11, fmax=16):
-        for spindle in self.detectedSpindles:        
-            spindle.computeRMS(reader, fmin, fmax)
-        
-    # computeRMS2 is less elegant than computeRMS but is 40 times faster at 
-    # esecution
-    def computeRMS2(self, reader, fmin=11, fmax=16):
         listChannels = unique([s.channel for s in self.detectedSpindles])        
         
         # Pickle data for each channel separatelly so simplify and accelerate
@@ -222,14 +230,17 @@ class SpindleDectector:
 
 
 
+    """
+     This function could be more elegantly written as :
+         
+        def simpleSetStagesToSpindles(self, reader):
+            for spindle in self.detectedSpindles:        
+                spindle.setStage(reader)
+        
+      but such an implementation is 50 times slower at execution than the 
+      proposed version.
+    """    
     def setStagesToSpindles(self, reader):
-        for spindle in self.detectedSpindles:        
-            spindle.setStage(reader)
-
-
-    # setStagesToSpindles2 is less elegant thant setStagesToSpindles but is 50 times faster at 
-    # esecution
-    def setStagesToSpindles2(self, reader):
         stageIndicator, lstStages = self.computeStageIndicator(reader)
         for spindle in self.detectedSpindles:        
             spindle.sleepStage = lstStages[stageIndicator[spindle.startSample]]
@@ -259,22 +270,53 @@ class SpindleDectector:
         for i in range(1, windowNbSample) : 
             result += signal[i:(i+len(signal)-windowNbSample+1)]
 
-        return concatenate((ones(windowNbSample/2)*result[0], result, ones(windowNbSample/2)* result[-1]))/windowNbSample 
+        return concatenate((ones(windowNbSample/2)*result[0], result, 
+                            ones(windowNbSample/2)* result[-1]))/windowNbSample 
 
 
 
-  
-    # Detect every spindle in the channels listChannels of the file opened by the reader.
-    def detectSpindles(self, reader, listChannels, verbose=True) :
-        return
+    """
+     Detect every spindle in the channels listChannels of the file opened 
+     by the reader.
+    """
+    @abstractmethod
+    def detectSpindles(self, listChannels, reader=None, verbose=True) : 
+        if isinstance(listChannels, str) :
+            listChannels = [listChannels]
 
+        if not type(listChannels) is list and not type(listChannels) is tuple:
+            raise TypeError
+
+        if not reader is None:
+            if isinstance(reader, EEGDBReaderBase):
+                self.reader = reader
+            else:
+                raise TypeError
+        else:
+            if self.reader is None:
+                raise ValueError("The reader attribute of the object is set to"
+                                 " None and not reader object has been passed "
+                                 "as argument to the detectSpindles() method.")
+            
+        # List of detected spindles
+        self.detectedSpindles = []
+
+        
+        
+        
+        
+        
+        
+        
     # TODO: To implement. Used to save detected spindle in EEG data file. 
     def saveSpindleSTS(self, reader, eventName):
         
         for spindle in self.detectedSpindles:            
-            reader.addEvent(eventName, spindle.startSample, spindle.endSample-spindle.startSample, spindle.channel)
+            reader.addEvent(eventName, spindle.startSample, 
+                            spindle.endSample-spindle.startSample, 
+                            spindle.channel)
 
-    # TODO: To implement. Used to save detected spindle in EEG data file. 
+    # Used to save detected spindle in EEG data file. 
     def saveSpindleTxt(self, fileName):
 
         try:
@@ -290,8 +332,6 @@ class SpindleDectector:
 
 
 
-
-    # TODO: To implement. Used to save detected spindle in EEG data file. 
     def loadSpindleTxt(self, fileName):
         import csv
 
@@ -324,8 +364,8 @@ class SpindleDectector:
 class SpindleDectectorRMS(SpindleDectector):
     
     
-    def __init__(self):
-        SpindleDectector.__init__(self)
+    def __init__(self, reader=None, usePickled=False):
+        SpindleDectector.__init__(self, reader, usePickled)
         
         ###############################################################################
         # Detection patameters
@@ -355,40 +395,32 @@ class SpindleDectectorRMS(SpindleDectector):
 
   
     # Detect every spindle in the channels listChannels of the file opened by the reader.
-    def detectSpindles(self, reader, listChannels, verbose=True, usePickled=False) :
-
-        if isinstance(listChannels, str) :
-            listChannels = [listChannels]
-
-        if not type(listChannels) is list and not type(listChannels) is tuple:
-            raise TypeError
-            
-        # List of detected spindles
-        self.detectedSpindles = []
+    def detectSpindles(self, listChannels, reader=None, verbose=True) :
+        SpindleDectector.detectSpindles(self, listChannels, reader, verbose)
 
         # Computing sleep cycles
-        cycles = computeDreamCycles([e for e in reader.events if e.groupeName == "Stage"], self.aeschbachCycleDef)
-    
+        cycles = computeDreamCycles([e for e in self.reader.events if e.groupeName == "Stage"], self.aeschbachCycleDef)
+        print [e for e in self.reader.events if e.groupeName == "Stage"]
+        print cycles
     
         #################################### READING ##########################
         if verbose:   print "Start reading datafile..."
    
 
-        listChannels = [channel for channel in listChannels if channel in reader.getChannelLabels()] 
-        print listChannels
+        listChannels = [channel for channel in listChannels 
+                        if channel in self.reader.getChannelLabels()] 
 
         # Pickle data for each channel separatelly so simplify and accelerate
         # the reading of large files.    
-        if usePickled :
-            reader.pickleCompleteRecord(listChannels)   
+        if self.usePickled :
+            self.reader.pickleCompleteRecord(listChannels)   
    
         for channel in listChannels:    
             if verbose:   print "Channel " + channel + "..."           
             
-            data        = reader.readChannel(channel, usePickled=usePickled)
-
+            data        = self.reader.readChannel(channel, usePickled=self.usePickled)
             signal      = data.signal
-            fs          = data.samplingRate                      # sampling rate    
+            fs          = data.samplingRate
    
    
             ################################## FILTERING ##########################
@@ -398,7 +430,9 @@ class SpindleDectectorRMS(SpindleDectector):
                      
             
             bandPassFilter = Filter(fs)
-            bandPassFilter.create(low_crit_freq=self.lowFreq, high_crit_freq=self.highFreq, order=1001, btype="bandpass", ftype="FIR", useFiltFilt=True)          
+            bandPassFilter.create(low_crit_freq=self.lowFreq, 
+                                  high_crit_freq=self.highFreq, order=1001, 
+                                  btype="bandpass", ftype="FIR", useFiltFilt=True)          
 
             # filtering can take a lot of memory. By making sure that the 
             # garbage collector as passed just before the filtering, we
@@ -407,7 +441,7 @@ class SpindleDectectorRMS(SpindleDectector):
             
             #import datetime
             #a = datetime.datetime.now()        
-            signal = bandPassFilter.applyFilter(signal, True)     
+            signal = bandPassFilter.applyFilter(signal)     
             #b = datetime.datetime.now()
             #print(b-a) # 0:02:20.937000
             #signal = bandPassFilter.applyFilter(signal, False)     
@@ -439,7 +473,7 @@ class SpindleDectectorRMS(SpindleDectector):
             if verbose:  print "Spindle detection..."
             
             for cycle in cycles :
-                stageEvent = reader.getEventsBySample(cycle.sampleStart(), cycle.sampleEnd()) 
+                stageEvent = self.reader.getEventsBySample(cycle.sampleStart(), cycle.sampleEnd()) 
                 stageEvent = filter(lambda e: e.groupeName == "Stage", stageEvent)   
                 
                 currentStageEvents = []
@@ -483,6 +517,7 @@ class SpindleDectectorRMS(SpindleDectector):
                     stopSpinInd  = stopSpinInd[nbSampleDuration/fs >= self.minimalSpindleDuration]
                     
                     newSpindles = [DetectedSpindle(channel, start, end) for start, end in zip(startSpinInd, stopSpinInd)]   
+                    print newSpindles
                     self.detectedSpindles.extend(newSpindles)  
 
 

@@ -1,2 +1,5 @@
 # __init__.py
-__version__ = "0.1.0a.dev1"
+
+
+from spyndle.detector.spindleDetectors import SpindleDectectorRMS
+from spyndle.detector.detectorEvaluation import DetectorEvaluator

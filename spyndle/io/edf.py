@@ -38,9 +38,6 @@ Modification by Christian O'Reilly (Copyright (c) 2013)
 '''
 
 
-
-from scipy import ceil
-
 from EEGDatabaseReader import EEGDBReaderBase
 
 
@@ -48,10 +45,16 @@ import os
 import re, datetime, logging
 import numpy as np
 
+from scipy import array
+
+from lxml import etree
+from spyndle.io import Event, RecordedChannel
+
+
+
 EVENT_CHANNEL = 'EDF Annotations'
 log = logging.getLogger(__name__)
 
-class EDFEndOfData: pass
 
 """
  Class representing the Time-stamped Annotations Lists (TALs) used in EDF+ 
@@ -80,9 +83,6 @@ def tal(tal_str):
   return [parse(m.groupdict()) for m in re.finditer(exp, tal_str)]
 
 
-
-from lxml import etree
-from spyndle.io import Event
   
 class EDFEvent(Event):
     def __init__(self, talEvent): #, ISignalFile):
@@ -90,9 +90,6 @@ class EDFEvent(Event):
         self.startTime   = talEvent[0]
         self.timeLength  = talEvent[1]        # Duration in seconds  
         #self.dateTime    = ""          
-        #self.startSample = ""
-        #self.sampleLength= ""
-        #self.color       = ""
 
 
         self.properties  = {}
@@ -110,6 +107,13 @@ class EDFEvent(Event):
                     self.properties[name] = value                    
         else:
             self.name = talEvent[2]
+            if ( self.name == "Sleep stage 1" or self.name == "Sleep stage 2" or
+                 self.name == "Sleep stage 3" or self.name == "Sleep stage 4" or
+                 self.name == "Sleep stage R" or self.name == "Sleep stage W" or
+                 self.name == "Sleep stage ?" ) :
+               
+               
+               self.groupeName = "Stage"
 
 
 
@@ -153,66 +157,83 @@ class EDFHeader :
              raise IOError
 
         
-        # recording info)
-        self.local_subject_id = f.read(80).strip()
-        self.local_recording_id = f.read(80).strip()
+        # recording info
+        self.subjectID = f.read(80).strip()
+        self.recordingIR = f.read(80).strip()
         
         
         # parse timestamp
         (day, month, year) = [int(x) for x in re.findall('(\d+)', f.read(8))]
         (hour, minute, sec)= [int(x) for x in re.findall('(\d+)', f.read(8))]
         
-          
         # Guessing that the data are less than 100 years old....
         year = year + (2000 if year + 2000 < datetime.date.today().year else 1900) 
-        self.date_time = datetime.datetime(year, month, day, hour, minute, sec)
+        self.startDateTime = datetime.datetime(year, month, day, hour, minute, sec)
         
         
         # misc
-        self.header_nbytes        = int(f.read(8))
-        self.subtype              = f.read(44)[:5]
-        self.contiguous           = self.subtype != 'EDF+D'
-        self.n_records            = int(f.read(8))
-        self.record_length        = float(f.read(8))  # in seconds
-        self.n_channels           = int(f.read(4))
-        
+        self.headerNbBytes      = int(f.read(8))
+        self.subtype            = f.read(44)[:5]
+        self.contiguous         = self.subtype != 'EDF+D'
+        self.nbRecords          = int(f.read(8))
+        self.recordLength       = float(f.read(8))  # in seconds
+        self.nbChannels         = int(f.read(4))
         
         # read channel info
-        channels                  = range(self.n_channels)
-        self.label                = [f.read(16).strip() for n in channels]
-        self.transducer_type      = [f.read(80).strip() for n in channels]
-        self.units                = [f.read(8).strip() for n in channels]
-        self.physical_min         = np.asarray([float(f.read(8)) for n in channels])
-        self.physical_max         = np.asarray([float(f.read(8)) for n in channels])
-        self.digital_min          = np.asarray([int(f.read(8)) for n in channels])
-        self.digital_max          = np.asarray([int(f.read(8)) for n in channels])
-        self.prefiltering         = [f.read(80).strip() for n in channels]
-        self.n_samples_per_record = [int(f.read(8)) for n in channels]
-        f.read(32 * self.n_channels)  # reserved
+        self.channelLabels      = [f.read(16).strip() for n in range(self.nbChannels)]
+
+        self.transducerType     = {}
+        self.units              = {}
+        self.physicalMin        = {}
+        self.physicalMax        = {}          
+        self.digitalMin         = {}
+        self.digitalMax         = {}
+        self.prefiltering       = {}          
+        self.nbSamplesPerRecord = {} 
+        
+        for channel in self.channelLabels : 
+            self.transducerType[channel]        = f.read(80).strip()
+        for channel in self.channelLabels : 
+            self.units[channel]                 = f.read(8).strip()
+        for channel in self.channelLabels : 
+            self.physicalMin[channel]           = float(f.read(8))
+        for channel in self.channelLabels : 
+            self.physicalMax[channel]          = float(f.read(8))            
+        for channel in self.channelLabels : 
+            self.digitalMin[channel]            = int(f.read(8))
+        for channel in self.channelLabels : 
+            self.digitalMax[channel]            = int(f.read(8))  
+        for channel in self.channelLabels : 
+            self.prefiltering[channel]          = f.read(80).strip()            
+        for channel in self.channelLabels : 
+            self.nbSamplesPerRecord[channel]    = int(f.read(8))  
+
+        f.read(32 * self.nbChannels)  # reserved
           
-        assert f.tell() == self.header_nbytes
+        assert(f.tell() == self.headerNbBytes)
 
 
         # Compute variables to locate pages
         #self.headerSize   = self.header['header_nbytes']    
-        self.recordSize = sum(self.n_samples_per_record)*self.nbBytes
-  
+        self.recordSize = sum(self.nbSamplesPerRecord.values())*self.nbBytes
 
         # Patch pour corriger le fait qu'Harmonie met -1 comme valeur à 
         # self.n_records.
         # Le nombre de bytes restant dans le fichier divisé par ns/sizeof(interger) 
         # va donner la valeur de records
-        if self.n_records == -1:
+        if self.nbRecords == -1:
             fileSize = os.path.getsize(fileName)
-            self.n_records =  int((fileSize-self.header_nbytes)/self.recordSize);      
+            self.nbRecords =  int((fileSize-self.headerNbBytes)/self.recordSize);      
     
 
         # calculate ranges for rescaling
-        phys_range = self.physical_max - self.physical_min
-        dig_range = self.digital_max - self.digital_min
-        assert np.all(phys_range > 0)
-        assert np.all(dig_range > 0)
-        self.gain = phys_range / dig_range        
+        self.gain = {}
+        for channel in self.channelLabels :         
+            physicalRange = self.physicalMax[channel] - self.physicalMin[channel]
+            digitalRange  = self.digitalMax[channel]  - self.digitalMin[channel]
+            assert np.all(physicalRange > 0)
+            assert np.all(digitalRange > 0)
+            self.gain[channel] = physicalRange / digitalRange        
         
 
 
@@ -228,46 +249,95 @@ class EDFReader(EEGDBReaderBase) :
         self.fileName = fname
         self.file     = open(fname, 'rb')
         
-        self.read_header()    
-        self.pageSize = sum(self.header.n_samples_per_record)*self.header.nbBytes  # in bytes
-        
+        self.readHeader()    
         self.readEvents()        
         
         
     def getNbPages(self):    
-        return int(ceil(self.header.n_records*self.header.record_length/self.getPageDuration()))          
+        return self.header.nbRecords          
                 
     def getChannelLabels(self):
-        # Le -1 prend en compte que le signal EDF Annotation est exclus du record.   
-        # TODO: Devrait être plus robuste. EDF Annotation n'est pas nécessairement le
-        # dernier signal.
-        return self.header.label[0:-1]
+        return [v for v in self.header.channelLabels if not v == EVENT_CHANNEL]        
+        
         
     def readEvents(self):
-        # TODO: À implémenter.
-        
         self.events = []
-        self.file.seek(self.header.header_nbytes)        
-        indEventChannel = self.header.label.index(EVENT_CHANNEL)
+        self.file.seek(self.header.headerNbBytes)        
+        #indEventChannel = self.header.label.index(EVENT_CHANNEL)
         for noPage in range(self.getNbPages()):        
-            raw_record = self.read_raw_record()  
+            rawRecord = self.readRawRecord()  
             
             # The first index is the mendatory time keeping event. We don't need it.
-            for talEvent in tal(raw_record[indEventChannel] )[1:] : 
+            
+            for talEvent in tal(rawRecord[EVENT_CHANNEL])[1:] : 
                 # One TAL can contain many events wit the same startTime/Duration properties
                 for noEventStr in talEvent[2]:
                     self.events.append(EDFEvent((talEvent[0], talEvent[1], noEventStr)))
 
 
 
+    """
+     Convert a String of bytes to an array of integers.
+    """
+    def byteStr2integers(self, samples):
+        if self.header.fileType == "EDF":
+            # 2-byte little-endian integers
+            return np.fromstring(samples, '<h')
+        elif self.header.fileType == "BDF":
+            #print "reading BDF..."
+            # 3-byte little-endian integers
+            
+            # Inserting a fourth byte to read it as 4-byte floats
+            # byteStr = "\0".join([samples[(noByte*3):(noByte*3+3)] for noByte in range(int(len(samples)/3))]) + "\0"
+            # ==>> cannot use this because we do not always need to pad with zeros...                     
+            
+            # Pad witth zeros or ones depending on wheter the number is 
+            # positive or negative
+            byteStr = ""
+            for noByte in range(int(len(samples)/3)):
+                byteStr += samples[(noByte*3):(noByte*3+3)] + ('\0' if samples[noByte*3+2] < '\x80' else '\xff')                        
+                                             
+            return np.fromstring(byteStr, '<i')          
+        else:
+            raise IOError
 
 
+
+    """
+     Digital to physical conversion.
+    """
+    def digital2physical(self, dig, channel):
+        return (dig - self.header.digitalMin[channel]) * self.header.gain[channel] + self.header.physicalMin[channel]
+
+
+
+
+    """
+     Read the complete signal recorded by a given channel.
+    """
     def readChannel(self, signalName, usePickled=False):
+
+        if not isinstance(signalName, str) :
+            raise TypeError        
+        
+        
         if usePickled:
             raise NotImplementedError
         else:
-            raise NotImplementedError
+            self.file.seek(self.header.headerNbBytes)        
 
+            data = RecordedChannel()         
+            data.samplingRate   = self.header.nbSamplesPerRecord[signalName]/self.header.recordLength
+            data.type           = "EEG"
+            data.startTime      = self.header.startDateTime          
+            
+            signal = []
+            for noPage in range(self.getNbPages()):                  
+                dig = self.byteStr2integers(self.readRawRecord()[signalName])
+                signal.extend(self.digital2physical(dig, signalName))
+                
+            data.signal = array(signal)
+            return data    
 
 
 
@@ -281,61 +351,67 @@ class EDFReader(EEGDBReaderBase) :
         self.changeRecordDuration(duration)
         
     def getPageDuration(self):
-        return self.header.record_length
+        return self.header.recordLength
                 
         
-    def readPage(self, signalNames, pageId):
+    def readPage(self, channelList, pageId):
 
-        # Position de la page pageId :
-        pagePosition = self.header.header_nbytes  + (pageId-1)*self.pageSize
+        # Position the file cursor to the begin of the page no. pageId :
+        pagePosition = self.header.headerNbBbytes  + (pageId-1)*self.recordSize
         self.file.seek(pagePosition)
-
-        # TODO: Maybe replace the ID indexing by name indexing in dictionnary.
-        signalIDs = self.signalNames2IDs(signalNames)        
-        record = self.read_record()
-        recordedSignals = [record[1][signalID] for signalID in signalIDs]
+   
+        record = self.readRecord()
+        recordedSignals = [record[1][channel] for channel in channelList]
         sigStart = record[0]        
-        samplingRates = [self.header.n_samples_per_record[signalID] for signalID in signalIDs]
+        samplingRates = [self.header.n_samples_per_record[channel] for channel in channelList]
         return (samplingRates, sigStart, recordedSignals)
         
         
         
         
-        
-        
+    def getNbSample(self, channel):
+        if not isinstance(channel, str):
+            raise TypeError
+                    
+        assert(channel in self.getChannelLabels())
+                                
+        return self.header.nbSamplesPerRecord[channel]*self.header.nbRecords
+               
         
 
     def __del__(self):
         self.file.close()
 
 
-    def read_header(self):
+    def readHeader(self):
         self.header = EDFHeader(self.file, self.fileName)
       
-  
-    def read_raw_record(self):
-        '''Read a record with data and return a list containing arrays with raw
-        bytes.
-        '''
-        result = []
+      
+      
+    '''
+     Read a record and return a dictionnary indexed by the signal labels
+     containing arrays with raw bytes.  
+    '''        
+    def readRawRecord(self):
+
+        result = {}
         
-        # We label records sequentially from 1 to N...
-        #self.currentRecordInd = int((self.file.tell() - self.header.header_nbytes)/self.header.recordSize)   
-        
-        for nsamp in self.header.n_samples_per_record:
-            samples = self.file.read(nsamp * self.header.nbBytes)
-            if len(samples) != nsamp * self.header.nbBytes:
-                raise EDFEndOfData
-            result.append(samples)
-          
+        for channel in self.header.channelLabels:
+            nbBytes = self.header.nbSamplesPerRecord[channel]*self.header.nbBytes
+            result[channel] = self.file.read(nbBytes)
+            if len(result[channel]) != nbBytes :
+                raise EOFError   
+                
         return result
 
-    
-    def read_record(self):
-        '''Read a raw record, convert it to a (time, signals, events) tuple based on
-        information in the header, and return it.
-        '''
-        raw_record = self.read_raw_record()    
+
+    '''
+     Read a raw record, convert it to a (time, signals, events) tuple based on
+     information in the header, and return it.
+    '''    
+    def readRecord(self):
+
+        rawRecord = self.readRawRecord()    
         
         #dig_min, phys_min, gain = self.dig_min, self.phys_min, self.gain
             
@@ -343,52 +419,23 @@ class EDFReader(EEGDBReaderBase) :
         #time = self.header.date_time + datetime.timedelta(0,offset_seconds)
         signals = []
         events = []
-        for (i, samples) in enumerate(raw_record):
-            if self.header.label[i] == EVENT_CHANNEL:
-                ann = tal(samples)
+        for channel in rawRecord:
+            if channel == EVENT_CHANNEL:
+                ann = tal(rawRecord[channel])
                 time = self.header.date_time + datetime.timedelta(0,ann[0][0]) 
                 events.extend(ann[1:])
             else:
-                if self.header.fileType == "EDF":
-                    # 2-byte little-endian integers
-                    dig = np.fromstring(samples, '<h')
-                elif self.header.fileType == "BDF":
-                    #print "reading BDF..."
-                    # 3-byte little-endian integers
-                    
-                    # Inserting a fourth byte to read it as 4-byte floats
-                    # byteStr = "\0".join([samples[(noByte*3):(noByte*3+3)] for noByte in range(int(len(samples)/3))]) + "\0"
-                    # ==>> cannot use this because we do not always need to pad with zeros...                     
-                    
-                    # Pad witth zeros or ones depending on wheter the number is 
-                    # positive or negative
-                    byteStr = ""
-                    for noByte in range(int(len(samples)/3)):
-                        byteStr += samples[(noByte*3):(noByte*3+3)] + ('\0' if samples[noByte*3+2] < '\x80' else '\xff')                        
-                                                     
-                    dig = np.fromstring(byteStr, '<i')          
-                else:
-                    raise IOError
-                
-                #(dig - self.header.dig_min[i]) * self.header.gain[i] + self.header.phys_min[i]                
-                phys = (dig - self.header.digital_min[i]) * self.header.gain[i] + self.header.physical_min[i]
-                signals.append(phys)
+                dig = self.byteStr2integers(rawRecord[channel])
+                signals.append(self.digital2physical(dig, channel))
         
         return time, signals, events
 
 
 
-
-    def signalNames2IDs(self, signalNames):
-        return [self.header.label.index(signalName) for signalName in signalNames]
-     
-     
-
     def changeRecordDuration(self, newDuration):
         #TODO: Implement.
         raise NotImplemented
-        #self.pageSize = sum(self.n_samples_per_record)*2 
-        return
+
 
 
 
@@ -401,8 +448,8 @@ class EDFReader(EEGDBReaderBase) :
         '''
         try:
           while True:
-            yield self.read_record()
-        except EDFEndOfData:
+            yield self.readRecord()
+        except EOFError:
           pass
 
 

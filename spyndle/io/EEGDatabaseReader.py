@@ -24,17 +24,7 @@ import time
 from lxml import etree  
 from abc import ABCMeta, abstractmethod
     
-
-
-class ErrPureVirtualCall(Exception): 
-    
-#    def __init__(self, err):
- #       self.value = value
-        
-    def __str__(self):
-        return "Trying to access a pure virtual function."
-
-
+from spyndle.errorMng import ErrPureVirtualCall
 
 """
  Abstract class describing an EEG reader.
@@ -58,8 +48,10 @@ class EEGDBReaderBase :
         
     @abstractmethod              
     def readChannel(self, channel, usePickled=False) :  raise ErrPureVirtualCall     
-        
-        
+            
+    @abstractmethod              
+    def getNbSample(self) :  raise ErrPureVirtualCall     
+
         
         
         
@@ -74,6 +66,8 @@ class EEGDBReaderBase :
         
         
   
+  
+# TODO: Manage discontinuous signals.
 class RecordedChannel:
     def __init__(self): #, ISignalFile):
         self.signal         = array([])
@@ -95,8 +89,39 @@ class RecordedChannel:
         self.type           = data["type"][0][0]  
         self.startTime      = time.strptime(data["startTime"][0], "%a, %d %b %Y %H:%M:%S +0000")
 
-            
+    def __str__(self):
+        return ("signal:" + str(self.signal) + ", samplingRate:" + 
+                 str(self.samplingRate) + ", type:" + str(self.type) +
+                 ", startTime:" + str(self.startTime) )
+                  
         
+        
+        
+        
+        
+"""        
+    In order to facilitate the cross-operation of readers for multiple data
+    format, some event names and groupe names are standerdized. It is to the
+    specific reader to ensure that data format using differents names transale
+    them in correct standerdized designation if these events are to be 
+    recognize correctly by other classes, such as detectors. 
+    
+    Standard groupe names : 
+        Stage : For all events used in sleep stage scoring.
+
+    Standard names: (these are compatible with http://www.edfplus.info/specs/edftexts.html#annotations)
+        Sleep stage 1
+        Sleep stage 2
+        Sleep stage 3
+        Sleep stage 4
+        Sleep stage R
+        Sleep stage W
+        Sleep stage ?
+        Sleep stage N 	
+        Sleep stage N1 	
+        Sleep stage N2 	
+        Sleep stage N3
+"""    
 class Event:
     def __init__(self): #, ISignalFile):
         self.no          = ""
@@ -116,7 +141,12 @@ class Event:
     def sampleEnd(self):
         return self.startSample + self.sampleLength        
     def sampleStart(self):
-        return self.startSample
+        return self.startSample    
+        
+    def timeEnd(self):
+        return self.startTime + self.timeLength        
+    def timeStart(self):
+        return self.startTime
 
             
     def __str__(self):
