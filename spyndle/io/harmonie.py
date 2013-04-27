@@ -16,18 +16,16 @@
 ###############################################################################
 
 
-from scipy import array, ceil, zeros, append
-
 import comtypes
 import comtypes.client as cc
 import os
-from scipy.io import savemat
-
-
-from math import floor
-from datetime import time, datetime, timedelta
-
 import ctypes, numpy
+from scipy.io import savemat
+from scipy import array, ceil, zeros, append, arange, concatenate
+from math import floor
+from datetime import datetime, timedelta
+import time
+
 
 from EEGDatabaseReader import EEGDBReaderBase, Event, RecordedChannel
 
@@ -74,7 +72,25 @@ class HarmonieEvent(Event):
         self.no          = no
         self.groupeName  = groupe.GetName()
         self.channel     = item.GetChannel()
-        self.name        = item.GetName()
+        
+        self.name = item.GetName()  
+        if self.groupeName.lower() == "stage":
+            if  self.name.lower() == "stage1":   
+                self.name = "Sleep stage 1"
+            elif  self.name.lower() == "stage2":   
+                self.name = "Sleep stage 2"
+            elif  self.name.lower() == "stage3":   
+                self.name = "Sleep stage 3"
+            elif  self.name.lower() == "stage4":   
+                self.name = "Sleep stage 4"
+            elif  self.name.lower() == "rem":   
+                self.name = "Sleep stage R"
+            elif  self.name.lower() == "wake":   
+                self.name = "Sleep stage W"
+            else:   
+                self.name = "Sleep stage ?"
+
+        
         self.startTime   = dayToSecond(item.GetStartTime(), startDay)  #en secondes #dayToTime(item.GetStartTime())
         self.dateTime    = ole2datetime(item.GetStartTime())        
         self.timeLength  = item.GetTimeLength()                
@@ -247,7 +263,7 @@ class HarmonieReader(EEGDBReaderBase):
         
         
     def getDuration(self):    # en secondes
-        return self.ISignalFile.GetRecordCount(int(self.baseFreq))       
+        return float(self.ISignalFile.GetRecordCount(1))/self.baseFreq       
 
     def getNbSample(self, channel=None):
         if channel is None:
@@ -255,7 +271,7 @@ class HarmonieReader(EEGDBReaderBase):
         else:
             if not isinstance(channel, str):
                 raise TypeError 
-            return self.getDuration()*self.samplingRates[self.labels.index(channel)] 
+            return int(self.getDuration()*self.samplingRates[self.labels.index(channel)])
         
     def getElectrodesLabels(self):
         return self.labels
@@ -545,6 +561,30 @@ class HarmonieReader(EEGDBReaderBase):
 
 
 
+
+
+    def getChannelTime(self, channel) :
+        if not isinstance(channel, str) :
+            raise TypeError        
+        
+        #if not channel in self.getChannelLabels() :
+        #    raise 
+
+        samplingRate = self.samplingRates[self.labels.index(channel)]
+        
+        
+        discontinuitySample = [e.startSample for e in self.events if e.groupeName == "Discontinuity"]    
+        discontinuityEvent = [e for e in self.events if e.groupeName == "Discontinuity"]        
+        sampleTransitions = concatenate((discontinuitySample, [self.getNbSample( channel)]))
+
+        time = []
+        for i in range(len(sampleTransitions)-1):
+            nbSamples = sampleTransitions[i+1] - sampleTransitions[i]
+            time = concatenate((time, discontinuityEvent[i].startTime + arange(nbSamples)/samplingRate))       
+
+        return time
+
+
     # Patch parce qu'il semble y avoir un problème avec le temps associé
     # aux fuseaux de Gaétan
     def resyncEvents(self):
@@ -608,7 +648,9 @@ class HarmonieReader(EEGDBReaderBase):
             
             # Using standard EDF staging events 
             #(see http://www.edfplus.info/specs/edftexts.html#annotation)
+
             if event.groupeName.lower() == "stage":
+                """
                 if  event.name.lower() == "stage1":   
                     eventStr = "Sleep stage 1"
                 elif  event.name.lower() == "stage2":   
@@ -623,12 +665,18 @@ class HarmonieReader(EEGDBReaderBase):
                     eventStr = "Sleep stage W"
                 else:   
                     eventStr = "Sleep stage ?"
+                """
+                eventStr = event.name
             else:
                 eventStr = event.getXml()
             
+            timeDiff = time.mktime(event.dateTime.timetuple()) - time.mktime(self.recordingStartDateTime.timetuple())  
             
-            
-            return "+" + str(event.startTime) + "\x15" + str(event.timeLength) + "\x14" + eventStr + "\x14\0"    
+            return "+" + str(timeDiff) + "\x15" + str(event.timeLength) + "\x14" + eventStr + "\x14\0"    
+        
+        
+
+        
         
         
         
@@ -850,10 +898,10 @@ class HarmonieReader(EEGDBReaderBase):
 
                     indS += int(self.pageNbSamples[i])
                 
-                # Annotation channel
-                timeDiff = ole2datetime(ISignalRecord.GetStartTime()) - self.recordingStartDateTime
-                timeKeepingStr = "+" + str(timeDiff.seconds + timeDiff.days * 86400) + "\x14\x14\0"
-
+                # Annotation channel                
+                timeDiff = time.mktime(ole2datetime(ISignalRecord.GetStartTime()).timetuple()) - time.mktime(self.recordingStartDateTime.timetuple())  
+                timeKeepingStr = "+" + str(timeDiff) + "\x14\x14\0"       
+                                
                 while(noEvent < nbEvents and len(timeKeepingStr) + len(eventStr) <= annotationFieldLength*nbByte):
                     timeKeepingStr += eventStr
                     #print eventStr

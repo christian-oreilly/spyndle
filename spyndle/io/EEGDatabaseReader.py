@@ -52,7 +52,13 @@ class EEGDBReaderBase :
     @abstractmethod              
     def getNbSample(self) :  raise ErrPureVirtualCall     
 
-        
+
+    """
+     Return an array of the time associated with every sample of the signal
+     recorded by the channel.
+    """
+    @abstractmethod    
+    def getChannelTime(self, channel)  :  raise ErrPureVirtualCall           
         
         
     def __init__(self, pageDuration = 30): # en secondes
@@ -65,6 +71,44 @@ class EEGDBReaderBase :
         return self.pageDuration
         
         
+    def getSleepStage_REM(self):
+        return [e for e in self.reader.events if e.name == "Sleep stage R"]      
+        
+    def getSleepStage_NREM(self):
+        return [e for e in self.reader.events if e.name == "Sleep stage 1" or 
+                                                e.name == "Sleep stage 2" or 
+                                                e.name == "Sleep stage 3" or 
+                                                e.name == "Sleep stage 4" or 
+                                                e.name == "Sleep stage N" or 
+                                                e.name == "Sleep stage N1" or 
+                                                e.name == "Sleep stage N2" or 
+                                                e.name == "Sleep stage N3"]      
+        
+    def getSleepStage_1(self):
+        return [e for e in self.reader.events if e.name == "Sleep stage 1" or 
+                                                 e.name == "Sleep stage N1" ]     
+    def getSleepStage_2(self):
+        return [e for e in self.reader.events if e.name == "Sleep stage 2" or 
+                                                 e.name == "Sleep stage N2" ]     
+        
+    def getSleepStage_3(self):
+        return [e for e in self.reader.events if e.name == "Sleep stage 3" or 
+                                                 e.name == "Sleep stage N3" ]      
+        
+    def getSleepStage_4(self):
+        return [e for e in self.reader.events if e.name == "Sleep stage 4"]      
+        
+    def getSleepStage_SWS(self):
+        return [e for e in self.reader.events if e.name == "Sleep stage 3" or 
+                                                e.name == "Sleep stage 4" or 
+                                                e.name == "Sleep stage N3"]         
+        
+        
+    def getEventsByTime(self, startTime, endTime) :
+        return filter(lambda e: (e.startTime >= startTime and e.startTime < endTime) or 
+                         (e.startTime + e.timeLength >= startTime and e.startTime + e.timeLength < endTime) , self.events)     
+
+
   
   
 # TODO: Manage discontinuous signals.

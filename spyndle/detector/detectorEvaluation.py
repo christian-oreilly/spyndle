@@ -40,11 +40,27 @@ from operator import attrgetter
 
 class BadTransitionSequence(Exception): 
     
-#    def __init__(self, err):
- #       self.value = value
+    def __init__(self, transition, state):
+        if transition.type == "A":
+            self.transition = "beginStage"
+        elif transition.type == "B":
+            self.transition = "endStage"
+        elif transition.type == "C":
+            self.transition = "beginSpindleGold"
+        elif transition.type == "D":
+            self.transition = "endSpindleGold"
+        elif transition.type == "E":
+            self.transition = "beginSpindleTest"
+        elif transition.type == "F":
+            self.transition = "endSpindleTest"
+        
+        self.state = state
+        self.time  = transition.time        
         
     def __str__(self):
-        return "Trying to access a pure virtual function."
+        return ("Encountered invalid transition sequence. Trying to make the transition "
+                            + self.transition + " while in state " + self.state + 
+                            " at time " + str(self.time) + ".")
 
 
 
@@ -64,6 +80,10 @@ class transition:
         """
         self.type = type
 
+    def __str__(self):
+        return str(self.time) + ":" + self.type
+
+
 
 class State:
     pass
@@ -78,7 +98,7 @@ class StateITN(State):
         elif transition.type == "C":
             return StateIFN()
         else:
-            raise BadTransitionSequence
+            raise BadTransitionSequence(transition, "ITN")
                 
 class StateIFN(State):
     def applyTransition(self, transition, machine):
@@ -90,7 +110,7 @@ class StateIFN(State):
         elif transition.type == "D":
             return StateITN()
         else:
-            raise BadTransitionSequence
+            raise BadTransitionSequence(transition, "IFN")
                 
                 
 class StateITP(State):
@@ -103,7 +123,7 @@ class StateITP(State):
         elif transition.type == "D":
             return StateIFP()
         else:
-            raise BadTransitionSequence
+            raise BadTransitionSequence(transition, "ITP")
                 
                 
 class StateIFP(State):
@@ -116,7 +136,7 @@ class StateIFP(State):
         elif transition.type == "F":
             return StateITN()
         else:
-            raise BadTransitionSequence
+            raise BadTransitionSequence(transition, "IFP")
                 
 
                 
@@ -127,7 +147,7 @@ class StateTN(State):
         elif transition.type == "E":  state = StateFP()
         elif transition.type == "C":  state = StateFN()
         else:
-            raise BadTransitionSequence
+            raise BadTransitionSequence(transition, "TN")
                 
         machine.TN += transition.time - machine.lastTime
         machine.lastTime = transition.time
@@ -141,7 +161,7 @@ class StateFN(State):
         elif transition.type == "D":  state = StateTN()
         elif transition.type == "E":  state = StateTP()
         else:
-            raise BadTransitionSequence
+            raise BadTransitionSequence(transition, "FN")
                 
         machine.FN += transition.time - machine.lastTime
         machine.lastTime = transition.time
@@ -155,7 +175,7 @@ class StateTP(State):
         elif transition.type == "F":  state = StateFN()
         elif transition.type == "D":  state = StateFP()
         else:
-            raise BadTransitionSequence
+            raise BadTransitionSequence(transition, "TP")
                 
         machine.TP += transition.time - machine.lastTime
         machine.lastTime = transition.time
@@ -169,7 +189,7 @@ class StateFP(State):
         elif transition.type == "F":  state = StateTN()
         elif transition.type == "C":  state = StateTP()
         else:
-            raise BadTransitionSequence
+            raise BadTransitionSequence(transition, "FP")
                 
         machine.FP += transition.time - machine.lastTime
         machine.lastTime = transition.time
@@ -246,29 +266,29 @@ class DetectorEvaluator:
             self.stageTransitions = []
          
          
-        def getSpindleSamples(detector, channel, isGold):
+        def getSpindleTransitions(detector, channel, isGold):
             channelSpindles = filter(lambda s: s.channel == channel, detector.detectedSpindles)     
             if len(channelSpindles) :
                 if isGold :
-                    return concatenate([[transition(spindle.timeStart(), "C"), 
-                                              transition(spindle.timeEnd(), "D")]  for spindle in channelSpindles])   
+                    return concatenate([[transition(spindle.startTime(), "C"), 
+                                              transition(spindle.endTime(), "D")]  for spindle in channelSpindles])   
                 else:
-                    return concatenate([[transition(spindle.timeStart(), "C"), 
-                                              transition(spindle.timeEnd(), "D")]  for spindle in channelSpindles])              
+                    return concatenate([[transition(spindle.startTime(), "E"), 
+                                              transition(spindle.endTime(), "F")]  for spindle in channelSpindles])              
             return []
             
             
             
         for channel in listChannels:
             transitions = concatenate([self.stageTransitions, 
-                                       getSpindleSamples(self.goldStandard, channel, True),
-                                       getSpindleSamples(self.tested, channel, False)])
+                                       getSpindleTransitions(self.goldStandard, channel, True),
+                                       getSpindleTransitions(self.tested, channel, False)])
 
             msa = StateMachine()
                                        
             # Sort transitions by time of occurence and apply finite state 
             # machine to compute TP, TN, FP, FN
-            msa.run(sorted(transitions, key=attrgetter('time')) )
+            msa.run(sorted(transitions, key=attrgetter('time')))
             
 
             self.TP[channel] = msa.TP

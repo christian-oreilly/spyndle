@@ -57,8 +57,10 @@ class cycleDefinitions():
 
      def setFeinberg(self):
         self.minStage1ForSleep      = 0
-        self.sleepDeterminingStages = ["Stage2", "Stage3", "Stage4", "REM"]
-        self.sleepStages            = ["Stage2", "Stage3", "Stage4", "REM"]
+        self.sleepDeterminingStages = ["Sleep stage 2", "Sleep stage 3", 
+                                       "Sleep stage 4", "Sleep stage R", 
+                                       "Sleep stage N2", "Sleep stage N3"]
+        self.sleepStages            = self.sleepDeterminingStages
         self.minTimeNREM            = 15
         self.minTimeLastNREM        = 5
         self.minTimeREMExceptFirst  = 5
@@ -68,10 +70,13 @@ class cycleDefinitions():
         self.type                   = "Feinberg & Floyd"
 
 
+
      def setSchulz(self):
         self.minStage1ForSleep      = 0
-        self.sleepDeterminingStages = ["Stage2", "Stage3", "Stage4", "REM"]
-        self.sleepStages            = ["Stage2", "Stage3", "Stage4", "REM"]
+        self.sleepDeterminingStages = ["Sleep stage 2", "Sleep stage 3", 
+                                       "Sleep stage 4", "Sleep stage R", 
+                                       "Sleep stage N2", "Sleep stage N3"]
+        self.sleepStages            = self.sleepDeterminingStages 
         self.minTimeNREM            = 15
         self.minTimeLastNREM        = 5
         self.minTimeREMExceptFirst  = 0
@@ -83,8 +88,10 @@ class cycleDefinitions():
 
      def setAeschbach(self):
         self.minStage1ForSleep      = 0
-        self.sleepDeterminingStages = ["Stage2", "Stage3", "Stage4", "REM"]
-        self.sleepStages            = ["Stage2", "Stage3", "Stage4", "REM"]
+        self.sleepDeterminingStages = ["Sleep stage 2", "Sleep stage 3", 
+                                       "Sleep stage 4", "Sleep stage R", 
+                                       "Sleep stage N2", "Sleep stage N3"]
+        self.sleepStages            = self.sleepDeterminingStages 
         self.minTimeNREM            = 15
         self.minTimeLastNREM        = 5
         self.minTimeREMExceptFirst  = 5
@@ -96,8 +103,11 @@ class cycleDefinitions():
 
      def setMinimal(self):
         self.minStage1ForSleep      = 1
-        self.sleepDeterminingStages = ["Stage1", "Stage2", "Stage3", "Stage4", "REM"]
-        self.sleepStages            = ["Stage1", "Stage2", "Stage3", "Stage4", "REM"]
+        self.sleepDeterminingStages = ["Sleep stage 1", "Sleep stage 2", 
+                                       "Sleep stage 3", "Sleep stage 4", 
+                                       "Sleep stage R", "Sleep stage N1",
+                                       "Sleep stage N2", "Sleep stage N3"]
+        self.sleepStages            = self.sleepDeterminingStages 
         self.minTimeNREM            = 0
         self.minTimeLastNREM        = 0
         self.minTimeREMExceptFirst  = 0
@@ -117,28 +127,24 @@ class cycleDefinitions():
 # Dream cycles are composed of one NREM period follow by a REM period.
 class DreamCycle :
     def __init__(self):    
-        self.sampleStartNREM    = 0.0
         self.timeStartNREM      = 0.0
-        self.timeDurationNREM   = 0.0
-        self.sampleDurationNREM = 0.0
+        self.durationNREM   = 0.0
         self.NREMpages          = []
         
-        self.sampleStartREM     = 0.0
         self.timeStartREM       = 0.0
-        self.timeDurationREM    = 0.0
-        self.sampleDurationREM  = 0.0
+        self.durationREM    = 0.0
         self.REMpages           = []
 
         self.completeCycle      = True
 
-    def sampleDuration(self):    
-        return self.sampleDurationNREM + self.sampleDurationREM
+    def duration(self):    
+        return self.durationNREM + self.durationREM
 
-    def sampleStart(self):    
-        return self.sampleStartNREM
+    def timeStart(self):    
+        return self.timeStartNREM
         
-    def sampleEnd(self):    
-        return self.sampleStart() + self.sampleDuration()
+    def timeEnd(self):    
+        return self.timeStart() + self.duration()
 
 
 
@@ -163,14 +169,32 @@ def computeDreamCycles(events, cyclesDefinition):
         # Gérer "mettre fin au début de la période NREM suivante"
         if cyclesDefinition.cylesEndWithNextNREM :
             for i in range(len(cycles)-1):
-                cycles[i].timeDurationREM    =  cycles[i+1].timeStartNREM  - cycles[i].timeStartREM 
-                cycles[i].sampleDurationREM  =  cycles[i+1].sampleStartNREM  - cycles[i].sampleStartREM 
+                cycles[i].durationREM    =  cycles[i+1].timeStartNREM  - cycles[i].timeStartREM 
     
         for cycle in cycles:
-            cycle.REMpages = filter(lambda e: e.startSample >= cycle.sampleStartREM and e.startSample < cycle.sampleStartREM + cycle.sampleDurationREM, events) 
-            cycle.NREMpages = filter(lambda e: e.startSample >= cycle.sampleStartNREM and e.startSample < cycle.sampleStartNREM + cycle.sampleDurationNREM, events) 
+            cycle.REMpages = filter(lambda e: e.startTime >= cycle.timeStartREM and e.startTime < cycle.timeStartREM + cycle.durationREM, events) 
+            cycle.NREMpages = filter(lambda e: e.startTime >= cycle.timeStartNREM and e.startTime < cycle.timeStartNREM + cycle.durationNREM, events) 
+
+    # If no cycle has been found, make a single cycle of the whole recording.
+    # This is useful to avoid breaking functions relying in cycles when
+    # using shorter recording which full recording time is not enough 
+    # for defining a complete cycle. This can happen for example when using
+    # a 30-minute recording during which the subject stays in stage sleep 2-4.
+    else:
+        cycle = DreamCycle()
+
+        startTimes = [e.startTime for e in events]
+        endEvent     = filter(lambda e: e.startTime == max(startTimes), events)[0] 
+
+        cycle.timeStartNREM    = min(startTimes)
+        cycle.durationNREM = endEvent.startTime + endEvent.timeLength - min(startTimes)
+
+        cycles.append(cycle)
+
 
     return cycles
+    
+    
     
 def computeUneDreamCyle(events, cycleDefinition, sleeping, noCycle): 
     
@@ -181,23 +205,22 @@ def computeUneDreamCyle(events, cycleDefinition, sleeping, noCycle):
     return cycle, lastingEvents, sleeping    
     
     
+    
 def computeNREM(cycle, events, cycleDefinition, sleeping, noCycle):
     
     possibleStartTime = None
-    possibleStartPage = None
     startStage1       = None
     for i, event in zip(range(len(events)), events):
         #print sleeping, possibleStartTime, event.name, cycleDefinition.sleepDeterminingStages     
-        if not sleeping:               
+        if not sleeping:        
             if event.name in cycleDefinition.sleepDeterminingStages:
-                if event.name == "Stage1":
+                if event.name == "Sleep stage 1" or  event.name == "Sleep stage N1":
                     if startStage1 is None :
                         startStage1 = event.startTime
                         possibleStartTime = event.startTime
-                        possibleStartPage = event.startSample
                     elif event.startTime - startStage1 + event.timeLength >= cycleDefinition.minStage1ForSleep*60.0 :
                         sleeping = True
-                elif event.name == "REM":
+                elif  event.name == "Sleep stage R":
                     sleeping = True
                     if noCycle == 1:
                         enterREM = True
@@ -209,28 +232,23 @@ def computeNREM(cycle, events, cycleDefinition, sleeping, noCycle):
                         # Le cycle sera incomplet avec aucune période NREM
                         if possibleStartTime is None:
                             possibleStartTime   = event.startTime 
-                            possibleStartPage   = event.startSample 
                         
-                        cycle.sampleStartNREM    = possibleStartPage
                         cycle.timeStartNREM      = possibleStartTime
-                        cycle.timeDurationNREM   = event.startTime - possibleStartTime
-                        cycle.sampleDurationNREM = event.startSample - possibleStartPage
+                        cycle.durationNREM   = event.startTime - possibleStartTime
                         cycle.completeCycle      = False
 
                         return cycle, events[i:len(events)], sleeping
                 else:
                     sleeping = True
                     if possibleStartTime is None :
-                        possibleStartTime = event.startTime
-                        possibleStartPage = event.startSample     
+                        possibleStartTime = event.startTime    
 
         else:
             if event.name in cycleDefinition.sleepStages:    
                 if possibleStartTime is None:
                     possibleStartTime = event.startTime
-                    possibleStartPage = event.startSample    
                 
-                if event.name == "REM":
+                if  event.name == "Sleep stage R":
                     if noCycle == 1:
                         enterREM = True
                     else:
@@ -238,24 +256,19 @@ def computeNREM(cycle, events, cycleDefinition, sleeping, noCycle):
 
                     if enterREM:
                         if possibleStartTime is None:
-                            possibleStartTime   = event.startTime 
-                            possibleStartPage   = event.startSample                         
+                            possibleStartTime   = event.startTime                  
                         
                         if event.startTime - possibleStartTime >= cycleDefinition.minTimeNREM :                       
                             # On a notre période NREM!
-                            cycle.sampleStartNREM    = possibleStartPage
-                            cycle.timeStartNREM      = possibleStartTime
-                            cycle.timeDurationNREM   = event.startTime - possibleStartTime
-                            cycle.sampleDurationNREM = event.startSample - possibleStartPage
+                            cycle.timeStartNREM  = possibleStartTime
+                            cycle.durationNREM   = event.startTime - possibleStartTime
 
                             return cycle, events[i:len(events)], sleeping
                         else:
                             # Période pas assez longue...
                             # Le cycle sera incomplet avec aucune période NREM
-                            cycle.sampleStartNREM    = possibleStartPage
                             cycle.timeStartNREM      = possibleStartTime
-                            cycle.timeDurationNREM   = event.startTime - possibleStartTime
-                            cycle.sampleDurationNREM = event.startSample - possibleStartPage
+                            cycle.durationNREM   = event.startTime - possibleStartTime
                             cycle.completeCycle      = False
 
                             return cycle, events[i:len(events)], sleeping
@@ -269,7 +282,7 @@ def goInREM(events, cycleDefinition, i):
     startTime = events[i].startTime
     
     for event in events[(i+1):len(events)] :
-        if event.name != "REM":
+        if event.name !=  "Sleep stage R":
             return event.startTime - startTime >= cycleDefinition.minTimeREMExceptFirst*60.0
     
 
@@ -279,31 +292,26 @@ def computeREM(cycle, events, cycleDefinition, sleeping, noCycle):
     if not len(events) : 
         return None, [], sleeping
         
-    if events[0].name != "REM":
+    if events[0].name != "Sleep stage R":
         cycle.completeCycle      = False
         return cycle, events, sleeping
         
-    startTime   = events[0].startTime        
-    startSample = events[0].startSample       
+    startTime   = events[0].startTime       
         
 
     for event, i in zip(events, range(len(events))):
-        if event.name == "REM":
+        if  event.name == "Sleep stage R":
             finPossibleTime     = None
-            finPossibleSample   = None
             finI                = None
         else:
             if finPossibleTime is None:
                 finPossibleTime   = event.startTime
-                finPossibleSample = event.startSample
                 finI              = i
                 
             if event.startTime - finPossibleTime + event.timeLength >= cycleDefinition.maxPeriodWithoutREM*60.0:
                 # Fin de la période REM
-                cycle.sampleStartREM     = startSample
                 cycle.timeStartREM       = startTime
-                cycle.timeDurationREM    = finPossibleTime - startTime
-                cycle.sampleDurationREM  = finPossibleSample - startSample              
+                cycle.durationREM    = finPossibleTime - startTime             
                 return cycle, events[finI:len(events)], events[finI].name in cycleDefinition.sleepStages  
      
      
@@ -311,12 +319,9 @@ def computeREM(cycle, events, cycleDefinition, sleeping, noCycle):
     # Fin de la nuit    
     if finPossibleTime is None:
         finPossibleTime   = events[-1].startTime + events[-1].timeLength  
-        finPossibleSample = events[-1].startSample + events[-1].sampleLength 
         
-    cycle.sampleStartREM     = startSample
     cycle.timeStartREM       = startTime
-    cycle.timeDurationREM    = finPossibleTime - startTime
-    cycle.sampleDurationREM  = finPossibleSample - startSample              
+    cycle.durationREM    = finPossibleTime - startTime             
     return cycle, [], False    
 
 

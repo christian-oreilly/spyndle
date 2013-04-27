@@ -45,7 +45,7 @@ import os
 import re, datetime, logging
 import numpy as np
 
-from scipy import array
+from scipy import array, arange, concatenate
 
 from lxml import etree
 from spyndle.io import Event, RecordedChannel
@@ -176,7 +176,7 @@ class EDFHeader :
         self.subtype            = f.read(44)[:5]
         self.contiguous         = self.subtype != 'EDF+D'
         self.nbRecords          = int(f.read(8))
-        self.recordLength       = float(f.read(8))  # in seconds
+        self.recordDuration       = float(f.read(8))  # in seconds
         self.nbChannels         = int(f.read(4))
         
         # read channel info
@@ -261,20 +261,39 @@ class EDFReader(EEGDBReaderBase) :
         
         
     def readEvents(self):
-        self.events = []
+        self.events          = []
+        self.recordStartTime = []
         self.file.seek(self.header.headerNbBytes)        
         #indEventChannel = self.header.label.index(EVENT_CHANNEL)
         for noPage in range(self.getNbPages()):        
             rawRecord = self.readRawRecord()  
+            tals      = tal(rawRecord[EVENT_CHANNEL])
             
             # The first index is the mendatory time keeping event. We don't need it.
+            self.recordStartTime.append(EDFEvent((tals[0][0], tals[0][1], tals[0][2])))     
             
-            for talEvent in tal(rawRecord[EVENT_CHANNEL])[1:] : 
+            for talEvent in tals[1:] : 
                 # One TAL can contain many events wit the same startTime/Duration properties
                 for noEventStr in talEvent[2]:
-                    self.events.append(EDFEvent((talEvent[0], talEvent[1], noEventStr)))
+                    self.events.append(EDFEvent((talEvent[0], talEvent[1], noEventStr)))            
+            
 
 
+
+
+
+    def getChannelTime(self, channel) :
+        if not isinstance(channel, str) :
+            raise TypeError        
+        
+        #if not channel in self.getChannelLabels() :
+        #    raise 
+        
+        nbSamples = float(self.header.nbSamplesPerRecord[channel])
+        recordTime = arange(nbSamples)/nbSamples*self.header.recordDuration
+        return concatenate([e.startTime + recordTime for e in self.recordStartTime])        
+        
+ 
 
     """
      Convert a String of bytes to an array of integers.
@@ -327,7 +346,7 @@ class EDFReader(EEGDBReaderBase) :
             self.file.seek(self.header.headerNbBytes)        
 
             data = RecordedChannel()         
-            data.samplingRate   = self.header.nbSamplesPerRecord[signalName]/self.header.recordLength
+            data.samplingRate   = self.header.nbSamplesPerRecord[signalName]/self.header.recordDuration
             data.type           = "EEG"
             data.startTime      = self.header.startDateTime          
             
@@ -351,7 +370,7 @@ class EDFReader(EEGDBReaderBase) :
         self.changeRecordDuration(duration)
         
     def getPageDuration(self):
-        return self.header.recordLength
+        return self.header.recordDuration
                 
         
     def readPage(self, channelList, pageId):

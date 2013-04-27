@@ -56,24 +56,33 @@ from spyndle.io import EEGDBReaderBase
 
 # Class representing a detected spindle.
 class DetectedSpindle:
-    def __init__(self, channel, startSample, endSample):
+    def __init__(self, channel, startTime, endTime):
 
         # Channel on which spindle has been detected
         self.channel = channel
         
         # Spindle starting sample
-        self.startSample = startSample
+        self.__startTime = startTime
         
         # Spindle ending sample
-        self.endSample   = endSample
+        self.__endTime   = endTime
+
+        self.timeDuration   = endTime - startTime        
 
         self.RMSamp         = 0.0
         self.meanFreq       = 0.0
-        self.timeDuration   = 0.0 
         self.sleepStage     = ""
 
 
+    def startTime(self):
+        return self.__startTime
+
+    def endTime(self):
+        return self.__endTime
+
+
     def computeRMS(self, reader, fmin=10, fmax=16):
+        raise UserWarning("The code of this function need to be recoded to use time rather than sample.")        
         
         # The filters need the signal to be at least 3*nbTaps
         nbTaps = 1001        
@@ -98,6 +107,9 @@ class DetectedSpindle:
                 
         
     def computeMeanFreq(self, reader, fmin=10, fmax=16):
+        raise UserWarning("The code of this function need to be recoded to use time rather than sample.")        
+        
+        
         data = reader.read(self.channel, self.startSample, sampleDuration=self.endSample-self.startSample)
 
         samplingRate = data[0][0]
@@ -118,20 +130,21 @@ class DetectedSpindle:
         
         
     def computeTimeDuration(self, reader):
-        self.timeDuration = float(self.endSample - self.startSample)/reader.getSamplingRate(self.channel)
+        raise DeprecationWarning("No need anymore to call this function.")
 
 
     def setStage(self, reader):
+
         # Select the stage where the spindle begin as the sleep stage
         # of the spindle.
         stageEvent23 = filter(lambda e: e.groupeName == "Stage" and
-                                            e.sampleStart() <=  self.startSample and 
-                                            e.sampleEnd() >= self.startSample, reader.events)                                 
+                                            e.timeStart() <=  self.startTime and 
+                                            e.timeEnd() >= self.startTime, reader.events)                                 
         if len(stageEvent23) > 0 :
             self.sleepStage = stageEvent23[0].name.lower()
                 
         else:
-            print "No stage", self.startSample
+            print "No stage", self.startTime
             
 
 
@@ -146,7 +159,7 @@ class SpindleDectector:
         
         # Sleep stages in which we want to detect spindles. Should be a list of
         # event names used to score the stages we want to extract spindle from.        
-        self.detectionStages    = ["Stage2", "Stage3"]
+        self.detectionStages    = ["Sleep stage 2", "Sleep stage N2"]
         
         # Low-end of the spindle frequency band
         self.lowFreq  = 11.0
@@ -400,9 +413,7 @@ class SpindleDectectorRMS(SpindleDectector):
 
         # Computing sleep cycles
         cycles = computeDreamCycles([e for e in self.reader.events if e.groupeName == "Stage"], self.aeschbachCycleDef)
-        print [e for e in self.reader.events if e.groupeName == "Stage"]
-        print cycles
-    
+
         #################################### READING ##########################
         if verbose:   print "Start reading datafile..."
    
@@ -410,7 +421,7 @@ class SpindleDectectorRMS(SpindleDectector):
         listChannels = [channel for channel in listChannels 
                         if channel in self.reader.getChannelLabels()] 
 
-        # Pickle data for each channel separatelly so simplify and accelerate
+        # Pickle data for each channel separatelly to simplify and accelerate
         # the reading of large files.    
         if self.usePickled :
             self.reader.pickleCompleteRecord(listChannels)   
@@ -427,8 +438,6 @@ class SpindleDectectorRMS(SpindleDectector):
             if verbose:   print "Filtering..."   
             
             # Defining EEG filters
-                     
-            
             bandPassFilter = Filter(fs)
             bandPassFilter.create(low_crit_freq=self.lowFreq, 
                                   high_crit_freq=self.highFreq, order=1001, 
@@ -437,18 +446,9 @@ class SpindleDectectorRMS(SpindleDectector):
             # filtering can take a lot of memory. By making sure that the 
             # garbage collector as passed just before the filtering, we
             # increase our chances to avoid a MemoryError  
-            gc.collect()                     
-            
-            #import datetime
-            #a = datetime.datetime.now()        
+            gc.collect()                      
             signal = bandPassFilter.applyFilter(signal)     
-            #b = datetime.datetime.now()
-            #print(b-a) # 0:02:20.937000
-            #signal = bandPassFilter.applyFilter(signal, False)     
-            #c = datetime.datetime.now()     
-            #print(c-b) # 0:00:03.348000                
-            
-            
+
             
             ################################# RMS COMPUTATION #####################
             if verbose:  print "RMS computation..."
@@ -459,29 +459,35 @@ class SpindleDectectorRMS(SpindleDectector):
             
             
             windowNbSample = int(round(self.averagingWindowSize*fs))
-            if mod(windowNbSample, 2) == 0 : # We want an odd number.
+            if mod(windowNbSample, 2) == 0 : # We need an odd number.
                 windowNbSample += 1
     
             self.RMS = self.averaging(signal, windowNbSample)
             
+
+            ############################### SPINDLE DETECTION #####################  
+            if verbose:  print "Spindle detection..."
+
             # Thereshold are computed for each sleep cycles and each sleep stage
             # since the average amplitude of EEG signal can vary accoss night
             # and stages.
-            
-            
-            ############################### SPINDLE DETECTION #####################  
-            if verbose:  print "Spindle detection..."
+
+            channelTime = self.reader.getChannelTime(channel)    
+            assert(len(channelTime) == len(signal))
             
             for cycle in cycles :
-                stageEvent = self.reader.getEventsBySample(cycle.sampleStart(), cycle.sampleEnd()) 
-                stageEvent = filter(lambda e: e.groupeName == "Stage", stageEvent)   
+                stageEvent = self.reader.getEventsByTime(cycle.timeStart(), cycle.timeEnd())               
+                stageEvent = filter(lambda e: e.groupeName == "Stage", stageEvent)     
                 
                 currentStageEvents = []
                 for stage in self.detectionStages :
                     currentStageEvents.extend(filter(lambda e: e.name.lower() == stage.lower(), stageEvent)  ) 
-    
+
                 if len(currentStageEvents) :
-                    samplesIndexes = concatenate([range(event.sampleStart(), event.sampleEnd()) for event in currentStageEvents])
+                    samplesIndexes = concatenate([where((channelTime >= event.timeStart())*
+                                                        (channelTime <= event.timeEnd()))[0] 
+                                                  for event in currentStageEvents])
+
     
                     treshold = mquantiles(self.RMS[samplesIndexes], self.quantileThreshold)[0]
                     
@@ -501,23 +507,22 @@ class SpindleDectectorRMS(SpindleDectector):
                     startSpinInd = startSpinInd[:indEnd]
                     stopSpinInd  = stopSpinInd[:indEnd] 
 
-                    #assert(all(stopSpinInd - startSpinInd > 0))
-                    #assert(all(startSpinInd[1:] - stopSpinInd[:-1] > 0))
+                    assert(all(stopSpinInd - startSpinInd > 0))
+                    assert(all(startSpinInd[1:] - stopSpinInd[:-1] > 0))
     
-                    gapToKeepInd = where(startSpinInd[1:] - stopSpinInd[:-1] > self.maxAllowableGapBellowThreshold*fs)[0]
+                    gapToKeepInd = where(channelTime[startSpinInd[1:]] - channelTime[stopSpinInd[:-1]] > self.maxAllowableGapBellowThreshold)[0]
                     
                     startSpinInd = startSpinInd[concatenate(([0], gapToKeepInd+1))]
                     stopSpinInd  = stopSpinInd[concatenate((gapToKeepInd, [len(stopSpinInd)-1]))]
                     
                     
-                    ## Careful : data are supporte contiguous. 
-                    nbSampleDuration = stopSpinInd - startSpinInd
+                    ## Careful : Non contiguous datas not presently supported. 
+                    duration = channelTime[stopSpinInd] - channelTime[startSpinInd]
                                    
-                    startSpinInd = startSpinInd[nbSampleDuration/fs >= self.minimalSpindleDuration]
-                    stopSpinInd  = stopSpinInd[nbSampleDuration/fs >= self.minimalSpindleDuration]
+                    startSpinInd = startSpinInd[duration >= self.minimalSpindleDuration]
+                    stopSpinInd  = stopSpinInd[duration >= self.minimalSpindleDuration]
                     
-                    newSpindles = [DetectedSpindle(channel, start, end) for start, end in zip(startSpinInd, stopSpinInd)]   
-                    print newSpindles
+                    newSpindles = [DetectedSpindle(channel, start, end) for start, end in zip(channelTime[startSpinInd], channelTime[stopSpinInd])]   
                     self.detectedSpindles.extend(newSpindles)  
 
 

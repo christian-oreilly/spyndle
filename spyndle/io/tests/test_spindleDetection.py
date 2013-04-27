@@ -24,5 +24,7 @@ listChannels = readerEDF.getChannelLabels()[0:2]
 detectorEDF = SpindleDectectorRMS(readerEDF, usePickled=False)
 detectorSIG = SpindleDectectorRMS(readerSIG, usePickled=True)
 
+
 evaluator = DetectorEvaluator(detectorSIG, detectorEDF)
-evaluator.printEvaluation(listChannels, ["Stage2", "Sleep stage 2"])
+evaluator.printEvaluation(listChannels, ["Sleep stage N2", "Sleep stage 2"])
+
