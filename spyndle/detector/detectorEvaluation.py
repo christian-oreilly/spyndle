@@ -115,6 +115,7 @@ class StateIFN(State):
                 
 class StateITP(State):
     def applyTransition(self, transition, machine):
+        
         if transition.type == "A":
             machine.lastTime = transition.time
             return StateTP()
@@ -128,6 +129,7 @@ class StateITP(State):
                 
 class StateIFP(State):
     def applyTransition(self, transition, machine):
+
         if transition.type == "A":
             machine.lastTime = transition.time
             return StateFP()
@@ -232,7 +234,7 @@ class DetectorEvaluator:
         self.computeStatistics(listChannels, listSleepStages)
         for channel in listChannels:            
             print ("Channel:%s, sensitivity=%f, specificity=%f, PPV=%f, NPV=%f\n"
-                   "            TP=%d, TN=%d, FP=%d, FN=%d" % (channel, 
+                   "            TP=%f, TN=%f, FP=%f, FN=%f" % (channel, 
                    self.sensitivity(channel), self.specificity(channel),
                    self.PPV(channel), self.NPV(channel), self.TP[channel], 
                    self.TN[channel], self.FP[channel], self.FN[channel]))

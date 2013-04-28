@@ -16,10 +16,10 @@
 ###############################################################################
 
 
-from scipy import array
-
+from scipy import array, arange
 from scipy.io import loadmat
 
+import datetime
 import time
 from lxml import etree  
 from abc import ABCMeta, abstractmethod
@@ -31,6 +31,17 @@ from spyndle.errorMng import ErrPureVirtualCall
 """
 class EEGDBReaderBase :
     __metaclass__ = ABCMeta
+    
+
+    # List of EEGPageInfo of the recording.
+    __infoPages = []    
+
+
+    def getInfoPages(self, noPage=None):
+        if noPage is None:
+            return self.__infoPages    
+        else:
+            return self.__infoPages[noPage-1]
     
     # Abstract accessor functions   
     
@@ -50,7 +61,7 @@ class EEGDBReaderBase :
     def readChannel(self, channel, usePickled=False) :  raise ErrPureVirtualCall     
             
     @abstractmethod              
-    def getNbSample(self) :  raise ErrPureVirtualCall     
+    def getNbSample(self, channel=None) :  raise ErrPureVirtualCall     
 
 
     """
@@ -109,6 +120,72 @@ class EEGDBReaderBase :
                          (e.startTime + e.timeLength >= startTime and e.startTime + e.timeLength < endTime) , self.events)     
 
 
+  
+
+  
+# TODO: Manage discontinuous signals.
+class EEGPage:
+    
+    def __init__(self, samplingRates, pageStart, recordedSignals, recordingStartTime) :
+        
+        if not isinstance(pageStart,          datetime.datetime) : raise TypeError
+        if not isinstance(recordingStartTime, datetime.datetime) : raise TypeError
+        if not isinstance(samplingRates,      dict) : raise TypeError
+        if not isinstance(recordedSignals,    dict) : raise TypeError
+            
+
+        self.pageStartTime      = pageStart
+        self.recordingStartTime = recordingStartTime
+        
+        # Dictionaries indexed by the channel label.
+        self.recordedSignals    = recordedSignals
+        self.samplingRates      = samplingRates
+
+
+        
+    """
+     Return the datetime object corresponding to the starting of the page.
+    """
+    def getStartDateTime(self):
+        return self.recordingStartTime
+  
+    """
+     Return the time corresponding to the starting of the page in seconds
+     since the begining of the recording.
+    """
+    def getStartTime(self):
+        return (self.pageStartTime  - self.recordingStartTime).total_seconds()   
+  
+  
+
+    def getDuration(self):
+        for channel in self.recordedSignals:
+            return float(len(self.recordedSignals[channel]))/self.samplingRates[channel]
+        
+  
+    def getSignal(self, channel):
+        return self.recordedSignals[channel] 
+        
+    def getSignalTime(self, channel):
+        return arange(len(self.recordedSignals[channel]))/self.samplingRates[channel] + self.getStartTime()
+  
+  
+  
+  
+
+"""
+ Gives some really basic information on a page.
+"""
+class EEGPageInfo:
+    def __init__(self, startSample, endSample, isComplete=True):
+        self.startSample = startSample
+        self.endSample   = endSample
+        self.isComplete  = isComplete
+        
+    def getNbSamples(self):
+        return self.endSample - self.startSample
+  
+  
   
   
 # TODO: Manage discontinuous signals.
@@ -172,9 +249,9 @@ class Event:
         self.groupeName  = ""
         self.channel     = ""
         self.name        = ""
-        self.startTime   = ""
-        self.dateTime    = ""      
-        self.timeLength  = ""        # Duration in seconds      
+        self.startTime   = ""       # In seconds, since the begining of the recording of the EEG file.
+        self.timeLength  = ""       # Duration in seconds      
+        self.dateTime    = ""       # datetime  object giving the begining time of the event.
         self.startSample = ""
         self.sampleLength= ""
         self.color       = ""

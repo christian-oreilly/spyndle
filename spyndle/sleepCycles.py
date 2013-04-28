@@ -147,7 +147,9 @@ class DreamCycle :
         return self.timeStart() + self.duration()
 
 
-
+    def __str__(self):
+        return ("NREM (start, duration) : (%f, %f) | REM (start, duration) : (%f, %f) " 
+                %(self.timeStartNREM, self.durationNREM, self.timeStartREM, self.durationREM))
 
 
 def computeDreamCycles(events, cyclesDefinition):

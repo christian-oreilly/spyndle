@@ -489,7 +489,10 @@ class SpindleDectectorRMS(SpindleDectector):
                                                   for event in currentStageEvents])
 
     
-                    treshold = mquantiles(self.RMS[samplesIndexes], self.quantileThreshold)[0]
+                    treshold = 0.375179523976 #mquantiles(self.RMS[samplesIndexes], self.quantileThreshold)[0]
+                    
+                    #0.375179523976 #
+                    #print "Threshold:", treshold
                     
                     spinMarkers = concatenate(([0], diff((self.RMS[samplesIndexes] > treshold).astype(int))))
                     
@@ -523,7 +526,8 @@ class SpindleDectectorRMS(SpindleDectector):
                     stopSpinInd  = stopSpinInd[duration >= self.minimalSpindleDuration]
                     
                     newSpindles = [DetectedSpindle(channel, start, end) for start, end in zip(channelTime[startSpinInd], channelTime[stopSpinInd])]   
-                    self.detectedSpindles.extend(newSpindles)  
+                    self.detectedSpindles.extend(newSpindles) 
+        #print [s.startTime() for s in self.detectedSpindles]            
 
 
  

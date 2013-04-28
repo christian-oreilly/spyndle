@@ -38,7 +38,7 @@ Modification by Christian O'Reilly (Copyright (c) 2013)
 '''
 
 
-from EEGDatabaseReader import EEGDBReaderBase
+from EEGDatabaseReader import EEGDBReaderBase, EEGPage
 
 
 import os
@@ -176,7 +176,7 @@ class EDFHeader :
         self.subtype            = f.read(44)[:5]
         self.contiguous         = self.subtype != 'EDF+D'
         self.nbRecords          = int(f.read(8))
-        self.recordDuration       = float(f.read(8))  # in seconds
+        self.recordDuration      = float(f.read(8))  # in seconds
         self.nbChannels         = int(f.read(4))
         
         # read channel info
@@ -281,7 +281,6 @@ class EDFReader(EEGDBReaderBase) :
 
 
 
-
     def getChannelTime(self, channel) :
         if not isinstance(channel, str) :
             raise TypeError        
@@ -292,7 +291,6 @@ class EDFReader(EEGDBReaderBase) :
         nbSamples = float(self.header.nbSamplesPerRecord[channel])
         recordTime = arange(nbSamples)/nbSamples*self.header.recordDuration
         return concatenate([e.startTime + recordTime for e in self.recordStartTime])        
-        
  
 
     """
@@ -376,14 +374,19 @@ class EDFReader(EEGDBReaderBase) :
     def readPage(self, channelList, pageId):
 
         # Position the file cursor to the begin of the page no. pageId :
-        pagePosition = self.header.headerNbBbytes  + (pageId-1)*self.recordSize
+        pagePosition = self.header.headerNbBytes  + (pageId-1)*self.header.recordSize
         self.file.seek(pagePosition)
    
         record = self.readRecord()
-        recordedSignals = [record[1][channel] for channel in channelList]
         sigStart = record[0]        
-        samplingRates = [self.header.n_samples_per_record[channel] for channel in channelList]
-        return (samplingRates, sigStart, recordedSignals)
+        
+        recordedSignals = {}
+        samplingRates   = {}
+        for channel in channelList:
+            samplingRates[channel]    = float(self.header.nbSamplesPerRecord[channel])/self.header.recordDuration
+            recordedSignals [channel] = record[1][channel]
+                
+        return EEGPage(samplingRates, sigStart, recordedSignals, self.header.startDateTime)
         
         
         
@@ -436,16 +439,16 @@ class EDFReader(EEGDBReaderBase) :
             
         #offset_seconds = self.currentRecordInd*self.header.record_length      
         #time = self.header.date_time + datetime.timedelta(0,offset_seconds)
-        signals = []
+        signals = {}
         events = []
         for channel in rawRecord:
             if channel == EVENT_CHANNEL:
                 ann = tal(rawRecord[channel])
-                time = self.header.date_time + datetime.timedelta(0,ann[0][0]) 
+                time = self.header.startDateTime + datetime.timedelta(0,ann[0][0]) 
                 events.extend(ann[1:])
             else:
                 dig = self.byteStr2integers(rawRecord[channel])
-                signals.append(self.digital2physical(dig, channel))
+                signals[channel] = self.digital2physical(dig, channel)
         
         return time, signals, events
 
