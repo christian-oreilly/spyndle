@@ -9,6 +9,7 @@ from spyndle.io.harmonie import HarmonieReader
 from spyndle.io.edf import EDFReader
 from scipy import log10, trapz
 
+
 import unittest
 
 class conversionHarmonieEDFTests(unittest.TestCase) :

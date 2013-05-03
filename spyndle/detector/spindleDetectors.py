@@ -414,6 +414,7 @@ class SpindleDectectorRMS(SpindleDectector):
         # Computing sleep cycles
         cycles = computeDreamCycles([e for e in self.reader.events if e.groupeName == "Stage"], self.aeschbachCycleDef)
 
+
         #################################### READING ##########################
         if verbose:   print "Start reading datafile..."
    
@@ -472,7 +473,7 @@ class SpindleDectectorRMS(SpindleDectector):
             # since the average amplitude of EEG signal can vary accoss night
             # and stages.
 
-            channelTime = self.reader.getChannelTime(channel)    
+            channelTime = self.reader.getChannelTime(channel)   
             assert(len(channelTime) == len(signal))
             
             for cycle in cycles :
@@ -489,7 +490,7 @@ class SpindleDectectorRMS(SpindleDectector):
                                                   for event in currentStageEvents])
 
     
-                    treshold = 0.375179523976 #mquantiles(self.RMS[samplesIndexes], self.quantileThreshold)[0]
+                    treshold = mquantiles(self.RMS[samplesIndexes], self.quantileThreshold)[0]
                     
                     #0.375179523976 #
                     #print "Threshold:", treshold

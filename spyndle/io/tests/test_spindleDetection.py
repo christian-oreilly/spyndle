@@ -15,8 +15,8 @@ from spyndle.detector import DetectorEvaluator
 print "Reading the .sig file..."
 readerSIG =  HarmonieReader(parentdir + "/test.SIG")
 
-#print "Conversion: .sig -> .bdf..."
-#readerSIG.saveAsEDF(parentdir + "/test.BDF", "BDF")
+print "Conversion: .sig -> .bdf..."
+readerSIG.saveAsEDF(parentdir + "/test.BDF", "BDF")
 
 print "Reading the .bdf file..."
 readerEDF = EDFReader(parentdir + "/test.BDF")
@@ -35,7 +35,7 @@ evaluator.printEvaluation(listChannels, ["Sleep stage N2", "Sleep stage 2"])
 
 # For each pages, verify that the signals in reader and readerEDF
 # are essentially the same by verifying their signal-to-noise ratio
-for noPage in range(15, readerSIG.getNbPages()) :
+for noPage in range(readerSIG.getNbPages()) :
     
     # We test only complete pages since incomplete pages will be 
     # different for the two formats, the EDF format padding zeros

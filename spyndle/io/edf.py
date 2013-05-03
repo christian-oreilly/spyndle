@@ -243,13 +243,13 @@ class EDFHeader :
 
    
 class EDFReader(EEGDBReaderBase) :
-    def __init__(self, fname):
-        #EEGDBReaderBase.__init__(self)
-        
+    def __init__(self, fname):        
         self.fileName = fname
         self.file     = open(fname, 'rb')
         
         self.readHeader()    
+        
+        super(EDFReader, self).__init__(self.getPageDuration())        
         self.readEvents()        
         
         
@@ -270,7 +270,7 @@ class EDFReader(EEGDBReaderBase) :
             tals      = tal(rawRecord[EVENT_CHANNEL])
             
             # The first index is the mendatory time keeping event. We don't need it.
-            self.recordStartTime.append(EDFEvent((tals[0][0], tals[0][1], tals[0][2])))     
+            self.recordStartTime.append(EDFEvent((tals[0][0], tals[0][1], tals[0][2]))) 
             
             for talEvent in tals[1:] : 
                 # One TAL can contain many events wit the same startTime/Duration properties
@@ -282,7 +282,7 @@ class EDFReader(EEGDBReaderBase) :
 
 
     def getChannelTime(self, channel) :
-        if not isinstance(channel, str) :
+        if not (isinstance(channel, str) or isinstance(channel, unicode)):
             raise TypeError        
         
         #if not channel in self.getChannelLabels() :
@@ -365,7 +365,8 @@ class EDFReader(EEGDBReaderBase) :
         
         
     def setPageDuration(self, duration):
-        self.changeRecordDuration(duration)
+        if duration != self.getPageDuration():
+            self.changeRecordDuration(duration)
         
     def getPageDuration(self):
         return self.header.recordDuration

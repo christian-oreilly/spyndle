@@ -29,13 +29,13 @@ from spyndle.errorMng import ErrPureVirtualCall
 """
  Abstract class describing an EEG reader.
 """
-class EEGDBReaderBase :
+class EEGDBReaderBase(object) :
     __metaclass__ = ABCMeta
-    
 
     # List of EEGPageInfo of the recording.
-    __infoPages = []    
-
+    def __init__(self, pageDuration = 30):
+        self.setPageDuration(pageDuration)         
+        self.__infoPages   = []
 
     def getInfoPages(self, noPage=None):
         if noPage is None:
@@ -48,6 +48,7 @@ class EEGDBReaderBase :
     """
      Implementation of subclasses must return a list of channel labels (names).
     """
+
     @abstractmethod
     def getChannelLabels(self): raise ErrPureVirtualCall
         
@@ -71,9 +72,6 @@ class EEGDBReaderBase :
     @abstractmethod    
     def getChannelTime(self, channel)  :  raise ErrPureVirtualCall           
         
-        
-    def __init__(self, pageDuration = 30): # en secondes
-        self.setPageDuration(pageDuration) 
   
     def setPageDuration(self, duration):
         self.pageDuration = duration

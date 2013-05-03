@@ -189,7 +189,7 @@ def computeDreamCycles(events, cyclesDefinition):
         endEvent     = filter(lambda e: e.startTime == max(startTimes), events)[0] 
 
         cycle.timeStartNREM    = min(startTimes)
-        cycle.durationNREM = endEvent.startTime + endEvent.timeLength - min(startTimes)
+        cycle.durationNREM = endEvent.startTime + endEvent.timeLength - cycle.timeStartNREM 
 
         cycles.append(cycle)
 
