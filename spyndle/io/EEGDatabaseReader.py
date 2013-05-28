@@ -176,9 +176,25 @@ class EEGPage:
 """
 class EEGPageInfo:
     def __init__(self, startSample, endSample, isComplete=True):
-        self.startSample = startSample
-        self.endSample   = endSample
-        self.isComplete  = isComplete
+        
+        if isinstance(startSample, int):
+            self.startSample = startSample
+        else:
+            raise TypeError            
+            
+        if isinstance(endSample, int):
+            self.endSample   = endSample
+        else:
+            raise TypeError            
+            
+        if isinstance(isComplete, bool):
+            self.isComplete  = isComplete
+        else:
+            raise TypeError            
+            
+            
+
+
         
     def getNbSamples(self):
         return self.endSample - self.startSample
@@ -242,17 +258,15 @@ class RecordedChannel:
         Sleep stage N3
 """    
 class Event:
-    def __init__(self): #, ISignalFile):
-        self.no          = ""
-        self.groupeName  = ""
-        self.channel     = ""
-        self.name        = ""
-        self.startTime   = ""       # In seconds, since the begining of the recording of the EEG file.
-        self.timeLength  = ""       # Duration in seconds      
-        self.dateTime    = ""       # datetime  object giving the begining time of the event.
-        self.startSample = ""
-        self.sampleLength= ""
-        self.color       = ""
+    def __init__(self, name = "", groupeName = "", channel = "", startTime = -1.0,
+                 timeLength = -1.0, dateTime = None, properties = {}):
+                     
+        self.groupeName  = groupeName
+        self.channel     = channel
+        self.name        = name
+        self.startTime   = startTime   # In seconds, since the begining of the recording of the EEG file.
+        self.timeLength  = timeLength  # Duration in seconds      
+        self.dateTime    = dateTime    # datetime  object giving the begining time of the event.
 
         self.properties  = {}
 
@@ -274,11 +288,19 @@ class Event:
 
     def getXml(self):
         # create XML 
-        root = etree.Element('Event', name=self.name, groupeName=self.groupeName)
-        for propKey in self.properties:
-            propertyElem = etree.Element('Property')
-            propertyElem.set(propKey, self.properties[propKey])            
-            root.append(propertyElem)
+        try:
+            root = etree.Element('Event', name=self.name, groupeName=self.groupeName)
+            for propKey in self.properties:
+                propertyElem = etree.Element('Property')
+                
+                # XML properties cannot contain space characters. Substituting them by "_".                
+                propertyElem.set(propKey.replace(' ', '_'), self.properties[propKey])    
+                
+                root.append(propertyElem)
+        except ValueError :
+            print self.properties
+            raise
+            
             
         # pretty string
         return etree.tostring(root) #, pretty_print=True)        

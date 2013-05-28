@@ -45,14 +45,13 @@ from scipy.fftpack import fftfreq
 from scipy.io import savemat, loadmat
 from scipy.integrate import trapz
 
-
+from datetime import timedelta
 
 from spyndle import Filter
 from spyndle import cycleDefinitions, computeDreamCycles
 from spyndle import computeMST
 from spyndle.errorMng import ErrPureVirtualCall
-from spyndle.io import EEGDBReaderBase
-
+from spyndle.io import EEGDBReaderBase, Event
 
 # Class representing a detected spindle.
 class DetectedSpindle:
@@ -186,6 +185,9 @@ class SpindleDectector:
         # If self.usePickled, the spindle detection uses pickled data.
         self.usePickled = usePickled
 
+
+
+
     def setReader(self, reader):
         self.reader = reader
 
@@ -293,12 +295,9 @@ class SpindleDectector:
      by the reader.
     """
     @abstractmethod
-    def detectSpindles(self, listChannels, reader=None, verbose=True) : 
+    def detectSpindles(self, listChannels=None, reader=None, verbose=True) : 
         if isinstance(listChannels, str) :
             listChannels = [listChannels]
-
-        if not type(listChannels) is list and not type(listChannels) is tuple:
-            raise TypeError
 
         if not reader is None:
             if isinstance(reader, EEGDBReaderBase):
@@ -311,23 +310,39 @@ class SpindleDectector:
                                  " None and not reader object has been passed "
                                  "as argument to the detectSpindles() method.")
             
+
+        if listChannels is None:
+            self.listChannels = self.reader.getChannelLabels()            
+        else:
+            if isinstance(listChannels, list) or isinstance(listChannels, tuple):
+                
+                # Process only available channels to the reader...
+                self.listChannels = [channel for channel in listChannels 
+                                            if channel in self.reader.getChannelLabels()]                                
+            else:
+                raise TypeError            
+            
         # List of detected spindles
         self.detectedSpindles = []
 
         
         
         
+
+    # Used to save detected spindle in EEG data file. 
+    def saveSpindle(self, reader, eventName, eventGroupName, fileName = None):
+        for spindle in self.detectedSpindles:    
+            event = Event( name = eventName, groupeName = eventGroupName, 
+                          channel = spindle.channel, startTime = spindle.startTime(),
+                          timeLength = spindle.timeDuration , 
+                          dateTime = reader.recordingStartDateTime + timedelta(seconds=spindle.startTime()),
+                          properties = {})            
+                          
+            reader.addEvent(event)
+
+        reader.save(fileName)
         
         
-        
-        
-    # TODO: To implement. Used to save detected spindle in EEG data file. 
-    def saveSpindleSTS(self, reader, eventName):
-        
-        for spindle in self.detectedSpindles:            
-            reader.addEvent(eventName, spindle.startSample, 
-                            spindle.endSample-spindle.startSample, 
-                            spindle.channel)
 
     # Used to save detected spindle in EEG data file. 
     def saveSpindleTxt(self, fileName):
@@ -339,8 +354,8 @@ class SpindleDectector:
             exit()
         
         for spindle in self.detectedSpindles:            
-            f.write(spindle.channel + ";" + str(spindle.startSample) + ";" +  
-                    str(spindle.endSample) + ";" + str(spindle.RMSamp) + ";" + str(spindle.meanFreq )
+            f.write(spindle.channel + ";" + str(spindle.startTime()) + ";" +  
+                    str(spindle.endTime()) + ";" + str(spindle.RMSamp) + ";" + str(spindle.meanFreq )
                       + ";" + str(spindle.timeDuration) + ";" + str(spindle.sleepStage) + "\n")             
 
 
@@ -408,26 +423,21 @@ class SpindleDectectorRMS(SpindleDectector):
 
   
     # Detect every spindle in the channels listChannels of the file opened by the reader.
-    def detectSpindles(self, listChannels, reader=None, verbose=True) :
+    def detectSpindles(self, listChannels=None, reader=None, verbose=True) :
         SpindleDectector.detectSpindles(self, listChannels, reader, verbose)
 
         # Computing sleep cycles
         cycles = computeDreamCycles([e for e in self.reader.events if e.groupeName == "Stage"], self.aeschbachCycleDef)
 
-
         #################################### READING ##########################
         if verbose:   print "Start reading datafile..."
-   
-
-        listChannels = [channel for channel in listChannels 
-                        if channel in self.reader.getChannelLabels()] 
 
         # Pickle data for each channel separatelly to simplify and accelerate
         # the reading of large files.    
         if self.usePickled :
-            self.reader.pickleCompleteRecord(listChannels)   
+            self.reader.pickleCompleteRecord(self.listChannels)   
    
-        for channel in listChannels:    
+        for channel in self.listChannels:    
             if verbose:   print "Channel " + channel + "..."           
             
             data        = self.reader.readChannel(channel, usePickled=self.usePickled)
@@ -541,8 +551,9 @@ class SpindleDectectorRMS(SpindleDectector):
 class SpindleDectectorTeager(SpindleDectector):
     
     
-    def __init__(self):
-        SpindleDectector.__init__(self)
+    def __init__(self, reader=None, usePickled=False):
+        SpindleDectector.__init__(self, reader, usePickled)
+        
         self.detectStages = []
     
 
@@ -565,22 +576,17 @@ class SpindleDectectorTeager(SpindleDectector):
 
   
     # Detect every spindle in the channels listChannels of the file opened by the reader.
-    def detectSpindles(self, reader, listChannels, verbose=True) :
-        # List of detected spindles
-        self.detectedSpindles = []
+    def detectSpindles(self, listChannels, reader=None, verbose=True) :
+        SpindleDectector.detectSpindles(self, listChannels, reader, verbose)
      
         #################################### READING ##########################
         if verbose:   print "Start reading datafile..."
 
-
-        # Process only available channels...
-        listChannels = [channel for channel in listChannels if channel in reader.getAvailableChannels()] 
-
         # Pickle data for each channel separatelly so simplify and accelerate
         # the reading of large files.       
-        reader.pickleCompleteRecord(listChannels)   
+        reader.pickleCompleteRecord(self.listChannels)   
    
-        for channel in listChannels:    
+        for channel in self.listChannels:    
             if verbose:   print "Channel " + channel + "..."           
             
             data        = reader.readPickledChannel(channel)
@@ -664,8 +670,9 @@ class SpindleDectectorTeager(SpindleDectector):
 class SpindleDectectorSigma(SpindleDectector):
     
     
-    def __init__(self):
-        SpindleDectector.__init__(self)
+    def __init__(self, reader=None, usePickled=False):
+        SpindleDectector.__init__(self, reader, usePickled)
+        
         self.detectStages = []
     
 
@@ -688,25 +695,21 @@ class SpindleDectectorSigma(SpindleDectector):
 
   
     # Detect every spindle in the channels listChannels of the file opened by the reader.
-    def detectSpindles(self, reader, listChannels, verbose=True) :
-        # List of detected spindles
-        self.detectedSpindles = []
-     
+    def detectSpindles(self, listChannels=None, reader=None, verbose=True) :
+        SpindleDectector.detectSpindles(self, listChannels, reader, verbose)
+        
         #################################### READING ##########################
         if verbose:   print "Start reading datafile..."
 
-
-        # Process only available channels...
-        listChannels = [channel for channel in listChannels if channel in reader.getAvailableChannels()] 
-
-        # Pickle data for each channel separatelly so simplify and accelerate
-        # the reading of large files.       
-        reader.pickleCompleteRecord(listChannels)   
+        # Pickle data for each channel separatelly to simplify and accelerate
+        # the reading of large files.    
+        if self.usePickled :
+            self.reader.pickleCompleteRecord(self.listChannels)   
    
-        for channel in listChannels:    
+        for channel in self.listChannels:    
             if verbose:   print "Channel " + channel + "..."           
             
-            data        = reader.readPickledChannel(channel)
+            data        = self.reader.readChannel(channel, usePickled=self.usePickled)
 
             signal      = data.signal
             fs          = data.samplingRate                      # sampling rate                     
@@ -715,27 +718,27 @@ class SpindleDectectorSigma(SpindleDectector):
             ########################## Computing SIGMA INDEX ######################
             if verbose:   print "Computing sigma index..."
             
-            fileName = reader.fname + "_sigmaIndex_" + channel + ".mat"
+            fileName = self.reader.fileName + "_sigmaIndex_" + channel + ".mat"
     
             if os.path.exists(fileName):
                 print "Using saved sigma index..."    
                 self.sigmaIndex = loadmat(fileName)["sigma"]
                 self.sigmaIndex = self.sigmaIndex.reshape(self.sigmaIndex.size)
             else:     
-                self.sigmaIndex = zeros(reader.getNbSample()) 
+                self.sigmaIndex = zeros(self.reader.getNbSample(channel)) 
                         
                 
                 nbPad = int(0.1*fs)
                 nbWin = int(4.0*fs)
     
-                nbIter = int(reader.getNbSample()/nbWin)
+                nbIter = int(self.reader.getNbSample(channel)/nbWin)
                 for i in range(nbIter):
                     if mod(i, 1000) == 0: print i, nbIter
                     
                     if i == 0 :            # First iteration
                         indexes = arange(nbPad + nbWin) 
                     elif i == nbIter-1 :   # Last iteration
-                        indexes = arange(i*nbWin-nbPad, reader.getNbSample())
+                        indexes = arange(i*nbWin-nbPad, self.reader.getNbSample(channel))
                     else:                       # Other iterations
                         indexes = arange(i*nbWin-nbPad, i*nbWin + nbWin+nbPad)
     
@@ -744,7 +747,7 @@ class SpindleDectectorSigma(SpindleDectector):
                     if i == 0 :            # First iteration
                         indexesNoPad = arange(nbWin) 
                     elif i == nbIter-1 :   # Last iteration
-                        indexesNoPad = arange(nbPad, nbPad + reader.getNbSample()-i*nbWin)
+                        indexesNoPad = arange(nbPad, nbPad + self.reader.getNbSample(channel)-i*nbWin)
                     else:                       # Other iterations
                         indexesNoPad = arange(nbPad, nbPad + nbWin)
                         
@@ -791,7 +794,7 @@ class SpindleDectectorSigma(SpindleDectector):
                 stopSpinInd  = stopSpinInd[concatenate((gapToKeepInd, [len(stopSpinInd)-1]))]
                 
                 
-                ## Careful : data are supporte contiguous. 
+                ## Careful : data are supposed contiguous. 
                 nbSampleDuration = stopSpinInd - startSpinInd
                                
                 startSpinInd = startSpinInd[nbSampleDuration/fs >= self.minimalSpindleDuration]
@@ -834,22 +837,17 @@ class SpindleDectectorRSP(SpindleDectector):
 
   
     # Detect every spindle in the channels listChannels of the file opened by the reader.
-    def detectSpindles(self, reader, listChannels, verbose=True) :
-        # List of detected spindles
-        self.detectedSpindles = []
+    def detectSpindles(self, listChannels, reader=None, verbose=True) :
+        SpindleDectector.detectSpindles(self, listChannels, reader, verbose)
      
         #################################### READING ##########################
         if verbose:   print "Start reading datafile..."
 
-
-        # Process only available channels...
-        listChannels = [channel for channel in listChannels if channel in reader.getAvailableChannels()] 
-
         # Pickle data for each channel separatelly so simplify and accelerate
         # the reading of large files.       
-        reader.pickleCompleteRecord(listChannels)   
+        reader.pickleCompleteRecord(self.listChannels)   
    
-        for channel in listChannels:    
+        for channel in self.listChannels:    
             if verbose:   print "Channel " + channel + "..."           
             
             data        = reader.readPickledChannel(channel)

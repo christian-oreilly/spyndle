@@ -41,7 +41,7 @@ Modification by Christian O'Reilly (Copyright (c) 2013)
 from EEGDatabaseReader import EEGDBReaderBase, EEGPage
 
 
-import os
+import os, io
 import re, datetime, logging
 import numpy as np
 
@@ -237,6 +237,134 @@ class EDFHeader :
         
 
 
+    def write(self, f):
+
+        assert f.tell() == 0  # check file position
+
+        #8 ascii : version of this data format (0) 
+        if self.fileType == "EDF":
+            f.write("0       ")
+        elif self.fileType == "BDF":
+            f.write("\xFFBIOSEMI")
+        
+        #80 ascii : local patient identification 
+        #The 'local patient identification' field must start with the subfields 
+        #(subfields do not contain, but are separated by, spaces):
+        #  - the code by which the patient is known in the hospital administration.
+        #  - sex (English, so F or M).
+        #  - birthdate in dd-MMM-yyyy format using the English 3-character abbreviations 
+        #    of the month in capitals. 02-AUG-1951 is OK, while 2-AUG-1951 is not.
+        #  - the patients name.
+        #Any space inside the hospital code or the name of the patient must be replaced by
+        #a different character, for instance an underscore. For instance, the 'local patient 
+        #identification' field could start with: MCH-0234567 F 02-MAY-1951 Haagse_Harry. 
+        #Subfields whose contents are unknown, not applicable or must be made anonymous 
+        #are replaced by a single character 'X'. Additional subfields may follow the ones described here.                
+        f.write(self.subjectID  + (80-len(self.subjectID ))*" ")
+          
+          
+
+        # 80 ascii : local recording identification 
+        # The 'local recording identification' field must start with the 
+        # subfields (subfields do not contain, but are separated by, spaces):
+        #    - The text 'Startdate'.
+        #    - The startdate itself in dd-MMM-yyyy format using the English 
+        #      3-character abbreviations of the month in capitals.
+        #    - The hospital administration code of the investigation, 
+        #      i.e. EEG number or PSG number.
+        #    - A code specifying the responsible investigator or technician.
+        #    - A code specifying the used equipment.
+        # Any space inside any of these codes must be replaced by a different 
+        # character, for instance an underscore. The 'local recording identification' 
+        # field could contain: Startdate 02-MAR-2002 PSG-1234/2002 NN Telemetry03. 
+        # Subfields whose contents are unknown, not applicable or must be made anonymous
+        #  are replaced by a single character 'X'. So, if everything is unknown then the 
+        # 'local recording identification' field would start with: Startdate X X X X. 
+        # Additional subfields may follow the ones described here.      
+        f.write(self.recordingIR + (80-len(self.recordingIR))*" ")              
+          
+        #8 ascii : startdate of recording (dd.mm.yy)
+        f.write(self.startDateTime.strftime("%d.%m.%y"))
+             
+
+        # 8 ascii : number of bytes in header record
+        f.write("%08d" % self.headerNbBytes)   
+        
+        # 44 ascii : reserved
+        if self.fileType == "EDF":
+            f.write(" "*44) 
+        elif self.fileType == "BDF":
+            f.write("24BIT" + " "*39)            
+        
+        
+        # 8 ascii : number of data records (-1 if unknown)
+        #  The 'number of data records' can only be -1 during recording. 
+        # As soon as the file is closed, the correct number is known and must be entered. 
+        f.write("%08d" % self.nbRecords)  
+        
+        # 8 ascii : duration of a data record, in seconds
+        f.write(("%8.6f" % self.recordDuration)[:8] )  
+        
+        # 4 ascii : number of signals (ns) in data record
+        f.write("%04d" % (self.nbChannels))
+        
+        # ns * 16 ascii : ns * label (e.g. EEG Fpz-Cz or Body temp)
+        for channel in self.channelLabels: 
+            f.write("%16s" % channel)
+
+
+  
+        # ns * 80 ascii : ns * transducer type (e.g. AgAgCl electrode)
+        for channel in self.channelLabels : 
+            f.write("%80s" % self.transducerType[channel])
+            
+        # ns * 8 ascii : ns * physical dimension (e.g. uV or degreeC)
+        for channel in self.channelLabels : 
+            f.write("%80s" % self.units[channel]  )  
+  
+        # ns * 8 ascii : ns * physical minimum (e.g. -500 or 34)
+        for channel in self.channelLabels : 
+            f.write(("%8.6f" %  self.physicalMin[channel])[:8])  
+  
+        # ns * 8 ascii : ns * physical maximum (e.g. 500 or 40)
+        for channel in self.channelLabels : 
+            f.write(("%8.6f" %  self.physicalMax[channel])[:8])
+ 
+        # ns * 8 ascii : ns * digital minimum (e.g. -2048)
+        for channel in self.channelLabels : 
+            f.write("%08d" %  self.digitalMin[channel])
+
+        # ns * 8 ascii : ns * digital maximum (e.g. 2047)
+        for channel in self.channelLabels : 
+            f.write("%08d" %  self.digitalMax[channel])  
+  
+        # ns * 80 ascii : ns * prefiltering (e.g. HP:0.1Hz LP:75Hz)
+        for channel in self.channelLabels : 
+            f.write("%08d" %  self.prefiltering[channel])  
+        
+        
+        # ns * 8 ascii : ns * nr of samples in each data record
+        for channel in self.channelLabels : 
+            f.write("%08d" % self.nbSamplesPerRecord[channel])
+
+
+        # ns * 32 ascii : ns * reserved
+        f.write(" "*32*len(self.channelLabels))
+
+
+        assert(f.tell() == self.headerNbBytes)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -245,9 +373,9 @@ class EDFHeader :
 class EDFReader(EEGDBReaderBase) :
     def __init__(self, fname):        
         self.fileName = fname
-        self.file     = open(fname, 'rb')
+        self.file     = io.open(fname, 'r+b')
         
-        self.readHeader()    
+        self.header = EDFHeader(self.file, self.fileName)  
         
         super(EDFReader, self).__init__(self.getPageDuration())        
         self.readEvents()        
@@ -277,6 +405,32 @@ class EDFReader(EEGDBReaderBase) :
                 for noEventStr in talEvent[2]:
                     self.events.append(EDFEvent((talEvent[0], talEvent[1], noEventStr)))            
             
+
+
+    def addEvent(self, event):
+        self.events.append(event)   
+
+
+
+    def save(self, fileName=None):
+        
+        if fileName is None:
+            fileName = self.fileName
+        
+        with io.open(fileName, 'wb') as f:
+            
+            self.header.write(f, fileName)
+            
+            self.writeBody(f)            
+
+        f.close()
+
+
+
+
+
+    def writeBody(self, f):
+        raise
 
 
 
@@ -405,9 +559,6 @@ class EDFReader(EEGDBReaderBase) :
     def __del__(self):
         self.file.close()
 
-
-    def readHeader(self):
-        self.header = EDFHeader(self.file, self.fileName)
       
       
       

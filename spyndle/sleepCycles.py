@@ -163,8 +163,8 @@ def computeDreamCycles(events, cyclesDefinition):
 
     if len(cycles):
         # Vérifier rêgles pour le dernier cycle
-        if (cycles[-1].timeDurationREM   < cyclesDefinition.minTimeLastREM*60.0  or 
-            cycles[-1].timeDurationNREM  < cyclesDefinition.minTimeLastNREM*60.0 ) :
+        if (cycles[-1].durationREM   < cyclesDefinition.minTimeLastREM*60.0  or 
+            cycles[-1].durationNREM  < cyclesDefinition.minTimeLastNREM*60.0 ) :
                cycles = cycles[0:-1]
     
     

@@ -19,6 +19,6 @@ setup(
     license='LICENSE.txt',
     packages=['spyndle'],
     url=URL,
-    setup_requires=['bitbucket-distutils >= 0.1.2'])
+    setup_requires=['bitbucket-distutils >= 0.1.2', 'lxml', 'comtypes'])
 
 #, install_requires=[], download_url=DOWNLOAD_URL,

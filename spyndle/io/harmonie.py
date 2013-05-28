@@ -19,13 +19,14 @@
 import comtypes
 import comtypes.client as cc
 import os
+import io  # For buffered writing
 import ctypes, numpy
 from scipy.io import savemat
 from scipy import array, ceil, zeros, append, arange, concatenate
 from math import floor
 from datetime import datetime, timedelta
 import time
-
+from sys import stdout
 
 from EEGDatabaseReader import EEGDBReaderBase, Event, RecordedChannel, EEGPage, EEGPageInfo
 
@@ -74,6 +75,8 @@ class HarmonieEvent(Event):
         self.channel     = item.GetChannel()
         
         self.name = item.GetName()  
+        
+        # Tore's lab
         if self.groupeName.lower() == "stage":
             if  self.name.lower() == "stage1":   
                 self.name = "Sleep stage 1"
@@ -89,6 +92,27 @@ class HarmonieEvent(Event):
                 self.name = "Sleep stage W"
             else:   
                 self.name = "Sleep stage ?"
+
+
+        # Julie's lab
+        if self.groupeName.lower() == "stade":
+            if  self.name.lower() == "stade1":   
+                self.name = "Sleep stage 1"
+            elif  self.name.lower() == "stade2":   
+                self.name = "Sleep stage 2"
+            elif  self.name.lower() == "stade3":   
+                self.name = "Sleep stage 3"
+            elif  self.name.lower() == "stade4":   
+                self.name = "Sleep stage 4"
+            elif  self.name.lower() == "sp":   
+                self.name = "Sleep stage R"
+            elif  self.name.lower() == '\xc9veil':   
+                self.name = "Sleep stage W"
+            else:   
+                self.name = "Sleep stage ?"
+                
+            self.groupeName = "stage"
+
 
         
         # OLE complete date-time object giving the begining time of the event.
@@ -134,11 +158,17 @@ class HarmonieReader(EEGDBReaderBase):
         # TODO : ajouter cette vérification
         #print ISignalFile.IsValid(fileName)
 
-        self.fname = fname
+        self.fileName = fname
 
         tlb_id = comtypes.GUID("{72A34744-DDD9-11D1-BB8F-00001B4E6868}")
         SignalFile_id = comtypes.GUID('{72A34754-DDD9-11D1-BB8F-00001B4E6868}')
-        cc.GetModule((tlb_id, 1, 1))
+
+        try:        
+            cc.GetModule((tlb_id, 1, 1))
+        except WindowsError:
+            print "Using the HarmonieReader module requires the installation of the Harmonie API. This API is normally install together with the Harmonie software."
+            raise
+        
         
         import comtypes.gen.SignalFileLib as SignalLib
         
@@ -214,7 +244,7 @@ class HarmonieReader(EEGDBReaderBase):
             
   
         
-        self.nbSamples = self.ISignalFile.GetRecordCount(1)   
+        self.nbSamples = int(self.ISignalFile.GetRecordCount(1))   
         
 
         ## Getting the recording start time
@@ -261,11 +291,10 @@ class HarmonieReader(EEGDBReaderBase):
     """
     def definePages(self):
     
-        discontinuitySample = [e.startSample for e in self.events if e.groupeName == "Discontinuity" or
-                                                                     e.groupeName == "Recording Start"]    
-        sampleTransitions = sorted(concatenate((discontinuitySample, [self.nbSamples+1])))
+        discontinuitySample = array([e.startSample for e in self.events if e.groupeName == "Discontinuity" or
+                                                                     e.groupeName == "Recording Start"], dtype=int)    
+        sampleTransitions = sorted(concatenate((discontinuitySample, array([self.nbSamples+1], dtype=int))))
                 
-
         noTransition = 0 
         startSample = 0                
         # We skip the first transition if it is at sample 0.
@@ -625,7 +654,7 @@ class HarmonieReader(EEGDBReaderBase):
      Convert and save the .sig/.sts files in .edf/.ann files with the .ann file
      being a custom format file used to save complex annotations.
     """
-    def saveAsEDF(self, filename, fileType = "EDF"):
+    def saveAsEDF(self, filename, fileType = "EDF", verbose=True):
         
         def subjectFields(field):
             return field if field else "X"
@@ -653,10 +682,63 @@ class HarmonieReader(EEGDBReaderBase):
             
             return "+" + str(timeDiff) + "\x15" + str(event.timeLength) + "\x14" + eventStr + "\x14\0"    
         
+
+        def prepareEventStr(timeDiff, events):
+            # Annotation channel            
+            timeKeepingStr = "+" + str(timeDiff) + "\x14\x14\0"       
+                            
+            for event in events:
+                timeKeepingStr += edfEventEncode(event)  
+
+            return timeKeepingStr
+ 
+ 
+ 
+ 
+        # Encoding events such that events are writen in their respective page.
+        # This has the disaventage to use a lot of space (each pages have
+        # is reserved enough space to record as much annotation as the 
+        # page with the most annotation) but to make complete data records.
+        if verbose:
+            print "Encoding events..."
+
+        for page in self.getInfoPages():
+            ISignalRecord = self.ISignalFile.CreateSignalRecord(10)     
+            
+            ISignalRecord.SetStartSample(page.startSample)
+
+            # This function call is the bottle neck of this section.
+            self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
+
+            # Annotation channel            
+            page.startTime = (ole2datetime(ISignalRecord.GetStartTime()) - self.recordingStartDateTime).total_seconds()         
+
+
+
+        filteredEvents = filter(lambda e: e.startTime < self.getInfoPages()[1].startTime, self.events)     
+        self.getInfoPages()[0].eventStr = prepareEventStr(self.getInfoPages()[0].startTime, filteredEvents)
+        nbEvents = len(filteredEvents)        
         
+        for nopage in range(1, len(self.getInfoPages())-1):
+            filteredEvents = filter(lambda e: e.startTime <  self.getInfoPages()[nopage+1].startTime and 
+                                              e.startTime >= self.getInfoPages()[nopage].startTime, self.events)     
+            self.getInfoPages()[nopage].eventStr = prepareEventStr(self.getInfoPages()[nopage].startTime, filteredEvents)                                           
+            nbEvents += len(filteredEvents)  
+            
+        filteredEvents = filter(lambda e: e.startTime >= self.getInfoPages()[len(self.getInfoPages())-1].startTime, self.events)     
+        self.getInfoPages()[len(self.getInfoPages())-1].eventStr = prepareEventStr(self.getInfoPages()[len(self.getInfoPages())-1].startTime, filteredEvents)        
+        nbEvents += len(filteredEvents)  
+    
+        assert(nbEvents == len(self.events))            
+            
+       
+        # Using buffered writer
+        with io.open(filename, 'wb') as f:
 
-        with open(filename, 'wb') as f:
+            if verbose:
+                print "Writing header..."
 
+            
             #8 ascii : version of this data format (0) 
             if fileType == "EDF":
                 f.write("0       ")
@@ -792,10 +874,16 @@ class HarmonieReader(EEGDBReaderBase):
             for i in range(ns+1): f.write(" "*80)
 
 
+            if fileType == "EDF":
+                nbByte = 2
+            elif fileType == "BDF":
+                nbByte = 3
+
+
             # ns * 8 ascii : ns * nr of samples in each data record
             for channel in self.labels: 
                 f.write("%08d" % self.pageNbSamples[channel])
-            annotationFieldLength = 400      
+            annotationFieldLength = int(max(400, max(array([len(page.eventStr) for page in self.getInfoPages()]))/nbByte*1.2))            
             f.write("%08d" % annotationFieldLength)
             
             
@@ -816,25 +904,30 @@ class HarmonieReader(EEGDBReaderBase):
              discontinuity to complete the EDF records. The incomplete records
              are filled with "\0" values.
             """
-            nbEvents = len(self.events)
-            noEvent  = 0
-            eventStr = edfEventEncode(self.events[noEvent])    
-            if fileType == "EDF":
-                nbByte = 2
-            elif fileType == "BDF":
-                nbByte = 3
+            
+            
+            #nbEvents = len(self.events)
+            #noEvent  = 0
+            #eventStr = edfEventEncode(self.events[noEvent])    
+
+
+            if verbose:
+                print "Writing body..."
                         
-            for page in self.getInfoPages():
+            for nopage, page in enumerate(self.getInfoPages()):
                 ISignalRecord = self.ISignalFile.CreateSignalRecord(page.getNbSamples())     
                 
                 ISignalRecord.SetStartSample(page.startSample)
+
+                # This function call is the bottle neck of this section.
                 self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
-                
-                # TODO: Évaluer la possibilité d'utiliser GetRecordBuffer pour augmenter l'efficacité...
-                record = ISignalRecord.GetRecordData()       
+
+                cBuffer = ISignalRecord.GetRecordBuffer()        
+                record = numpy.frombuffer(numpy.core.multiarray.int_asbuffer(ctypes.addressof(cBuffer[0].contents), 8*cBuffer[1]), float) 
 
                 indS = 0                
                 for i, channel in enumerate(self.labels):
+
                     # Get the number of sample associate to every channels 
                     channelPageNbSample = int(page.getNbSamples()/self.baseFreq*self.channelFreqs[channel])                      
                     
@@ -865,6 +958,8 @@ class HarmonieReader(EEGDBReaderBase):
                     
                     recordedSignal = (recordedSignal - physical_min)/gain + digital_min       
 
+
+
                     if nbByte == 2: # EDF
                         f.write(recordedSignal.astype('<h').tostring())
                     elif nbByte == 3: #BDF
@@ -873,9 +968,11 @@ class HarmonieReader(EEGDBReaderBase):
                         recordedSignal = recordedSignal.astype('<i').tostring()
                         recordedSignal = "".join([recordedSignal[noBit] for noBit in range(len(recordedSignal)) if (noBit+1)%4])
                         f.write(recordedSignal)
-                        
+                                                
+               
                 
                 # Annotation channel            
+                """                
                 timeDiff = (ole2datetime(ISignalRecord.GetStartTime()) - self.recordingStartDateTime).total_seconds()  
                 timeKeepingStr = "+" + str(timeDiff) + "\x14\x14\0"       
                                 
@@ -884,12 +981,22 @@ class HarmonieReader(EEGDBReaderBase):
                     noEvent += 1
                     if noEvent < nbEvents :
                         eventStr = edfEventEncode(self.events[noEvent])  
-                    
                 f.write(timeKeepingStr +  "\0"*(annotationFieldLength*nbByte-len(timeKeepingStr)))         
+                """
+                f.write(page.eventStr +  "\0"*(annotationFieldLength*nbByte-len(page.eventStr)))         
 
+                done=float(nopage)/len(self.getInfoPages())*100.0
+                stdout.write(" Body writing percentage: %s%%      %s"%(done,"\r"))
+                stdout.flush()
+                
 
+        """
         if noEvent < nbEvents:
+            print noEvent, nbEvents
+            print float(nopage), len(self.getInfoPages())
             raise IOError("Not enough place in EDF Annotation signal to store all events.")
+        """
+        
         f.closed
 
 
