@@ -116,25 +116,7 @@ class EDFEvent(Event):
                self.groupeName = "Stage"
 
 
-
-    def getXml(self):
-        # create XML 
-        root = etree.Element('Event', name=self.name, groupeName=self.groupeName)
-        for propKey in self.properties:
-            propertyElem = etree.Element('Property')
-            propertyElem.set(propKey, self.properties[propKey])            
-            root.append(propertyElem)
-            
-        # pretty string
-        return etree.tostring(root) #, pretty_print=True)        
-
-            
-        
-
-
-
-
-
+   
 
 
 
@@ -238,8 +220,9 @@ class EDFHeader :
 
 
     def write(self, f):
-
-        assert f.tell() == 0  # check file position
+        
+        # Position the cursor at the start of the file
+        f.seek(0)
 
         #8 ascii : version of this data format (0) 
         if self.fileType == "EDF":
@@ -286,6 +269,9 @@ class EDFHeader :
         #8 ascii : startdate of recording (dd.mm.yy)
         f.write(self.startDateTime.strftime("%d.%m.%y"))
              
+        #8 ascii : starttime of recording (hh.mm.ss) 
+        f.write(self.startDateTime.strftime("%H.%M.%S"))
+         
 
         # 8 ascii : number of bytes in header record
         f.write("%08d" % self.headerNbBytes)   
@@ -320,7 +306,7 @@ class EDFHeader :
             
         # ns * 8 ascii : ns * physical dimension (e.g. uV or degreeC)
         for channel in self.channelLabels : 
-            f.write("%80s" % self.units[channel]  )  
+            f.write("%8s" % self.units[channel]  )  
   
         # ns * 8 ascii : ns * physical minimum (e.g. -500 or 34)
         for channel in self.channelLabels : 
@@ -340,7 +326,7 @@ class EDFHeader :
   
         # ns * 80 ascii : ns * prefiltering (e.g. HP:0.1Hz LP:75Hz)
         for channel in self.channelLabels : 
-            f.write("%08d" %  self.prefiltering[channel])  
+            f.write("%80s" %  self.prefiltering[channel])  
         
         
         # ns * 8 ascii : ns * nr of samples in each data record
@@ -350,7 +336,6 @@ class EDFHeader :
 
         # ns * 32 ascii : ns * reserved
         f.write(" "*32*len(self.channelLabels))
-
 
         assert(f.tell() == self.headerNbBytes)
 
@@ -381,6 +366,10 @@ class EDFReader(EEGDBReaderBase) :
         self.readEvents()        
         
         
+        
+    def getRecordingStartTime(self): 
+        return self.header.startDateTime        
+        
     def getNbPages(self):    
         return self.header.nbRecords          
                 
@@ -389,6 +378,7 @@ class EDFReader(EEGDBReaderBase) :
         
         
     def readEvents(self):
+        print "Reading events..."
         self.events          = []
         self.recordStartTime = []
         self.file.seek(self.header.headerNbBytes)        
@@ -396,8 +386,10 @@ class EDFReader(EEGDBReaderBase) :
         for noPage in range(self.getNbPages()):        
             rawRecord = self.readRawRecord()  
             tals      = tal(rawRecord[EVENT_CHANNEL])
+                       
+            #print rawRecord[EVENT_CHANNEL].decode('utf-8')            
             
-            # The first index is the mendatory time keeping event. We don't need it.
+            # The first index is the mendatory time keeping event. We record it separately.
             self.recordStartTime.append(EDFEvent((tals[0][0], tals[0][1], tals[0][2]))) 
             
             for talEvent in tals[1:] : 
@@ -412,25 +404,75 @@ class EDFReader(EEGDBReaderBase) :
 
 
 
-    def save(self, fileName=None):
+    """
+     Save the header information and the events to the file. The data themself
+     are unchanged for two reasons:
+         1 - We should always keep the original data as is an apply modifications
+             (e.g., filtering) "on-line" to avoid loosing important information
+             in the recorded phenomena.
+         2 - The data are not loaded in kept within the object, as opposed to 
+             the header and the event informations.
+    """
+    def save(self):
         
-        if fileName is None:
-            fileName = self.fileName
+        self.header.write(self.file)
+
+        def prepareEventStr(timeDiff, events):
+            if not isinstance(timeDiff, float):
+                raise TypeError
+            if not isinstance(events, list):
+                raise TypeError                
+            
+            
+            # Annotation channel            
+            timeKeepingStr = "+" + str(timeDiff) + "\x14\x14\0"       
+                           
+            for event in events:
+                if not isinstance(event, Event):
+                    raise TypeError        
+
+                timeKeepingStr += event.toEDFStr()
+
+
+            return timeKeepingStr
+
+
         
-        with io.open(fileName, 'wb') as f:
+        nbEvents = 0
+        for nopage, startTimeEvent in enumerate(self.recordStartTime):
+            startTime = startTimeEvent.startTime
+            for channel in self.header.channelLabels:
+                if channel == EVENT_CHANNEL:
+                    # We record the events associated to the current page.                
+
+                    if nopage == 0:
+                        filteredEvents = filter(lambda e: e.startTime < self.recordStartTime[1].startTime, self.events)     
+                        
+                    elif nopage == len(self.recordStartTime) - 1:
+                        filteredEvents = filter(lambda e: e.startTime >= startTime, self.events)  
+                        
+                    else:                    
+                        filteredEvents = filter(lambda e: e.startTime <  self.recordStartTime[nopage+1].startTime and 
+                                                          e.startTime >= startTime, self.events)     
+                        
+                    eventStr = prepareEventStr(startTime, filteredEvents)         
+                    self.file.write(eventStr + "\0"*(self.header.nbSamplesPerRecord[channel]*self.header.nbBytes - len(eventStr))  )  
+                                  
+                    nbEvents += len(filteredEvents)  
+
+                else: 
+                    # We leave the data as is, moving the cursor after the data associated to the current channel.
+                    self.file.seek(self.file.tell() + self.header.nbSamplesPerRecord[channel]*self.header.nbBytes)            
+                
+        # Verify that the number of recorded events correspond to the number of events within the object.   
+                       
+        assert(nbEvents == len(self.events))              
             
-            self.header.write(f, fileName)
             
-            self.writeBody(f)            
+            
+            
+            
 
-        f.close()
-
-
-
-
-
-    def writeBody(self, f):
-        raise
 
 
 

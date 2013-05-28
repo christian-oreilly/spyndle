@@ -666,7 +666,7 @@ class HarmonieReader(EEGDBReaderBase):
                      7:"JUL", 8:"AUG", 9:"SEP", 10:"OCT", 11:"NOV", 12:"DEC"}
             return "%02d-%s-%04d" % (OLEdate.day, month[OLEdate.month], OLEdate.year)
         
-        
+        """
         # Function used to encode Harmony events in a format compatible with EDF.
         def edfEventEncode(event):
             
@@ -681,14 +681,14 @@ class HarmonieReader(EEGDBReaderBase):
             timeDiff = (event.dateTime - self.recordingStartDateTime).total_seconds()  
             
             return "+" + str(timeDiff) + "\x15" + str(event.timeLength) + "\x14" + eventStr + "\x14\0"    
-        
+        """
 
         def prepareEventStr(timeDiff, events):
             # Annotation channel            
             timeKeepingStr = "+" + str(timeDiff) + "\x14\x14\0"       
                             
             for event in events:
-                timeKeepingStr += edfEventEncode(event)  
+                timeKeepingStr += event.toEDFStr() #edfEventEncode(event)  
 
             return timeKeepingStr
  
@@ -985,9 +985,10 @@ class HarmonieReader(EEGDBReaderBase):
                 """
                 f.write(page.eventStr +  "\0"*(annotationFieldLength*nbByte-len(page.eventStr)))         
 
-                done=float(nopage)/len(self.getInfoPages())*100.0
-                stdout.write(" Body writing percentage: %s%%      %s"%(done,"\r"))
-                stdout.flush()
+                if verbose:
+                    done=float(nopage)/len(self.getInfoPages())*100.0
+                    stdout.write(" Body writing percentage: %s%%      %s"%(done,"\r"))
+                    stdout.flush()
                 
 
         """

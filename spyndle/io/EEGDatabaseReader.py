@@ -49,6 +49,12 @@ class EEGDBReaderBase(object) :
      Implementation of subclasses must return a list of channel labels (names).
     """
 
+
+    # Should return a DateTime object indicating the time when the recording
+    # has begun. 
+    @abstractmethod
+    def getRecordingStartTime(self): raise ErrPureVirtualCall
+
     @abstractmethod
     def getChannelLabels(self): raise ErrPureVirtualCall
         
@@ -283,7 +289,7 @@ class Event:
 
             
     def __str__(self):
-        return( str(self.no) + " " + str(self.groupeName) + " " + str(self.channel)
+        return(str(self.groupeName) + " " + str(self.channel)
                 + " " + str(self.name) + " " + str(self.startTime) + " " + str(self.timeLength))
 
     def getXml(self):
@@ -305,5 +311,14 @@ class Event:
         # pretty string
         return etree.tostring(root) #, pretty_print=True)        
 
+    
             
+    def toEDFStr(self):
+        
+        if self.groupeName.lower() == "stage":
+            eventStr = self.name
+        else:
+            eventStr = self.getXml()
+        
+        return "+" + str(self.startTime) + "\x15" + str(self.timeLength) + "\x14" + eventStr + "\x14\0"    
         

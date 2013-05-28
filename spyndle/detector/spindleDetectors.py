@@ -335,13 +335,16 @@ class SpindleDectector:
             event = Event( name = eventName, groupeName = eventGroupName, 
                           channel = spindle.channel, startTime = spindle.startTime(),
                           timeLength = spindle.timeDuration , 
-                          dateTime = reader.recordingStartDateTime + timedelta(seconds=spindle.startTime()),
+                          dateTime = reader.getRecordingStartTime() + timedelta(seconds=spindle.startTime()),
                           properties = {})            
                           
+            #print event.toEDFStr()
             reader.addEvent(event)
-
-        reader.save(fileName)
         
+        if fileName is None:
+            reader.save()
+        else:      
+            reader.saveAs(fileName)  
         
 
     # Used to save detected spindle in EEG data file. 
