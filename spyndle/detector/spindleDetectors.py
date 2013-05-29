@@ -202,15 +202,16 @@ class SpindleDectector:
       but such an implementation is 40 times slower at execution than the 
       proposed version.
     """
-    def computeRMS(self, reader, fmin=11, fmax=16):
+    def computeRMS(self, fmin=11, fmax=16, ):
         listChannels = unique([s.channel for s in self.detectedSpindles])        
         
-        # Pickle data for each channel separatelly so simplify and accelerate
-        # the reading of large files.       
-        reader.pickleCompleteRecord(listChannels)   
+        # Pickle data for each channel separatelly to simplify and accelerate
+        # the reading of large files.    
+        if self.usePickled :
+            self.reader.pickleCompleteRecord(listChannels)   
    
         for channel in listChannels:    
-            data        = reader.readPickledChannel(channel)
+            data        = self.reader.readChannel(channel, usePickled=self.usePickled)
 
             signal      = data.signal
             fs          = data.samplingRate                      # sampling rate    
@@ -234,13 +235,13 @@ class SpindleDectector:
         
         
         
-    def computeMeanFreq(self, reader, fmin=10, fmax=16):
+    def computeMeanFreq(self, fmin=10, fmax=16):
         for spindle in self.detectedSpindles:        
-            spindle.computeMeanFreq(reader, fmin, fmax)
+            spindle.computeMeanFreq(self.reader, fmin, fmax)
         
-    def computeTimeDuration(self, reader):
+    def computeTimeDuration(self):
         for spindle in self.detectedSpindles:        
-            spindle.computeTimeDuration(reader)
+            spindle.computeTimeDuration(self.reader)
 
 
 

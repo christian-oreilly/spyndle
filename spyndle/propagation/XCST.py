@@ -102,14 +102,7 @@ def computeXCST(readerClass, nightLst, dataPath, resPath, eventName, channelLst,
         try:
             print 'Loading data of the file ' + night + '...'
             reader = readerClass(dataPath + night)    
-            
-            ###################################################################
-            # Patch used because data recorder with previous versions of Harmonie
-            # inconsistent time stamp due to discontinuous recording. These lines
-            # should not be necessary with another reader.
-            print "Resynchronization of the events..."
-            reader.resyncEvents()    
-            ###################################################################
+
             
         except IOError:     
             print "Error: The selected file could not be open."
@@ -123,88 +116,60 @@ def computeXCST(readerClass, nightLst, dataPath, resPath, eventName, channelLst,
             except IOError:     
                 print "Error: The selected file could not be open."
                 exit()
+
+            deltaSample = int(delta*reader.getChannelFreq(refChannel))        
+            delta       = deltaSample/reader.getChannelFreq(refChannel)    
             
             events = filter(lambda e: e.name == eventName and e.channel == refChannel, reader.events)
             for i, event in zip(range(len(events)), events):
-                deltaSample = int(delta*reader.baseFreq)        
-                delta       = deltaSample/reader.baseFreq    
                 
-                start = event.startSample -  int(beforePad*reader.baseFreq)       
-                duration = event.timeLength + beforePad + afterPad
+                startTime = event.startTime -  beforePad      
+                duration  = event.timeLength + beforePad + afterPad
             
-                signalsDataCmp = reader.read(channelLst, start - deltaSample + int(offset*reader.baseFreq), duration + 2.0*delta)  
-                signalsDataRef = reader.read([refChannel], start - deltaSample, duration + 2.0*delta)  
+                signalsDataCmp = reader.read(channelLst,   startTime - delta + offset, duration + 2.0*delta)  
+                signalsDataRef = reader.read([refChannel], startTime - delta         , duration + 2.0*delta)  
             
-                X  = []        
-                    
-                fs          = signalsDataRef[0][0]       # sampling rate   
-                chanType    = signalsDataRef[2][0]                     
-    
-                #highPassFilter = Filter(fs)
-                #highPassFilter.create(chanType, low_crit_freq=9.0, 
-                #                      high_crit_freq=None, order=4, btype="highpass", 
-                #                      ftype="butter", useFiltFilt=True)                    
-            
-    
-                #lowPassFilter = Filter(fs)
-                #lowPassFilter.create(chanType, low_crit_freq=None, 
-                #                      high_crit_freq=16.0, order=4, btype="lowpass",
-                #                      ftype="butter", useFiltFilt=True)                  
-                    
+
+                fs = signalsDataCmp[refChannel].samplingRate                   
+
                 # Spectra computation
-                for i2 in range(len(channelLst)+1) :
-                    if i2 == 0 :
-                        signal      = signalsDataRef[1][0]  
-                    else:
-                        signal      = signalsDataCmp[1][i2-1]               
-                    
-                             
-                    #signal = highPassFilter.applyFilter(signal)                       
-                    #signal = lowPassFilter.applyFilter(signal)                
-                    
-        
-                    Xtmp, fXtmp = computeMST(signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)  
-                            
-                            
-                    Xtmp = abs(transpose(Xtmp))
-                        
-                    if i2 == 0:    
-                        Xtmp = Xtmp[:, deltaSample:-deltaSample]
-           
-                    
-                    X.append(Xtmp)
+                X, fXtmp = computeMST(signalsDataRef[refChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)   
+                X = abs(transpose(X))
+                X = {"Ref":X[:, deltaSample:-deltaSample]}
+                for testChannel in channelLst :      
+                    Xtmp, fXtmp = computeMST(signalsDataCmp[testChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)         
+                    X[testChannel] = abs(transpose(Xtmp))              
             
-             
-            
-                refShape = list(shape(X[0]))      
+                refShape = list(shape(X["Ref"]))      
                 
-                maxCrosscor = zeros(len(channelLst))
-                maxDeltay   = zeros(len(channelLst))
+                maxCrosscor = {}
+                maxDeltay   = {}
                 
                 crosscor    = zeros(2*deltaSample)
                 time        = (arange(2*deltaSample)-deltaSample)/fs
-                refSelfCor  = trapz(trapz(X[0]*X[0])) 
+                refSelfCor  = trapz(trapz(X["Ref"]*X["Ref"])) 
                 
     
-                for i2 in range(1,len(channelLst)+1) :
-                    if channelLst[i2-1] == refChannel:
-                        maxDeltay[i2-1]   = 0       
-                        maxCrosscor[i2-1] = 1.0              
+                for testChannel in channelLst :
+                    if testChannel == refChannel:
+                        maxDeltay[testChannel]   = 0       
+                        maxCrosscor[testChannel] = 1.0              
                     else:                
-                        XCmpSquare = X[i2]*X[i2]
+                        XCmpSquare = X[testChannel]*X[testChannel]
                         XCmpSquare_colTrapz = trapz(XCmpSquare, axis=0)        
-                        for offset in range(2*deltaSample):
-                            XCmp             = X[i2][:, offset:(offset+refShape[1])]
-                            CmpSelfCor       = trapz(XCmpSquare_colTrapz[offset:(offset+refShape[1])])
-                            crosscor[offset] = trapz(trapz(XCmp*X[0]))/max(CmpSelfCor, refSelfCor)
+                        for indOffset in range(2*deltaSample):
+                            XCmp             = X[testChannel][:, indOffset:(indOffset+refShape[1])]
+                            CmpSelfCor       = trapz(XCmpSquare_colTrapz[indOffset:(indOffset+refShape[1])])
+                            #print XCmp.shape, X["Ref"].shape
+                            crosscor[indOffset] = trapz(trapz(XCmp*X["Ref"]))/max(CmpSelfCor, refSelfCor)
     
                         ind = where(crosscor == max(crosscor))[0][0]
                         
                         diffCrosscor = diff2(arange(2*deltaSample), crosscor)                
                         
                         if ind == 0 or ind == 2*deltaSample-1:
-                            maxDeltay[i2-1]   = time[ind]       
-                            maxCrosscor[i2-1] = crosscor[ind]                      
+                            maxDeltay[testChannel]   = time[ind]       
+                            maxCrosscor[testChannel] = crosscor[ind]                      
                         else:
                             if ind-2 > 0 :
                                 indm = ind-2
@@ -221,21 +186,30 @@ def computeXCST(readerClass, nightLst, dataPath, resPath, eventName, channelLst,
                             indFrac  = (diffCrosscor[indFloor])/(diffCrosscor[indFloor] - diffCrosscor[indFloor+1])
                           
         
-                            maxDeltay[i2-1]   = time[indFloor]      + indFrac*(time[indFloor+1]-time[indFloor])       
-                            maxCrosscor[i2-1] = crosscor[indFloor]  + indFrac*(crosscor[indFloor+1]-crosscor[indFloor])       
+                            maxDeltay[testChannel]   = time[indFloor]      + indFrac*(time[indFloor+1]-time[indFloor])       
+                            maxCrosscor[testChannel] = crosscor[indFloor]  + indFrac*(crosscor[indFloor+1]-crosscor[indFloor])       
                             
                         
     
+                # Print the header. A header is necessary as the column of these
+                # files may changes depending on avaiablement event properties.
+                if i == 0:        
+                    keys = event.properties.keys()
+                    f.write("no;startTime;duration;similarity;delay;"  + ";".join(keys) + '\n') # Write a string to a file            
+            
+            
             
                 result = str(i) + ";" + str(event.dateTime) + ";" + str(event.timeLength) + ";" 
-                for i2 in range(len(channelLst)):
-                    result += str(maxCrosscor[i2]) + ";"  +  str(maxDeltay[i2]) + ";"  
+                for testChannel in channelLst:
+                    result += str(maxCrosscor[testChannel]) + ";"  +  str(maxDeltay[testChannel]) + ";"  
                     
                 # Depending on the available properties 
-                for eventProperty in eventProperties:
-                    result += str(event.properties[eventProperty]) + ";" 
+                for eventProperty in keys:
+                    if eventProperty in event.properties:
+                        result += str(event.properties[eventProperty])
+                    result += ";" 
 
-                print night, refChannel, i
+                print night, refChannel, i, len(events)-1
 
                 f.write(result[:-1] + '\n') # Write a string to a file
                 

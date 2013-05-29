@@ -50,6 +50,14 @@ class EEGDBReaderBase(object) :
     """
 
 
+
+    # Should return a DateTime object indicating the time when the recording
+    # has begun. 
+    @abstractmethod
+    def getChannelFreq(self, channel): raise ErrPureVirtualCall
+    
+    
+
     # Should return a DateTime object indicating the time when the recording
     # has begun. 
     @abstractmethod
@@ -295,7 +303,7 @@ class Event:
     def getXml(self):
         # create XML 
         try:
-            root = etree.Element('Event', name=self.name, groupeName=self.groupeName)
+            root = etree.Element('Event', name=self.name, groupeName=self.groupeName, channel=self.channel)
             for propKey in self.properties:
                 propertyElem = etree.Element('Property')
                 

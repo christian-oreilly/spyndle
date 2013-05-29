@@ -279,6 +279,15 @@ class HarmonieReader(EEGDBReaderBase):
             event.stageEpoch = i+1
    
         self.definePages()
+        
+        
+        ###################################################################
+        # Patch used because data recorder with previous versions of Harmonie
+        # inconsistent time stamp due to discontinuous recording. These lines
+        # should not be necessary with another reader.
+        print "Resynchronization of the events..."
+        self.resyncEvents()    
+        ###################################################################        
 
 
 
@@ -520,7 +529,8 @@ class HarmonieReader(EEGDBReaderBase):
 
     # La fonctionnalité ISignalRecord.SetStartTime ne semble pas pouvoir être utilisée
     # pour la lecture.
-    def readWithTime(self, signalNames, startTime, timeDuration):
+    #def readWithTime(self, signalNames, startTime, timeDuration):
+    def read(self, signalNames, startTime, timeDuration):
                 
         recordNbSample = timeDuration*self.baseFreq
         ISignalRecord = self.ISignalFile.CreateSignalRecord(int(recordNbSample))
@@ -531,7 +541,7 @@ class HarmonieReader(EEGDBReaderBase):
         return self.read2(signalNames, timeDuration, ISignalRecord)
 
 
-
+    """
     def read(self, signalNames, startSample, timeDuration):
 
 
@@ -544,7 +554,7 @@ class HarmonieReader(EEGDBReaderBase):
         ISignalRecord.SetStartSample(int(startSample))
         
         return self.read2(signalNames, timeDuration, ISignalRecord)
-        
+    """ 
         
         
     def read2(self, signalNames, timeDuration, ISignalRecord):    
@@ -612,12 +622,13 @@ class HarmonieReader(EEGDBReaderBase):
     # Patch parce qu'il semble y avoir un problème avec le temps associé
     # aux fuseaux de Gaétan
     def resyncEvents(self):
-        ISignalRecord = self.ISignalFile.CreateSignalRecord(2)
+        ISignalRecord = self.ISignalFile.CreateSignalRecord(10)
         for event in self.events:
             ISignalRecord.SetStartSample(event.startSample)
             self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
-            event.startTime   = dayToSecond(ISignalRecord.GetStartTime(), self.startDay)  #en secondes #dayToTime(item.GetStartTime())
-            event.dateTime    = ole2datetime(ISignalRecord.GetStartTime())    
+            event.dateTime    = ole2datetime(ISignalRecord.GetStartTime())
+            # In seconds, since the begining of the recording of the EEG file.
+            self.startTime   = (event.dateTime - self.recordingStartDateTime).total_seconds()     
 
 
     # Patch parce qu'il semble y avoir un problème avec le temps associé
