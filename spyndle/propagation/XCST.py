@@ -52,6 +52,8 @@
 from scipy import where, zeros, transpose, arange, shape, diff, sign
 from scipy.integrate import trapz
 
+from spyndle.io import Event
+
 from ..utils import diff2
 #from ..filters import Filter
 from ..STransform import computeMST
@@ -195,11 +197,19 @@ def computeXCST(readerClass, nightLst, dataPath, resPath, eventName, channelLst,
                 # files may changes depending on avaiablement event properties.
                 if i == 0:        
                     keys = event.properties.keys()
-                    f.write("no;startTime;duration;similarity;delay;"  + ";".join(keys) + '\n') # Write a string to a file            
-            
-            
-            
-                result = str(i) + ";" + str(event.dateTime) + ";" + str(event.timeLength) + ";" 
+                    
+                    header = "no;startTime;duration;"
+
+                    for testChannel in channelLst:                    
+                        header += "similarity_" + testChannel + ";delay_" + testChannel + ";"
+
+                    header += ";".join(keys) + '\n'
+                    
+                    f.write(header) # Write a string to a file            
+
+
+                print event.toEDFStr()
+                result = str(i) + ";" + str(event.startTime) + ";" + str(event.timeLength) + ";" 
                 for testChannel in channelLst:
                     result += str(maxCrosscor[testChannel]) + ";"  +  str(maxDeltay[testChannel]) + ";"  
                     

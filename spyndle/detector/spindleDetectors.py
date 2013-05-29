@@ -34,11 +34,11 @@
 
 """
 
-import os, gc, copy
+import os, gc, copy, numpy
 
 from abc import ABCMeta, abstractmethod
 
-from scipy import concatenate, zeros, mean, sqrt, mod, diff, where, fft
+from scipy import concatenate, zeros, mean, sqrt, mod, diff, where, fft, linspace
 from scipy import array, arange, ones, unique
 from scipy.stats.mstats import mquantiles
 from scipy.fftpack import fftfreq
@@ -71,7 +71,8 @@ class DetectedSpindle:
         self.RMSamp         = 0.0
         self.meanFreq       = 0.0
         self.sleepStage     = ""
-
+        self.slopeOrigin    = 0.0
+        self.slope          = 0.0
 
     def startTime(self):
         return self.__startTime
@@ -337,7 +338,10 @@ class SpindleDectector:
                           channel = spindle.channel, startTime = spindle.startTime(),
                           timeLength = spindle.timeDuration , 
                           dateTime = reader.getRecordingStartTime() + timedelta(seconds=spindle.startTime()),
-                          properties = {})            
+                          properties = {"RMSamp"     :spindle.RMSamp,
+                                        "meanFreq"   :spindle.meanFreq,
+                                        "slopeOrigin":spindle.slopeOrigin,
+                                        "slope"      :spindle.slope})            
                           
             #print event.toEDFStr()
             reader.addEvent(event)
@@ -419,6 +423,10 @@ class SpindleDectectorRMS(SpindleDectector):
         # If true, teager operator of amplitude is used instead of amplitude
         # itself.
         self.useTeager = False
+        
+        self.computeRMS       = True
+        self.computeFreq      = True       
+        self.computeSlopeFreq = True
 
         ###############################################################################
 
@@ -541,6 +549,61 @@ class SpindleDectectorRMS(SpindleDectector):
                     stopSpinInd  = stopSpinInd[duration >= self.minimalSpindleDuration]
                     
                     newSpindles = [DetectedSpindle(channel, start, end) for start, end in zip(channelTime[startSpinInd], channelTime[stopSpinInd])]   
+                    
+                    # As the spindles are localized and the signal is extracted and filtred,
+                    # it is efficient to compute spindles characteristics directly here.
+                    if self.computeRMS :
+                        for startInd, stopInd, spindle in zip(startSpinInd, stopSpinInd, newSpindles):
+                            spindle.RMSamp = sqrt(mean(signal[startInd:stopInd]**2))
+                
+                    if self.computeFreq :
+                        for startInd, stopInd, spindle in zip(startSpinInd, stopSpinInd, newSpindles):
+                            sig       = signal[startInd:stopInd]
+
+                            if sig.size < 512:
+                                sig = concatenate((sig, zeros(512 - sig.size)))
+                            
+                            FFT = abs(fft(sig))
+                            freqs = fftfreq(sig.size, 1.0/fs)        
+                            
+                            FFT   = FFT[(freqs >= self.lowFreq)*(freqs <= self.highFreq)]
+                            freqs = freqs[(freqs >= self.lowFreq)*(freqs <= self.highFreq)]
+                            
+                            spindle.meanFreq = sum(freqs*FFT)/sum(FFT)
+                                                
+                    
+                    if self.computeSlopeFreq :
+                        for startInd, stopInd, spindle in zip(startSpinInd, stopSpinInd, newSpindles):
+                            sig       = signal[startInd:stopInd]
+               
+                            X, fX = computeMST(sig, fs, 0.0, 1.0, fmin=self.lowFreq-1, fmax=self.highFreq+1)  
+                            
+                            Y = abs(numpy.transpose(X))
+                                            
+                            regx = linspace(0, spindle.timeDuration, spindle.timeDuration*fs, endpoint=False)
+                            regy = []
+                            for i in range(len(regx)):
+                                regy.append(trapz(fX*Y[:, i], fX)/trapz(Y[:, i], fX))   
+                                
+                            z = numpy.polyfit(regx, regy, deg=1)     
+            
+                            spindle.slopeOrigin = z[1]
+                            spindle.slope       = z[0]
+
+                    """
+                    for spindle in newSpindles:
+                        event = Event( name = "a", groupeName = "b", 
+                                      channel = spindle.channel, startTime = spindle.startTime(),
+                                      timeLength = spindle.timeDuration , 
+                                      dateTime = self.reader.getRecordingStartTime() + timedelta(seconds=spindle.startTime()),
+                                      properties = {"RMSamp"     :spindle.RMSamp,
+                                                    "meanFreq"   :spindle.meanFreq,
+                                                    "slopeOrigin":spindle.slopeOrigin,
+                                                    "slope"      :spindle.slope})            
+                                                              
+                                    
+                        print event.toEDFStr()
+                    """
                     self.detectedSpindles.extend(newSpindles) 
         #print [s.startTime() for s in self.detectedSpindles]            
 

@@ -282,7 +282,7 @@ class Event:
         self.timeLength  = timeLength  # Duration in seconds      
         self.dateTime    = dateTime    # datetime  object giving the begining time of the event.
 
-        self.properties  = {}
+        self.properties  = properties
 
     
     def sampleEnd(self):
@@ -305,12 +305,16 @@ class Event:
         try:
             root = etree.Element('Event', name=self.name, groupeName=self.groupeName, channel=self.channel)
             for propKey in self.properties:
-                propertyElem = etree.Element('Property')
+                #propertyElem = etree.Element('Property')
                 
                 # XML properties cannot contain space characters. Substituting them by "_".                
-                propertyElem.set(propKey.replace(' ', '_'), self.properties[propKey])    
+                #propertyElem.set(propKey.replace(' ', '_'), str(self.properties[propKey]))    
                 
-                root.append(propertyElem)
+                #root.append(propertyElem)
+                
+                # XML properties cannot contain space characters. Substituting them by "_".                
+                root.set(propKey.replace(' ', '_'), str(self.properties[propKey])) 
+                
         except ValueError :
             print self.properties
             raise
