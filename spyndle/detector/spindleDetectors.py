@@ -169,6 +169,14 @@ class SpindleDectector:
         
         # Minimal duration of a valid spindle
         self.minimalSpindleDuration = 0.5 # in seconds
+
+        # Maximal duration of a valid spindle. Avoid aberrant spindle extraction
+        # such spindle with would last for tens of seconds because of a 
+        # thresholding problem. It also avoid some problems related to the fact
+        # that spindles are taken as being of short duration (e.g. a script
+        # stoping crashing because it has exhausted all the memory making
+        # a S-transform of a spindle of 30 seconds).
+        self.maximalSpindleDuration = 3.0 # in seconds
         
         # Sleep cycle definition used to compute the quantile distribution
         # of amplitude per stage/cycles
@@ -547,6 +555,10 @@ class SpindleDectectorRMS(SpindleDectector):
                                    
                     startSpinInd = startSpinInd[duration >= self.minimalSpindleDuration]
                     stopSpinInd  = stopSpinInd[duration >= self.minimalSpindleDuration]
+                    duration     = duration[duration >= self.minimalSpindleDuration]               
+                    
+                    startSpinInd = startSpinInd[duration <= self.maximalSpindleDuration]
+                    stopSpinInd  = stopSpinInd[duration <= self.maximalSpindleDuration]
                     
                     newSpindles = [DetectedSpindle(channel, start, end) for start, end in zip(channelTime[startSpinInd], channelTime[stopSpinInd])]   
                     

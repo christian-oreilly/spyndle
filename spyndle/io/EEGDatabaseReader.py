@@ -313,15 +313,17 @@ class Event:
                 #root.append(propertyElem)
                 
                 # XML properties cannot contain space characters. Substituting them by "_".                
-                root.set(propKey.replace(' ', '_'), str(self.properties[propKey])) 
+                root.set(propKey.replace(' ', '_'), self.properties[propKey]) 
                 
         except ValueError :
             print self.properties
+            print self.properties.keys()
+            print "propKey:", str(propKey),propKey 
+            print "property:", str(self.properties[propKey]), self.properties[propKey]
             raise
             
             
-        # pretty string
-        return etree.tostring(root) #, pretty_print=True)        
+        return etree.tostring(root, encoding=unicode) #, pretty_print=True)        
 
     
             

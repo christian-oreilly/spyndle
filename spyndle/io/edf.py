@@ -98,11 +98,27 @@ class EDFEvent(Event):
             try:
                 root = etree.fromstring(talEvent[2])
                 for name, value in sorted(root.items()):
-                    if name == "name":
+                    if not isinstance(name, unicode):
+                        if isinstance(name, str):  
+                            name = unicode(name)
+                        else:
+                            print type(name)
+                            raise TypeError
+
+                    if not isinstance(value, unicode):
+                        if isinstance(value, str):  
+                            value = unicode(value)
+                        else:
+                            print type(value)
+                            raise TypeError
+                    
+                    
+                    
+                    if name == u"name":
                         self.name = value
-                    elif name == "groupeName":
+                    elif name == u"groupeName":
                         self.groupeName = value
-                    elif name == "channel":
+                    elif name == u"channel":
                         self.channel = value
                     else :
                         self.properties[name] = value                    
@@ -111,13 +127,13 @@ class EDFEvent(Event):
                 raise
         else:
             self.name = talEvent[2]
-            if ( self.name == "Sleep stage 1" or self.name == "Sleep stage 2" or
-                 self.name == "Sleep stage 3" or self.name == "Sleep stage 4" or
-                 self.name == "Sleep stage R" or self.name == "Sleep stage W" or
-                 self.name == "Sleep stage ?" ) :
+            if ( self.name == u"Sleep stage 1" or self.name == u"Sleep stage 2" or
+                 self.name == u"Sleep stage 3" or self.name == u"Sleep stage 4" or
+                 self.name == u"Sleep stage R" or self.name == u"Sleep stage W" or
+                 self.name == u"Sleep stage ?" ) :
                
                
-               self.groupeName = "Stage"
+               self.groupeName = u"Stage"
 
 
    
@@ -445,8 +461,9 @@ class EDFReader(EEGDBReaderBase) :
         for eventStr in eventStings:
             rawRecord = self.readRawRecord()    
             for channel in self.header.channelLabels:
-                if channel == EVENT_CHANNEL:
-                    self.fileWrite.write(eventStr + "\0"*(writeHeader.nbSamplesPerRecord[channel]*self.header.nbBytes - len(eventStr))  )  
+                if channel == EVENT_CHANNEL:                         
+                    writeString = eventStr + "\0"*(writeHeader.nbSamplesPerRecord[channel]*self.header.nbBytes - len(eventStr)) 
+                    self.fileWrite.write(writeString.encode("utf8"))  
                 else: 
                     self.fileWrite.write(rawRecord[channel])
 

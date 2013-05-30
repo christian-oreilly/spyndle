@@ -48,11 +48,10 @@
 
 """
 
-
+import os
 from scipy import where, zeros, transpose, arange, shape, diff, sign
 from scipy.integrate import trapz
 
-from spyndle.io import Event
 
 from ..utils import diff2
 #from ..filters import Filter
@@ -71,8 +70,7 @@ from ..STransform import computeMST
 #                     EEG file format they are using folowwing the example given 
 #                     by the HarmonieReader class. If help is needed, contact
 #                     the author (christian.oreilly@umontreal.ca). 
-#    nightLst       : File name of the EEG data.
-#    dataPath       : Repertory containing the EEG data listed in nightLst.
+#    fileName       : File name of the EEG data.
 #    resPath        : Repertory where the results will be saved.
 #    eventName      : Name used to label the "spindle" events.
 #    channelLst     : List of the recorded channels.
@@ -97,131 +95,133 @@ from ..STransform import computeMST
 #                     Default value: "spindleDelays"
 #                     
 #
-def computeXCST(readerClass, nightLst, dataPath, resPath, eventName, channelLst, 
+def computeXCST(readerClass, fileName, resPath, eventName, channelLst, 
                  delta =0.5, beforePad=0.5, afterPad=0.5, offset=0.0, eventProperties = [],
                  resFilesPrefix="spindleDelays") :  
-    for night in nightLst:
-        try:
-            print 'Loading data of the file ' + night + '...'
-            reader = readerClass(dataPath + night)    
 
-            
+    night = os.path.basename(fileName)
+
+    try:
+        print 'Loading data of the file ' + night + '...'
+        reader = readerClass(fileName)    
+
+        
+    except IOError:     
+        print "Error: The selected file could not be open."
+        exit()        
+    
+    
+    
+    for refChannel in channelLst:        
+        try:
+            f = open(resPath + resFilesPrefix + "_" + night + "_" + refChannel + ".txt", "w")    
         except IOError:     
             print "Error: The selected file could not be open."
-            exit()        
-        
-        
-        
-        for refChannel in channelLst:        
-            try:
-                f = open(resPath + resFilesPrefix + "_" + night + "_" + refChannel + ".txt", "w")    
-            except IOError:     
-                print "Error: The selected file could not be open."
-                exit()
+            exit()
 
-            deltaSample = int(delta*reader.getChannelFreq(refChannel))        
-            delta       = deltaSample/reader.getChannelFreq(refChannel)    
+        deltaSample = int(delta*reader.getChannelFreq(refChannel))        
+        delta       = deltaSample/reader.getChannelFreq(refChannel)    
+        
+        events = filter(lambda e: e.name == eventName and e.channel == refChannel, reader.events)
+        for i, event in zip(range(len(events)), events):
             
-            events = filter(lambda e: e.name == eventName and e.channel == refChannel, reader.events)
-            for i, event in zip(range(len(events)), events):
-                
-                startTime = event.startTime -  beforePad      
-                duration  = event.timeLength + beforePad + afterPad
+            startTime = event.startTime -  beforePad      
+            duration  = event.timeLength + beforePad + afterPad
+        
+            signalsDataCmp = reader.read(channelLst,   startTime - delta + offset, duration + 2.0*delta)  
+            signalsDataRef = reader.read([refChannel], startTime - delta         , duration + 2.0*delta)  
+        
+
+            fs = signalsDataCmp[refChannel].samplingRate                   
+
+            # Spectra computation
+            X, fXtmp = computeMST(signalsDataRef[refChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)   
+            X = abs(transpose(X))
+            X = {"Ref":X[:, deltaSample:-deltaSample]}
+            for testChannel in channelLst :      
+                Xtmp, fXtmp = computeMST(signalsDataCmp[testChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)         
+                X[testChannel] = abs(transpose(Xtmp))              
+        
+            refShape = list(shape(X["Ref"]))      
             
-                signalsDataCmp = reader.read(channelLst,   startTime - delta + offset, duration + 2.0*delta)  
-                signalsDataRef = reader.read([refChannel], startTime - delta         , duration + 2.0*delta)  
+            maxCrosscor = {}
+            maxDeltay   = {}
+            
+            crosscor    = zeros(2*deltaSample)
+            time        = (arange(2*deltaSample)-deltaSample)/fs
+            refSelfCor  = trapz(trapz(X["Ref"]*X["Ref"])) 
             
 
-                fs = signalsDataCmp[refChannel].samplingRate                   
+            for testChannel in channelLst :
+                if testChannel == refChannel:
+                    maxDeltay[testChannel]   = 0       
+                    maxCrosscor[testChannel] = 1.0              
+                else:                
+                    XCmpSquare = X[testChannel]*X[testChannel]
+                    XCmpSquare_colTrapz = trapz(XCmpSquare, axis=0)        
+                    for indOffset in range(2*deltaSample):
+                        XCmp             = X[testChannel][:, indOffset:(indOffset+refShape[1])]
+                        CmpSelfCor       = trapz(XCmpSquare_colTrapz[indOffset:(indOffset+refShape[1])])
+                        #print XCmp.shape, X["Ref"].shape
+                        crosscor[indOffset] = trapz(trapz(XCmp*X["Ref"]))/max(CmpSelfCor, refSelfCor)
 
-                # Spectra computation
-                X, fXtmp = computeMST(signalsDataRef[refChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)   
-                X = abs(transpose(X))
-                X = {"Ref":X[:, deltaSample:-deltaSample]}
-                for testChannel in channelLst :      
-                    Xtmp, fXtmp = computeMST(signalsDataCmp[testChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)         
-                    X[testChannel] = abs(transpose(Xtmp))              
-            
-                refShape = list(shape(X["Ref"]))      
-                
-                maxCrosscor = {}
-                maxDeltay   = {}
-                
-                crosscor    = zeros(2*deltaSample)
-                time        = (arange(2*deltaSample)-deltaSample)/fs
-                refSelfCor  = trapz(trapz(X["Ref"]*X["Ref"])) 
-                
-    
-                for testChannel in channelLst :
-                    if testChannel == refChannel:
-                        maxDeltay[testChannel]   = 0       
-                        maxCrosscor[testChannel] = 1.0              
-                    else:                
-                        XCmpSquare = X[testChannel]*X[testChannel]
-                        XCmpSquare_colTrapz = trapz(XCmpSquare, axis=0)        
-                        for indOffset in range(2*deltaSample):
-                            XCmp             = X[testChannel][:, indOffset:(indOffset+refShape[1])]
-                            CmpSelfCor       = trapz(XCmpSquare_colTrapz[indOffset:(indOffset+refShape[1])])
-                            #print XCmp.shape, X["Ref"].shape
-                            crosscor[indOffset] = trapz(trapz(XCmp*X["Ref"]))/max(CmpSelfCor, refSelfCor)
-    
-                        ind = where(crosscor == max(crosscor))[0][0]
-                        
-                        diffCrosscor = diff2(arange(2*deltaSample), crosscor)                
-                        
-                        if ind == 0 or ind == 2*deltaSample-1:
-                            maxDeltay[testChannel]   = time[ind]       
-                            maxCrosscor[testChannel] = crosscor[ind]                      
+                    ind = where(crosscor == max(crosscor))[0][0]
+                    
+                    diffCrosscor = diff2(arange(2*deltaSample), crosscor)                
+                    
+                    if ind == 0 or ind == 2*deltaSample-1:
+                        maxDeltay[testChannel]   = time[ind]       
+                        maxCrosscor[testChannel] = crosscor[ind]                      
+                    else:
+                        if ind-2 > 0 :
+                            indm = ind-2
                         else:
-                            if ind-2 > 0 :
-                                indm = ind-2
-                            else:
-                                indm = 0
-                                
-                            if ind+2 < 2*deltaSample-1 :
-                                indp = ind+2
-                            else:
-                                indp = 2*deltaSample-1
-        
-                            pindinc = where(diff(sign(diffCrosscor[indm:(indp+1)])) != 0)[0][0]                
-                            indFloor = indm +pindinc 
-                            indFrac  = (diffCrosscor[indFloor])/(diffCrosscor[indFloor] - diffCrosscor[indFloor+1])
-                          
-        
-                            maxDeltay[testChannel]   = time[indFloor]      + indFrac*(time[indFloor+1]-time[indFloor])       
-                            maxCrosscor[testChannel] = crosscor[indFloor]  + indFrac*(crosscor[indFloor+1]-crosscor[indFloor])       
+                            indm = 0
                             
-                        
+                        if ind+2 < 2*deltaSample-1 :
+                            indp = ind+2
+                        else:
+                            indp = 2*deltaSample-1
     
-                # Print the header. A header is necessary as the column of these
-                # files may changes depending on avaiablement event properties.
-                if i == 0:        
-                    keys = event.properties.keys()
+                        pindinc = where(diff(sign(diffCrosscor[indm:(indp+1)])) != 0)[0][0]                
+                        indFloor = indm +pindinc 
+                        indFrac  = (diffCrosscor[indFloor])/(diffCrosscor[indFloor] - diffCrosscor[indFloor+1])
+                      
+    
+                        maxDeltay[testChannel]   = time[indFloor]      + indFrac*(time[indFloor+1]-time[indFloor])       
+                        maxCrosscor[testChannel] = crosscor[indFloor]  + indFrac*(crosscor[indFloor+1]-crosscor[indFloor])       
+                        
                     
-                    header = "no;startTime;duration;"
 
-                    for testChannel in channelLst:                    
-                        header += "similarity_" + testChannel + ";delay_" + testChannel + ";"
-
-                    header += ";".join(keys) + '\n'
-                    
-                    f.write(header) # Write a string to a file            
-
-
-                print event.toEDFStr()
-                result = str(i) + ";" + str(event.startTime) + ";" + str(event.timeLength) + ";" 
-                for testChannel in channelLst:
-                    result += str(maxCrosscor[testChannel]) + ";"  +  str(maxDeltay[testChannel]) + ";"  
-                    
-                # Depending on the available properties 
-                for eventProperty in keys:
-                    if eventProperty in event.properties:
-                        result += str(event.properties[eventProperty])
-                    result += ";" 
-
-                print night, refChannel, i, len(events)-1
-
-                f.write(result[:-1] + '\n') # Write a string to a file
+            # Print the header. A header is necessary as the column of these
+            # files may changes depending on avaiablement event properties.
+            if i == 0:        
+                keys = event.properties.keys()
                 
-        f.close()
+                header = "no;startTime;duration;"
+
+                for testChannel in channelLst:                    
+                    header += "similarity_" + testChannel + ";delay_" + testChannel + ";"
+
+                header += ";".join(keys) + '\n'
                 
+                f.write(header) # Write a string to a file            
+
+
+            #print event.toEDFStr()
+            result = str(i) + ";" + str(event.startTime) + ";" + str(event.timeLength) + ";" 
+            for testChannel in channelLst:
+                result += str(maxCrosscor[testChannel]) + ";"  +  str(maxDeltay[testChannel]) + ";"  
+                
+            # Depending on the available properties 
+            for eventProperty in keys:
+                if eventProperty in event.properties:
+                    result += str(event.properties[eventProperty])
+                result += ";" 
+
+            print night, refChannel, i, len(events)-1
+
+            f.write(result[:-1] + '\n') # Write a string to a file
+            
+    f.close()
+            

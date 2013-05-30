@@ -15,7 +15,7 @@
 #
 ###############################################################################
 
-
+import warnings
 import comtypes
 import comtypes.client as cc
 import os
@@ -77,41 +77,41 @@ class HarmonieEvent(Event):
         self.name = item.GetName()  
         
         # Tore's lab
-        if self.groupeName.lower() == "stage":
-            if  self.name.lower() == "stage1":   
-                self.name = "Sleep stage 1"
-            elif  self.name.lower() == "stage2":   
-                self.name = "Sleep stage 2"
-            elif  self.name.lower() == "stage3":   
-                self.name = "Sleep stage 3"
-            elif  self.name.lower() == "stage4":   
-                self.name = "Sleep stage 4"
-            elif  self.name.lower() == "rem":   
-                self.name = "Sleep stage R"
-            elif  self.name.lower() == "wake":   
-                self.name = "Sleep stage W"
+        if self.groupeName.lower() == u"stage":
+            if  self.name.lower() == u"stage1":   
+                self.name = u"Sleep stage 1"
+            elif  self.name.lower() == u"stage2":   
+                self.name = u"Sleep stage 2"
+            elif  self.name.lower() == u"stage3":   
+                self.name = u"Sleep stage 3"
+            elif  self.name.lower() == u"stage4":   
+                self.name = u"Sleep stage 4"
+            elif  self.name.lower() == u"rem":   
+                self.name = u"Sleep stage R"
+            elif  self.name.lower() == u"wake":   
+                self.name = u"Sleep stage W"
             else:   
-                self.name = "Sleep stage ?"
+                self.name = u"Sleep stage ?"
 
 
         # Julie's lab
-        if self.groupeName.lower() == "stade":
-            if  self.name.lower() == "stade1":   
-                self.name = "Sleep stage 1"
-            elif  self.name.lower() == "stade2":   
-                self.name = "Sleep stage 2"
-            elif  self.name.lower() == "stade3":   
-                self.name = "Sleep stage 3"
-            elif  self.name.lower() == "stade4":   
-                self.name = "Sleep stage 4"
-            elif  self.name.lower() == "sp":   
-                self.name = "Sleep stage R"
-            elif  self.name.lower() == '\xc9veil':   
-                self.name = "Sleep stage W"
+        if self.groupeName.lower() == u"stade":
+            if  self.name.lower() == u"stade1":   
+                self.name = u"Sleep stage 1"
+            elif  self.name.lower() == u"stade2":   
+                self.name = u"Sleep stage 2"
+            elif  self.name.lower() == u"stade3":   
+                self.name = u"Sleep stage 3"
+            elif  self.name.lower() == u"stade4":   
+                self.name = u"Sleep stage 4"
+            elif  self.name.lower() == u"sp":   
+                self.name = u"Sleep stage R"
+            elif  self.name == u"\xc9veil":   
+                self.name = u"Sleep stage W"
             else:   
-                self.name = "Sleep stage ?"
+                self.name = u"Sleep stage ?"
                 
-            self.groupeName = "stage"
+            self.groupeName = u"stage"
 
 
         
@@ -127,9 +127,11 @@ class HarmonieEvent(Event):
         self.color       = groupe.GetColor() 
 
         self.properties  = {}
+        # Keys and properties should be in unicode
         for i in range(groupe.GetItemPropertyCount()):
             key = groupe.GetItemPropertyKey(i)
             self.properties[key] = item.GetItemPropertyValue(key)
+            
     
 
             
@@ -171,7 +173,9 @@ class HarmonieReader(EEGDBReaderBase):
         
         
         import comtypes.gen.SignalFileLib as SignalLib
+        import pythoncom
         
+        pythoncom.CoInitialize()
         self.ISignalFile = cc.CreateObject(SignalFile_id, None, None, SignalLib.ISignalFile)
         
 
@@ -399,9 +403,19 @@ class HarmonieReader(EEGDBReaderBase):
      
      
      
-     
+    # Should return a DateTime object indicating the time when the recording
+    # has begun. 
+
+    def getChannelFreq(self, channel): 
+        for i in range(len(self.labels)):
+            if self.labels[i] == channel:
+                return self.channelFreqs[i] 
+        return 0.0
+    
 
     def getSamplingRate(self, channel) :
+        warnings.warn("This function is depreacted.", DeprecationWarning, stacklevel=2)
+        
         for i in range(len(self.labels)):
             if self.labels[i] == channel:
                 return self.channelFreqs[i] 
@@ -410,6 +424,7 @@ class HarmonieReader(EEGDBReaderBase):
      
      
     def getSamplingRates(self):
+        warnings.warn("This function is depreacted.", DeprecationWarning, stacklevel=2)
         return self.channelFreqs
      
     def getChannelTypes(self):
@@ -994,7 +1009,7 @@ class HarmonieReader(EEGDBReaderBase):
                         eventStr = edfEventEncode(self.events[noEvent])  
                 f.write(timeKeepingStr +  "\0"*(annotationFieldLength*nbByte-len(timeKeepingStr)))         
                 """
-                f.write(page.eventStr +  "\0"*(annotationFieldLength*nbByte-len(page.eventStr)))         
+                f.write((page.eventStr +  "\0"*(annotationFieldLength*nbByte-len(page.eventStr))).encode("utf8"))         
 
                 if verbose:
                     done=float(nopage)/len(self.getInfoPages())*100.0
