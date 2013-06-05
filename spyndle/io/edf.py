@@ -40,7 +40,7 @@ Modification by Christian O'Reilly (Copyright (c) 2013)
 
 from EEGDatabaseReader import EEGDBReaderBase, EEGPage
 
-
+import uuid
 import os, io
 import re, datetime, logging
 import numpy as np
@@ -431,13 +431,16 @@ class EDFReader(EEGDBReaderBase) :
          2 - The data are not loaded in kept within the object, as opposed to 
              the header and the event informations.
     """
-    def save(self):
+    def save(self, tempPath="c:/"):
 
  
         # Because the annotation field may change in size, records can be shifted 
         # so we cannot only alter the information in the annotation fields. We need
-        # to create a completely new file and swap it with the original. 
-        self.fileWrite  = io.open("temp", 'wb')
+        # to create a completely new file and swap it with the original.
+        tempFileName = tempPath + "temp-" + str(uuid.uuid1()) + "-" + os.path.basename(self.fileName)
+                
+        
+        self.fileWrite  = io.open(tempFileName, 'wb')
         
         # Computing the strings representing the EDF annotations
         eventStings = self.computeEDFAnnotations()       
@@ -461,9 +464,9 @@ class EDFReader(EEGDBReaderBase) :
         for eventStr in eventStings:
             rawRecord = self.readRawRecord()    
             for channel in self.header.channelLabels:
-                if channel == EVENT_CHANNEL:                         
-                    writeString = eventStr + "\0"*(writeHeader.nbSamplesPerRecord[channel]*self.header.nbBytes - len(eventStr)) 
-                    self.fileWrite.write(writeString.encode("utf8"))  
+                if channel == EVENT_CHANNEL:    
+                    encodedString = eventStr.encode("utf8")                     
+                    self.fileWrite.write(encodedString + "\0"*(writeHeader.nbSamplesPerRecord[channel]*self.header.nbBytes - len(encodedString)) )  
                 else: 
                     self.fileWrite.write(rawRecord[channel])
 
@@ -477,7 +480,7 @@ class EDFReader(EEGDBReaderBase) :
         os.remove(self.fileName)
  
         # rename the new file       
-        os.rename("temp", self.fileName)     
+        os.rename(tempFileName, self.fileName)     
         
         # Reinit the object with the new file.
         self.__init__(self.fileName)

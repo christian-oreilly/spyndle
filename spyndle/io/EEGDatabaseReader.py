@@ -313,7 +313,7 @@ class Event:
                 #root.append(propertyElem)
                 
                 # XML properties cannot contain space characters. Substituting them by "_".                
-                root.set(propKey.replace(' ', '_'), self.properties[propKey]) 
+                root.set(unicode(propKey.replace(' ', '_')), unicode(self.properties[propKey])) 
                 
         except ValueError :
             print self.properties

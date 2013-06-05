@@ -107,8 +107,8 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
 
         
     except IOError:     
-        print "Error: The selected file could not be open."
-        exit()        
+        print "Error : computeXCST : ", fileName, "could not be opened."
+        raise      
     
     
     
@@ -116,21 +116,34 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
         try:
             f = open(resPath + resFilesPrefix + "_" + night + "_" + refChannel + ".txt", "w")    
         except IOError:     
-            print "Error: The selected file could not be open."
-            exit()
+            print "Error : computeXCST :", resPath + resFilesPrefix + "_" + night + "_" + refChannel + ".txt", "could not be opened."
+            raise
 
         deltaSample = int(delta*reader.getChannelFreq(refChannel))        
         delta       = deltaSample/reader.getChannelFreq(refChannel)    
         
+        print "Processing propagation:", night, refChannel   
+        
         events = filter(lambda e: e.name == eventName and e.channel == refChannel, reader.events)
         for i, event in zip(range(len(events)), events):
+ 
             
             startTime = event.startTime -  beforePad      
             duration  = event.timeLength + beforePad + afterPad
         
             signalsDataCmp = reader.read(channelLst,   startTime - delta + offset, duration + 2.0*delta)  
             signalsDataRef = reader.read([refChannel], startTime - delta         , duration + 2.0*delta)  
-        
+
+            # Because of numerical approximation, the signal length between the
+            # synchronous and the asychronous comparisons can be different 
+            # of 1 sample. We need to fix them to the same size to avoid
+            # comparison problems.
+            if offset != 0.0:
+                if len(signalsDataCmp[refChannel].signal) > len(signalsDataRef[refChannel].signal):
+                    for channel in signalsDataCmp:
+                        signalsDataCmp[channel].signal = signalsDataCmp[channel].signal[:-1]
+                elif len(signalsDataCmp[refChannel].signal) < len(signalsDataRef[refChannel].signal):
+                    signalsDataRef[refChannel].signal = signalsDataRef[refChannel].signal[:-1]
 
             fs = signalsDataCmp[refChannel].samplingRate                   
 
@@ -162,6 +175,7 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                     for indOffset in range(2*deltaSample):
                         XCmp             = X[testChannel][:, indOffset:(indOffset+refShape[1])]
                         CmpSelfCor       = trapz(XCmpSquare_colTrapz[indOffset:(indOffset+refShape[1])])
+                        
                         #print XCmp.shape, X["Ref"].shape
                         crosscor[indOffset] = trapz(trapz(XCmp*X["Ref"]))/max(CmpSelfCor, refSelfCor)
 
@@ -219,7 +233,7 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                     result += str(event.properties[eventProperty])
                 result += ";" 
 
-            print night, refChannel, i, len(events)-1
+            #print night, refChannel, i, len(events)-1
 
             f.write(result[:-1] + '\n') # Write a string to a file
             
