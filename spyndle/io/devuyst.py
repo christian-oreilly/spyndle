@@ -15,33 +15,17 @@
 #
 ###############################################################################
 
-
-from scipy import array, ceil, concatenate, zeros
-
-
-
-import comtypes
-import comtypes.client as cc
 import os
-from scipy.io import savemat, loadmat
-
-
-from math import floor
-from datetime import time, datetime, timedelta
-
-import time
-import ctypes, numpy
+from datetime import datetime
+from scipy import array
+from scipy.io import savemat            
             
-            
-            
-            
-            
-from filters import channelType
-
+from spyndle.filters import channelType
+from spyndle.io import Event, EEGDBReaderBase, RecordedChannel
 
 
 class DevuystEvent(Event):
-    def __init__(self, groupeName, name, channel, startTime, timeDuration, samplingRate): #, ISignalFile):
+    def __init__(self, groupeName, name, channel, startTime, timeDuration, samplingRate):
         self.no          = None
         self.groupeName  = groupeName
         self.channel     = channel
@@ -56,18 +40,15 @@ class DevuystEvent(Event):
 
 
 
-class DevuystReader(EEGDBReaderBase):
+
+
+
+# TODO: Abstract methods in EEGDBReaderBase must be implemented before we can
+# put back the inheritence.
+class DevuystReader(): #(EEGDBReaderBase):
     def __init__(self, fname, samplingRate):
-        EEGDBReaderBase.__init__(self)
+        #EEGDBReaderBase.__init__(self)
  
-        #c:\tests>python makepy.py -i StlSignalFile.tlb
-        #StlSignalFileLib
-        # {72A34744-DDD9-11D1-BB8F-00001B4E6868}, lcid=0, major=1, minor=1
-        #self.ISignalFile = Dispatch('{72A34754-DDD9-11D1-BB8F-00001B4E6868}')
-
-        # TODO : ajouter cette vérification
-        #print ISignalFile.IsValid(fileName)
-
         self.fname = fname
 
         try:
@@ -188,23 +169,8 @@ class DevuystReader(EEGDBReaderBase):
 
 
 
-
-
-
-
-
-    # La fonctionnalité ISignalRecord.SetStartTime ne semble pas pouvoir être utilisée
-    # pour la lecture.
     def readWithTime(self, signalNames, startTime, timeDuration):
-                
-        recordNbSample = timeDuration*self.baseFreq
-        ISignalRecord = self.ISignalFile.CreateSignalRecord(int(recordNbSample))
-        ISignalRecord.SetStartTime(secondToDays(startTime, self.startDay))
-
-        #print secondToDays(startTime, self.startDay), ISignalRecord.GetStartTime(), self.startTimeInDays
-
-        return self.read2(signalNames, timeDuration, ISignalRecord)
-
+        return self.read(signalNames, int(startTime*self.baseFreq), timeDuration=timeDuration)
 
 
 
@@ -215,13 +181,70 @@ class DevuystReader(EEGDBReaderBase):
                
 
 
+    def readPickledChannel(self, signalName):
+
+        fileName = self.fname + "_readComplete_" + signalName + ".mat"
+
+        if os.path.exists(fileName):
+            data = RecordedChannel()
+            data.readPickledChannel(fileName)
+            return data
+        else:
+            return None
+
+
+
+    def pickleCompleteRecord(self, signalNames):
+
+        fileName = self.fname + "_readComplete_"
+
+        signalNamesToPickle = []
+        for signalName in signalNames:
+            fileChannel = fileName + signalName + ".mat"
+            if not os.path.exists(fileChannel):
+                signalNamesToPickle.append(signalName)
+                
+        if len(signalNamesToPickle) == 0:
+            return
+        
+        # We cannot process all channels at once for long nights at high
+        # sampling rates. There is not enough available memory.
+        # Array of this size correspond to approximatelly 610 M 
+        # (zeros(80000000).nbytes/1024/1024).
+        NbSampleMaxPerReadCompleteCall =  40000000
+        NbChannelPerCall = int(NbSampleMaxPerReadCompleteCall/self.nbSamples)
+        Indexes = range(0, len(signalNamesToPickle), NbChannelPerCall)
+        if Indexes[-1] < len(signalNamesToPickle):
+            Indexes.append(len(signalNamesToPickle))
+        for i in range(len(Indexes)-1):   
+            print "Reading form .sig file for " + str(signalNamesToPickle[Indexes[i]:Indexes[i+1]]) + "..."
+            data = self.readComplete(signalNamesToPickle[Indexes[i]:Indexes[i+1]])
+
+            print data
+
+            for signalName in data:
+                print "Pickling data of " + signalName + " for next time..."
+                savemat(fileName + signalName + ".mat", data[signalName])
+
+
 
     # As read, but read the complete duration of the signals.
     def readComplete(self, signalNames):
         if self.labels[0] in signalNames:
-            return (self.samplingRates, self.signal, self.channelType, None, self.labels)
+            
+            returnData = {}
+  
+            for i in range(len(self.labels)):
+                returnData[self.labels[i]]                = RecordedChannel()                
+                returnData[self.labels[i]].signal         = self.signal[i]
+                returnData[self.labels[i]].samplingRate   = self.samplingRates[i]
+                returnData[self.labels[i]].type           = self.channelType[i]
+                returnData[self.labels[i]].startTime      = [datetime.now().strftime("%a, %d %b %Y %H:%M:%S +0000")]
+
+            return returnData
         else:
-            return ([], [], [], None, [])
+            return {}
+
 
 
     def read(self, signalNames, startSample, timeDuration=None, sampleDuration=None):
@@ -242,17 +265,4 @@ class DevuystReader(EEGDBReaderBase):
 
 
 
-    # Patch parce qu'il semble y avoir un problème avec le temps associé
-    # aux fuseaux de Gaétan
-    def getSampleFromTime(self, approximativeSample, searchedDatetime):
-        ISignalRecord = self.ISignalFile.CreateSignalRecord(1)
-        ISignalRecord.SetStartSample(approximativeSample)
-        self.ISignalFile.Read(ISignalRecord, HarmonieConst.SIGNALFILE_FLAGS_CALIBRATE)
-        guessedDatetime    = ole2datetime(ISignalRecord.GetStartTime())   
-        delta = searchedDatetime - guessedDatetime
-        deltaSec = delta.days*24.0*3600.0 + delta.seconds + delta.microseconds/1000000.0
-        print guessedDatetime, searchedDatetime, delta, deltaSec, int(round(deltaSec*self.baseFreq) + approximativeSample)
-        return int(round(deltaSec*self.baseFreq) + approximativeSample)
-        
                         
-            
