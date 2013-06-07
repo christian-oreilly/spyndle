@@ -506,7 +506,7 @@ class HarmonieReader(EEGDBReaderBase):
                 ISignalRecord.SetStartSample(startSample)     
                 self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)   
                 
-                startDateTime = ole2datetime(ISignalRecord.GetStartTime()).strftime("%a, %d %b %Y %H:%M:%S +0000")   
+                startDateTime = ole2datetime(ISignalRecord.GetStartTime()) #.strftime("%a, %d %b %Y %H:%M:%S +0000")   
                 for channel in signalNames:
                     returnData[channel]                = RecordedChannel()                
                     returnData[channel].signal         = zeros(self.getNbSample(channel))
@@ -550,39 +550,10 @@ class HarmonieReader(EEGDBReaderBase):
         recordNbSample = timeDuration*self.baseFreq
         ISignalRecord = self.ISignalFile.CreateSignalRecord(int(recordNbSample))
         ISignalRecord.SetStartTime(secondToDays(startTime, self.startDay))
-
-        #print secondToDays(startTime, self.startDay), ISignalRecord.GetStartTime(), self.startTimeInDays
-
-        return self.read2(signalNames, timeDuration, ISignalRecord)
-
-
-    """
-    def read(self, signalNames, startSample, timeDuration):
-
-
-        # TODO: Implémenter le code pour obtenir la valeur de sigStart
-        startSample = max(startSample, 0)  
-        startSample = min(startSample, self.nbSamples-timeDuration*self.baseFreq)  
-        
-        recordNbSample = timeDuration*self.baseFreq
-        ISignalRecord = self.ISignalFile.CreateSignalRecord(int(recordNbSample))
-        ISignalRecord.SetStartSample(int(startSample))
-        
-        return self.read2(signalNames, timeDuration, ISignalRecord)
-    """ 
-        
-        
-    def read2(self, signalNames, timeDuration, ISignalRecord):    
-        raise DeprecationWarning
+  
         self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
- 
-    
-        indChannels   = [ind for lab, ind in zip(self.labels, range(len(self.labels))) if lab in signalNames]    
-        channelFreqs = [sr  for lab, sr  in zip(self.labels, self.channelFreqs)      if lab in signalNames] 
-        channelTypes  = [ct  for lab, ct  in zip(self.labels, self.channelType)        if lab in signalNames] 
 
-    
-        recordedSignals = [array([]) for i in range(len(indChannels))]
+        returnData = {}
         indS = 0
         
        # print indChannels, channelFreqs, channelTypes, signalNames, self.labels
@@ -591,14 +562,19 @@ class HarmonieReader(EEGDBReaderBase):
         npBuffer = numpy.core.multiarray.int_asbuffer(ctypes.addressof(cBuffer[0].contents), 8*cBuffer[1])
         record = numpy.frombuffer(npBuffer, float)
         
-        for i in range(self.nbChannels):
-            nbSamples = self.channelFreqs[i]*timeDuration       
-            if i in indChannels:   
-                recordedSignals[indChannels.index(i)] = array(record[indS:int(indS+nbSamples)])
+        startDateTime = ole2datetime(ISignalRecord.GetStartTime()) #.strftime("%a, %d %b %Y %H:%M:%S +0000")   
+        for channel in self.labels:
+            nbSamples = self.channelFreqs[channel]*timeDuration       
+            if channel in signalNames:   
+                returnData[channel]                = RecordedChannel()                
+                returnData[channel].signal         = array(record[indS:int(indS+nbSamples)])
+                returnData[channel].samplingRate   = self.channelFreqs[channel]
+                returnData[channel].type           = self.channelType[channel]
+                returnData[channel].startTime      = startDateTime                   
                 
             indS += int(nbSamples)
 
-        return (channelFreqs, recordedSignals, channelTypes, ole2datetime(ISignalRecord.GetStartTime()), array(self.labels)[indChannels])
+        return returnData 
 
 
 

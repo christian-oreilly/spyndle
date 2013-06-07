@@ -103,3 +103,9 @@ def computeMST(sig, fs, m=None, k=None, fmin=None, fmax=None):
     
     return transpose(MST), fOut[iMin:iMax]  
 
+
+
+def computeST(sig, fs, fmin=None, fmax=None):        
+    return computeMST(sig, fs, m=0.0, k=1.0, fmin=fmin, fmax=fmax)
+    
+    

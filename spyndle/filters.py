@@ -123,10 +123,14 @@ class Filter:
     
         if self.ftype == "FIR":
             
-            if self.useFiltFilt:
-                sig2filt = filtfilt_FFTWEAVE(self.b, sig2filt, padtype='even')
-            else:
-                sig2filt = filt_FFTWEAVE(self.b, sig2filt, padtype='even')       
+            try:
+                if self.useFiltFilt:
+                    sig2filt = filtfilt_FFTWEAVE(self.b, sig2filt, padtype='even')
+                else:
+                    sig2filt = filt_FFTWEAVE(self.b, sig2filt, padtype='even')       
+            except ValueError:
+                print "order:", self.order
+                raise
 
         else:
             Nd = min(3*self.samplingRate, len(sig2filt))   

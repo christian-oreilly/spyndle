@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 """
  Pure python implementation of the fast ST transformed as proposed in [1].This
  code inspired from the PyGFT package proposed by these authors. It is 
