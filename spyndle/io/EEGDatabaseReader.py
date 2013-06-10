@@ -19,6 +19,7 @@
 from scipy import array, arange
 from scipy.io import loadmat
 
+import re
 import datetime
 import time
 from lxml import etree  
@@ -312,8 +313,9 @@ class Event:
                 
                 #root.append(propertyElem)
                 
-                # XML properties cannot contain space characters. Substituting them by "_".                
-                root.set(unicode(propKey.replace(' ', '_')), unicode(self.properties[propKey])) 
+                # We replace all non alphanumeric characters by "_" to make sure
+                # the property name is valid for XML representation.
+                root.set(unicode(re.sub('[^0-9a-zA-Z]+', '_', propKey)), unicode(self.properties[propKey])) 
                 
         except ValueError :
             print self.properties
