@@ -53,9 +53,9 @@ from scipy import where, zeros, transpose, arange, shape, diff, sign
 from scipy.integrate import trapz
 
 
-from ..utils import diff2
+from spyndle.utils import diff2
 #from ..filters import Filter
-from ..STransform import computeMST
+from spyndle.STransform import computeMST
 
 
 
