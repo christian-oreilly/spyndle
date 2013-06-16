@@ -405,8 +405,9 @@ class EDFReader(EEGDBReaderBase) :
             #print rawRecord[EVENT_CHANNEL].decode('utf-8')            
             
             # The first index is the mendatory time keeping event. We record it separately.
-            self.recordStartTime.append(EDFEvent((tals[0][0], tals[0][1], tals[0][2]))) 
-         
+            # The time duration of this time keeping event is left blank but we know that records
+            # are of a duration given by self.header.recordDuration
+            self.recordStartTime.append(EDFEvent((tals[0][0], self.header.recordDuration, ""))) 
             
             for talEvent in tals[1:] : 
                 # One TAL can contain many events wit the same startTime/Duration properties
@@ -633,7 +634,7 @@ class EDFReader(EEGDBReaderBase) :
             pageDuration  = startTimeEvent.timeLength
             
             if pageStartTime + pageDuration >= startTime:
-                pages.append(self.readPage(signalNames, noPage))
+                pages.append(self.readPage(signalNames, noPage+1))
             
             if pageStartTime + pageDuration >= startTime + timeDuration:    
                 break
@@ -652,6 +653,7 @@ class EDFReader(EEGDBReaderBase) :
         for channel in info.recordedSignals:
             time = info.getStartTime() + arange(len(info.recordedSignals[channel]))/info.samplingRates[channel]
             ind  = where((time >= startTime)*(time <= startTime + timeDuration))[0]
+            
             assert(len(ind)>0)
 
 
@@ -684,6 +686,7 @@ class EDFReader(EEGDBReaderBase) :
                 
         
     def readPage(self, channelList, pageId):
+        # PageId are numbered starting from 1, not from 0.
 
         # Position the file cursor to the begin of the page no. pageId :
         pagePosition = self.header.headerNbBytes  + (pageId-1)*self.header.recordSize
