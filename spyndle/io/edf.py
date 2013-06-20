@@ -626,6 +626,28 @@ class EDFReader(EEGDBReaderBase) :
             return data    
 
 
+
+    """
+     Return the time associated with the next sample following startTime. Return
+     None if there is no sample next to startTime.
+    """
+    def getNextSampleStartTime(self, signalName, startTime):
+             
+        for noPage, startTimeEvent in enumerate(self.recordStartTime):
+            pageStartTime = startTimeEvent.startTime
+            pageDuration  = startTimeEvent.timeLength
+            
+            if pageStartTime + pageDuration >= startTime:
+                page = self.readPage([signalName], noPage+1)   
+                
+                time = page.getStartTime() + arange(len(page.recordedSignals[signalName]))/page.samplingRates[signalName]
+                IND = where(time >= startTime)[0]
+                if len(IND) :
+                    return time[IND[0]]                      
+
+        return None 
+
+
     def read(self, signalNames, startTime, timeDuration):
                 
         pages = []
@@ -648,6 +670,7 @@ class EDFReader(EEGDBReaderBase) :
             for page in pages[1:]:
                 for key in page.recordedSignals:
                     info.recordedSignals[key] = concatenate((info.recordedSignals[key], page.recordedSignals[key]))
+
 
         returnData = {}  
         for channel in info.recordedSignals:
