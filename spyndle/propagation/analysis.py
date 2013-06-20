@@ -11,7 +11,7 @@ import re
 from pandas import DataFrame, read_csv
 from glob import glob
 from scipy import unique, where, percentile, concatenate, array, mod, arange
-from scipy import isnan, sqrt, nan, logical_not, reshape
+from scipy import isnan, sqrt, nan, logical_not, reshape, median, std
 from sklearn.covariance import MinCovDet
 
 
@@ -368,12 +368,20 @@ def computeAveragePropagation(path, aggeragationlevels,
             
             #valids = !(X %in% outTau$out) & !is.na(X)
             if len(validX) >= 10 :
-                # MinCovDet().fit() crashes if we don't make this reshape...
-                validX = reshape(validX, (len(validX), 1))
-                
-                covX    = MinCovDet().fit(validX)
-                meanX   = covX.location_[0]
-                sdX     = sqrt(covX.covariance_[0, 0])
+                try:
+                    # MinCovDet().fit() crashes if we don't make this reshape...
+                    validX = reshape(validX, (len(validX), 1))
+                    covX    = MinCovDet().fit(validX)
+                    meanX   = covX.location_[0]
+                    sdX     = sqrt(covX.covariance_[0, 0])
+                except ValueError:
+                    # When the spindle detection resulted in discretized values
+                    # of spindle characteristics, the distribution of the variable
+                    # might not be acceptable for MCD algorithm which craches
+                    # with a "ValueError: expected square matrix" error. In these
+                    # time we fall back to simple statistics. 
+                    meanX   = median(validX)
+                    sdX     = std(0.0)                        
             else:
                 meanX   = nan
                 sdX     = nan     
@@ -476,8 +484,8 @@ def computeAveragePropagation(path, aggeragationlevels,
          
     meanData.to_csv(path + "meanData.csv", sep=";")
     
-path= 'C:\\DATA\\Julie\\Results\\'
-computeAveragePropagation(path, aggeragationlevels = ["ref", "test"],
-                              observationVariables = ["RMSamp", "delay", "duration", "meanFreq", 
-                                                      "similarity", "slope", "slopeOrigin"], 
-                                                      pattern="correctedData_*.csv",  verbose=True)    
+#path= 'C:\\DATA\\Julie\\Results\\'
+#computeAveragePropagation(path, aggeragationlevels = ["ref", "test"],
+#                              observationVariables = ["RMSamp", "delay", "duration", "meanFreq", 
+#                                                      "similarity", "slope", "slopeOrigin"], 
+#                                                      pattern="correctedData_*.csv",  verbose=True)    
