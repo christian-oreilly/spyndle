@@ -227,16 +227,26 @@ class HarmonieReader(EEGDBReaderBase):
         #	ATTENTION : Il n'y a toujours qu'un seul montage d'enregistrement, à l'index '0'
         self.IRecordingMontage = self.IPhysicalMontage.GetRecordingMontage(0)
 
-        self.basePageNbSamples  = int(self.IRecordingMontage.GetBaseSampleFrequency()*self.pageDuration)
-        self.trueBaseFreq       = self.IRecordingCalibration.GetTrueSampleFrequency()        
-        self.baseFreq           = self.IRecordingMontage.GetBaseSampleFrequency()             
-        self.nbChannels         = self.IRecordingMontage.GetChannelCount()
+        # We now avoid to use IRecordingMontage.GetBaseSampleFrequency() and always
+        # use self.IRecordingMontage.GetBaseSampleFrequency() to avoid any confusion.
+        self.trueBaseFreq      = self.IRecordingCalibration.GetTrueSampleFrequency()        
+        self.basePageNbSamples  = int(round(self.trueBaseFreq*self.pageDuration))   
+        
+        # We adjuste the page duration to account for the fact that it may not
+        # be exactly X seconds as the true base frequency is not an integer
+        # but a float.
+        self.pageDuration       = self.basePageNbSamples/self.trueBaseFreq
+        
+        self.nbChannels         = self.IRecordingMontage.GetChannelCount()     
         
         self.labels             = [self.IRecordingMontage.GetChannelLabel(i)  for i in range(self.nbChannels)]    
-        
+
+
+        freqCorrectFactor  = self.trueBaseFreq/self.IRecordingMontage.GetBaseSampleFrequency()       
+    
         self.channelFreqs = {}
         for i in range(self.nbChannels):
-            self.channelFreqs[self.labels[i]] = self.IRecordingMontage.GetChannelSampleFrequency(i)
+            self.channelFreqs[self.labels[i]] = self.IRecordingMontage.GetChannelSampleFrequency(i)*freqCorrectFactor
             
         self.pageNbSamples = {}
         for channel in self.channelFreqs:
@@ -364,7 +374,7 @@ class HarmonieReader(EEGDBReaderBase):
         
         
     def getDuration(self):    # en secondes
-        return float(self.ISignalFile.GetRecordCount(1))/self.baseFreq       
+        return float(self.nbSamples)/self.trueBaseFreq       
 
     def getNbSample(self, channel=None):
         if channel is None:
@@ -373,6 +383,7 @@ class HarmonieReader(EEGDBReaderBase):
             if not (isinstance(channel, str) or isinstance(channel, unicode)):
                 raise TypeError 
             return int(self.getDuration()*self.channelFreqs[channel])
+            
         
     def getElectrodesLabels(self):
         return self.labels
@@ -391,7 +402,8 @@ class HarmonieReader(EEGDBReaderBase):
         # TODO: Évaluer la possibilité d'utiliser GetRecordBuffer pour augmenter l'efficacité...
         record = ISignalRecord.GetRecordData()
         for channel in self.labels :
-            nbSamples = int(self.getInfoPages(pageNo).getNbSamples()/self.baseFreq*self.channelFreqs[channel])  
+            nbSamples = int(self.getInfoPages(pageNo).getNbSamples()/self.trueBaseFreq*self.channelFreqs[channel])  
+                 
             if channel in signalNames:
                 # Get the number of sample associate to this channel 
                 recordedSignals[channel] = array(record[indS:(indS+nbSamples)])
@@ -524,10 +536,10 @@ class HarmonieReader(EEGDBReaderBase):
             
             indS = 0
             for channel in self.labels :
-                channelNbSample = int(nbSamples/self.baseFreq*self.channelFreqs[channel])  
+                channelNbSample = int(nbSamples/self.trueBaseFreq*self.channelFreqs[channel])  
                 
                 if channel in signalNames:
-                    channelStartSample = int(startSample/self.baseFreq*self.channelFreqs[channel])   
+                    channelStartSample = int(startSample/self.trueBaseFreq*self.channelFreqs[channel])   
                     # Get the number of sample associate to this channel 
                     print noPass, nbSamples, channel, channelStartSample, channelNbSample
                     returnData[channel].signal[channelStartSample:(channelStartSample+channelNbSample)] = array(record[indS:(indS+channelNbSample)])
@@ -547,7 +559,7 @@ class HarmonieReader(EEGDBReaderBase):
     #def readWithTime(self, signalNames, startTime, timeDuration):
     def read(self, signalNames, startTime, timeDuration):
                 
-        recordNbSample = timeDuration*self.baseFreq
+        recordNbSample = timeDuration*self.trueBaseFreq
         ISignalRecord = self.ISignalFile.CreateSignalRecord(int(recordNbSample))
         ISignalRecord.SetStartTime(secondToDays(startTime, self.startDay))
   
@@ -589,16 +601,12 @@ class HarmonieReader(EEGDBReaderBase):
         #if not channel in self.getChannelLabels() :
         #    raise 
 
-        correctionFactor = self.trueBaseFreq/self.baseFreq 
-
-        samplingRate = self.channelFreqs[channel]*correctionFactor
-        
         discontinuityEvent = [e for e in self.events if e.groupeName == "Discontinuity" or
                                                         e.groupeName == "Recording Start"]      
                                                         
         discontinuitySample = array([e.startSample for e in discontinuityEvent])                                                          
         # These sample are in base frequency. We must convert them in channel frequency.
-        discontinuitySample = discontinuitySample*self.channelFreqs[channel]/self.baseFreq 
+        discontinuitySample = discontinuitySample*self.channelFreqs[channel]/self.trueBaseFreq 
                                                         
         sampleTransitions = concatenate((discontinuitySample, [self.getNbSample(channel)]))
 
@@ -631,8 +639,8 @@ class HarmonieReader(EEGDBReaderBase):
         guessedDatetime    = ole2datetime(ISignalRecord.GetStartTime())   
         delta = searchedDatetime - guessedDatetime
         deltaSec = delta.days*24.0*3600.0 + delta.seconds + delta.microseconds/1000000.0
-        print guessedDatetime, searchedDatetime, delta, deltaSec, int(round(deltaSec*self.baseFreq) + approximativeSample)
-        return int(round(deltaSec*self.baseFreq) + approximativeSample)
+        print guessedDatetime, searchedDatetime, delta, deltaSec, int(round(deltaSec*self.trueBaseFreq) + approximativeSample)
+        return int(round(deltaSec*self.trueBaseFreq) + approximativeSample)
         
             
     def addEvent(self, eventName, startSample, sampleLength, channel, description=""):
@@ -930,20 +938,24 @@ class HarmonieReader(EEGDBReaderBase):
                 indS = 0                
                 for i, channel in enumerate(self.labels):
 
-                    # Get the number of sample associate to every channels 
-                    channelPageNbSample = int(page.getNbSamples()/self.baseFreq*self.channelFreqs[channel])                      
                     
+                            
                     # If this page is discontinuous within the .sig file, only 
                     # the part up to the discontinuity is used: the rest of 
                     # this EDF signal is padded with zeros to make it the correct
                     # size of a complete record.                    
                     if not page.isComplete:
+                        # Get the number of sample associate to the incomplete pages for that channel 
+                        channelPageNbSample = int(page.getNbSamples()/self.trueBaseFreq*self.channelFreqs[channel])  
+                        
                         recordedSignal = append(array(record[indS:(indS+channelPageNbSample)]), 
-                                                zeros(self.channelFreqs[channel]*self.pageDuration - channelPageNbSample))
+                                                zeros(self.pageNbSamples[channel] - channelPageNbSample))
+                        indS += channelPageNbSample
                     else:
-                        recordedSignal = array(record[indS:(indS+channelPageNbSample)])
+                        
+                        recordedSignal = array(record[indS:(indS+self.pageNbSamples[channel])])
+                        indS += self.pageNbSamples[channel]
 
-                    indS += channelPageNbSample
                     
                     
                     # WRITE RECORDED SIGNAL....
