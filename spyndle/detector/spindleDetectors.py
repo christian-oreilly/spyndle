@@ -526,6 +526,10 @@ class SpindleDectectorAmp(SpindleDectector):
                     
                     startSpinInd = samplesIndexes[where(spinMarkers == 1)[0]]
                     stopSpinInd  = samplesIndexes[where(spinMarkers == -1)[0]]
+                          
+                          
+                    if len(stopSpinInd) == 0 or len(startSpinInd) == 0:
+                        continue
                     
                     #The first marker should be a start marker.                
                     if stopSpinInd[0] < startSpinInd[0]:
@@ -749,6 +753,9 @@ class SpindleDectectorRMS(SpindleDectector):
                     
                     startSpinInd = samplesIndexes[where(spinMarkers == 1)[0]]
                     stopSpinInd  = samplesIndexes[where(spinMarkers == -1)[0]]
+                    
+                    if len(stopSpinInd) == 0 or len(startSpinInd) == 0:
+                        continue
                     
                     #The first marker should be a start marker.                
                     if stopSpinInd[0] < startSpinInd[0]:
