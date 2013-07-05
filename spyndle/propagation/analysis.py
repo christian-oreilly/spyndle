@@ -55,14 +55,23 @@ def getLinkedInd(Data, refRow, candidateInds):
 # Vérifie s'il y a une relation bidirectionnelle entre l'électrode ref et source
 # de noRow et si oui retourne l'indice de la ligne bidirectionnelle avec refRow
 def findBidirectionnality(Data, refRow, candidateInds):
-  # S'il y a plusieurs candidats, on ne garde que celui dont l'occurence est 
-  # la plus proche de celle de noRow. Cela correspond
-  # au premier indice de la liste.  
-  IND = where(array((Data["ref" ].iloc[refRow] == Data["test"].iloc[candidateInds])*(Data["test"].iloc[refRow] == Data["ref" ].iloc[candidateInds])))[0]
-  if len(IND) == 0:
-      return []
-  else:
-      return candidateInds[IND[0]]
+
+    # We make sure refRow is not in CandidateInds, else the function would trivially
+    # return refRow
+    if refRow in candidateInds:
+        candidateInds = candidateInds[candidateInds != refRow]
+        
+    
+    # S'il y a plusieurs candidats, on ne garde que celui dont l'occurence est 
+    # la plus proche de celle de noRow. Cela correspond
+    # au premier indice de la liste.  
+    IND = where(array((Data["ref" ].iloc[refRow] == Data["ref"].iloc[candidateInds])*
+                    (Data["test"].iloc[refRow] == Data["test" ].iloc[candidateInds])))[0]
+                                    
+    if len(IND) == 0:
+        return None
+    else:
+        return candidateInds[IND[0]]
 
 
 
@@ -105,26 +114,47 @@ def getNotOutliers(data, coef=1.5):
     return where((data <= Q3 + coef*(Q3-Q1))*(data >= Q1 - coef*(Q3-Q1)))[0]
 
 
+
+
+###########################################################################    
+# Computing the cutoff
+###########################################################################
+def computingCutOff(path, fileNameAsyncList, channelList, electrodeList, alpha):        
+
+    dataCutOff = DataFrame()
+    # For eletrodes of this recording night (these are the reference electrodes)
+    for refElectrode, refChannel, fileNameAsync in zip(electrodeList, channelList, fileNameAsyncList):
+        async = read_csv(path + fileNameAsync, sep=';') #"spindleDelays_offset_" + night + ".bdf_" + refChannel + ".txt", sep=";") 
+
+        for testElectrode, testChannel in zip(unique(electrodeList), unique(channelList)) :
+            if testElectrode != refElectrode: # and not any(is.na(async[nameSim])) :
+                if async["similarity_" + testChannel].shape[0]:
+                    cutoff = percentile(async["similarity_" + testChannel], 100-alpha)
+                    row = DataFrame({"ref":refElectrode, "test":testElectrode, 
+                                     "cutoff":cutoff}, index=[0])
+                    dataCutOff = dataCutOff.append(row, ignore_index=True)
+        
+    return dataCutOff
+
+        
+
+
+
+
+
+
+
 ###########################################################################    
 # FALSE DETECTION AND OUTLIERS REJECTION
 ###########################################################################
-def propagationRejection(path, night, nights, channels, electrodes, alpha, verbose = True):        
+def readingSyncData(path, night, fileNameSyncList, channelList, electrodeList):        
 
-    if verbose :
-        print "night:", night
     
-    DataProp        = DataFrame()
-    channelList     = [channel for strNight, channel in zip(nights, channels) if strNight == night ]
-    electrodeList   = [electrode for strNight, electrode in zip(nights, electrodes) if strNight == night ]
+    DataProp = DataFrame()
     # For eletrodes of this recording night (these are the reference electrodes)
-    for refElectrode, refChannel in zip(electrodeList, channelList):
+    for refElectrode, refChannel, fileNameSync in zip(electrodeList, channelList, fileNameSyncList):
         
-        if verbose :
-            print "ref:", refElectrode        
-        
-        sync  = read_csv(path + "spindleDelays_" + night + ".bdf_" + refChannel + ".txt", sep=";")
-        async = read_csv(path + "spindleDelays_offset_" + night + ".bdf_" + refChannel + ".txt", sep=";") 
-
+        sync  = read_csv(path + fileNameSync, sep=';')
 
         for testElectrode, testChannel in zip(unique(electrodeList), unique(channelList)) :
                      
@@ -133,33 +163,71 @@ def propagationRejection(path, night, nights, channels, electrodes, alpha, verbo
                 nameSim   = "similarity_" + testChannel   
                 nameDelay = "delay_" + testChannel   
                    
-                # Rejection because of a too low similarity
-                cutoff    = percentile(async[nameSim], 100-alpha)
-                IND1      = where(sync[nameSim] >= cutoff)[0] 
-                sim       = sync[nameSim][IND1]
-                delays    = sync[nameDelay][IND1]
+                sim       = sync[nameSim]
+                delays    = sync[nameDelay]
                 
-                # Expected false detection rate
-                FDR       = alpha/(float(len(sim))/len(sync[nameSim]))
-                
-                # Rejection of delays outliers
-                IND2      = getNotOutliers(delays)
-                sim       = sim.iloc[IND2]
-                delays    = delays.iloc[IND2]                          
                           
                 if len(sim):  
                     # Keep all the fields exctep the delay and similarity related ones
                     colNames =  [colName for colName in sync.columns.tolist() if not ("delay_" in colName or "similarity_" in colName)] 
-                    newData = sync[colNames].iloc[IND1[IND2]]
+                    newData = sync[colNames]
                     
                     # Add the other fields
-                    newData["night"]        = night
                     newData["ref"]          = refElectrode
                     newData["test"]         = testElectrode
                     newData["delay"]        = delays
                     newData["similarity"]   = sim
-                    newData["FDR"]          = FDR
+  
+                    DataProp = DataProp.append(newData, ignore_index=True)
+        
+    return DataProp
 
+
+
+###########################################################################    
+# FALSE DETECTION AND OUTLIERS REJECTION
+###########################################################################
+
+def propagationRejection(night, dataIn, dataCutOff, alpha, verbose = True):        
+
+    DataProp = DataFrame()
+    # For eletrodes of this recording night (these are the reference electrodes)
+    for refElectrode in unique(dataIn["ref"]):
+                
+        if verbose :
+            print "ref:", refElectrode     
+        
+        for testElectrode in unique(dataIn["test"]) :
+                     
+            if testElectrode != refElectrode: # and not any(is.na(async[nameSim])) :
+                
+                dataIn2   = dataIn.iloc[where((dataIn["ref"] == refElectrode)*(dataIn["test"] == testElectrode))[0]] 
+                   
+                # Rejection because of a too low similarity
+                cutoff    = dataCutOff["cutoff"].iloc[where((dataCutOff["ref"]  == refElectrode)*
+                                                            (dataCutOff["test"] == testElectrode))[0]]
+                if isinstance(cutoff, float): 
+                    pass                   
+                elif len(cutoff) == 0: 
+                    continue                                                         
+                                                      
+                IND1      = where(dataIn2["similarity"] >= float(cutoff))[0] 
+                if len(IND1) == 0: 
+                    continue
+                
+                # Expected false detection rate
+                FDR = (alpha/100.0)/(float(len(IND1))/len(dataIn2["similarity"]))
+                
+                # Rejection of delays outliers
+                IND2      = getNotOutliers(dataIn2["delay"].iloc[IND1])
+                          
+                if len(IND2):  
+                    # Keep all the fields exctep the delay and similarity related ones
+                    newData = dataIn2.iloc[IND1[IND2]]
+                    
+                    # Add the other fields
+                    newData["night"]        = night
+                    newData["FDR"]          = FDR
   
                     DataProp = DataProp.append(newData, ignore_index=True)
         
@@ -173,35 +241,36 @@ def propagationRejection(path, night, nights, channels, electrodes, alpha, verbo
    detected spindles on separated electrodes to postulate, from different observations
    on different channel, a same physiological entity (i.e., the SPF).
 """     
-def identifySPF(DataProp) :
+def identifySPF(dataProp) :
         
-    DataProp             = DataProp.sort("startTime")
-    DataProp             = DataProp.rename(dict(zip(DataProp.index.tolist(), range(len(DataProp)))))
+    dataProp             = dataProp.sort("startTime")
+    dataProp             = dataProp.rename(dict(zip(dataProp.index.tolist(), range(len(dataProp)))))
         
     delta                = 0.5
-    DataProp["source"]   = -1
-    DataProp["bidirect"] = -1
+    dataProp["source"]   = -1
+    dataProp["bidirect"] = -1
+    dataProp["noSpindle"]= -1
     
     # Compute the widht of the window in which we will be looking for coocuring 
     # sleep spindles. 
-    N = len(DataProp)
+    N = dataProp.shape[0]
     Window = min(10, N)
-    while min(DataProp["startTime"].iloc[Window:N] - DataProp["startTime"].iloc[0:(N-Window)]) < delta :
+    while min(array(dataProp.startTime[Window:N]) - 
+              array(dataProp.startTime[0:(N-Window)])) < delta :
       Window += 1
       if Window >= N:
           break
-    
     
     for noRow in range(N):
         if mod(noRow, 1000) == 0:
             print noRow, N
         
-        rowBiDir = DataProp["bidirect"].iloc[noRow]        
+        rowBiDir = dataProp.bidirect[noRow]        
         if rowBiDir > -1 :
 
             # On prend le temps moyen de propagation calculé de X à Y ce qui correspond à la moyenne
             # du délais de X à Y et de la valeur négative du délais de Y à X.
-            DataProp["delay"].iloc[rowBiDir] = (DataProp["delay"].iloc[rowBiDir] - DataProp["delay"].iloc[noRow])/2.0
+            dataProp.delay[rowBiDir] = sum(dataProp.delay[[rowBiDir, noRow]])/2.0
      
         else:
 
@@ -209,46 +278,64 @@ def identifySPF(DataProp) :
             #inds = which(DataInd$timeDiff[noRow:length(DataInd$timeDiff)] - DataInd$timeDiff[noRow] <= delta) + noRow-1
             # utilise beaucoup de temps de processeur, d'où l'importance d'utiliser une fenêre. Celle-ci nécessite
             # bien sûr que les valeurs de DataInd$timeDiff soit triées en ordre croissant.
-            inds = where(DataProp["startTime"].iloc[noRow:min(noRow+Window, N)] - 
-                         DataProp["startTime"].iloc[noRow] <= delta)[0] + noRow
+            inds = where(dataProp.startTime[noRow:min(noRow+Window, N)] - 
+                                                    dataProp.startTime[noRow] <= delta )[0] + noRow
             
             # On doit garder seulements les entrées liées à l'électrode Ref de noRow.
-            inds = getLinkedInd(DataProp, noRow, inds)            
-
+            inds = getLinkedInd(dataProp, noRow, inds)            
 
 
             # Si une ou plusieurs sources sont présumés pour noRow, on conserve celle dont 
             # le temps d'occurence est le plus près de celui de noRow.  Celle-ci sera la dernière 
             # découverte, ce qui ne nous oblige qu'à garder la dernière en mémoire.  
             # Notons qu'une source doit avoir une référence différente de celle de noRow
-            condition = array(DataProp["ref"].iloc[noRow] != DataProp["ref"].iloc[inds])
-            if isinstance(condition, bool) or isinstance(condition, list) :
-                DataProp["source"].iloc[inds[condition]] = noRow
+            condition = array(dataProp.ref[noRow] != dataProp.ref[inds])
+            if array(condition).shape == () :
+                condition = condition.reshape(1)
+            dataProp.source[inds[condition]] = noRow
   
   
-            # Enlever bidirectionnalité pour éviter que les délais se cancellent entre eux :
+            # Enlever bidirectionnalité :
             # Si une ou plusieurs relations bidirectionnelles ont étées détectées avec
             # noRow, on considère celle dont le temps d'occurence est le plus près de celui
             # de noRow. Celle-ci sera la dernière découverte, ce qui ne nous oblige 
             # qu'à garder la dernière en mémoire. On réécrit donc directement sur toute relations
             # bidirectionnelles ayant été déjà trouvées.
-            DataProp["bidirect"].iloc[findBidirectionnality(DataProp, noRow, inds)] = noRow
+            indBidir = findBidirectionnality(dataProp, noRow, inds)
+            if not indBidir is None :
+                # We mark one (the first one) row as being bidirectionnal
+                # by putting its bidirect attribute to -2. This row will be kept
+                # and its delay will be the average of the two delays of the
+                # bidirectionnal relationship. Labelling it -2 distinguished by
+                # the non bidirectionnal channel pairs which are all labels -1
+                dataProp.bidirect[noRow]    = -2   
+                
+                # To mark the other (the second one) ow of the bidirectionnal
+                # relationship as being linked to the first on by indicating
+                # the row of the first row as its bidirect attribute. Once it
+                # has been used to compute the average delay, this second row
+                # will be removed.
+                dataProp.bidirect[indBidir] = noRow  
+                
 
     
-    DataProp["noSpindle"] = -1
-    DataSourceM1 = DataProp[DataProp["source"] == -1]
+    DataSourceM1 = dataProp[dataProp.source == -1]
     dataTmp = DataSourceM1[["startTime", "ref"]].drop_duplicates()
-    for iRowTmp in range(len(dataTmp)) :
-        DataSourceM1["noSpindle"][ (DataSourceM1["startTime"] == dataTmp["startTime"].iloc[iRowTmp])* 
-                      (DataSourceM1["ref"]       == dataTmp["ref"].iloc[iRowTmp])] = iRowTmp   
+    for iRowTmp, startTime, ref in zip(range(len(dataTmp)), dataTmp.startTime, dataTmp.ref) :
+               
+        #TODO: voir cas inversés
+        DataSourceM1.noSpindle[(DataSourceM1.startTime == startTime)*(DataSourceM1.ref == ref) ] = iRowTmp   
     
-    DataProp[DataProp["source"] == -1] = DataSourceM1
+    dataProp[dataProp.source == -1] = DataSourceM1
 
-    while any(DataProp["noSpindle"] == -1) :
-        iRowTmp = arange(len(DataProp))[DataProp["noSpindle"] == -1]
-        DataProp["noSpindle"].iloc[iRowTmp] = array(DataProp["noSpindle"].iloc[array(DataProp["source"].iloc[iRowTmp], dtype=int)])
+    inds = arange(len(dataProp))
+    while any(dataProp.noSpindle == -1) :
+        iRowTmp = inds[dataProp.noSpindle == -1]        
+        sources = array(dataProp.source[iRowTmp], dtype=int)
+        dataProp.noSpindle[iRowTmp] = array(dataProp.noSpindle[sources], dtype=int)  
 
-    return DataProp
+
+    return dataProp
 
 
 """
@@ -260,7 +347,10 @@ def identifySPF(DataProp) :
 """
 def removeBidirectionnalDuplicates(dataProp):
     
-    return dataProp.drop(dataProp["bidirect"] == -1)
+    dataRet = dataProp[dataProp["bidirect"] <= -1]
+    dataRet.bidirect[dataRet.bidirect == -1] = 0
+    dataRet.bidirect[dataRet.bidirect == -2] = 1
+    return dataRet
 
 
 
@@ -270,12 +360,14 @@ def removeBidirectionnalDuplicates(dataProp):
 """
 def negativeDelayCorrection(dataProp): 
             
-    indNeg                     = dataProp["delay"] < 0.0   
-    test                       = dataProp["test"][indNeg]
-    ref                        = dataProp["ref"][indNeg]
-    dataProp["delay"][indNeg]  = -dataProp["delay"][indNeg]
-    dataProp["ref"][indNeg]    = test
-    dataProp["test"][indNeg]   = ref
+    indNeg                          = dataProp["delay"] < 0.0   
+    test                            = dataProp["test"][indNeg]
+    ref                             = dataProp["ref"][indNeg]
+    dataProp["delay"][indNeg]       = -dataProp["delay"][indNeg]
+    dataProp["ref"][indNeg]         = test
+    dataProp["test"][indNeg]        = ref
+    dataProp["inverted"]            = 0
+    dataProp["inverted"][indNeg]    = 1
 
     return dataProp
 
@@ -297,7 +389,7 @@ def negativeDelayCorrection(dataProp):
  TODO:  Maybe object which contain the rules for obtaining the files and 
         its information (suject, nights, etc.) should be passed instead.
 """
-def computeSPF(path, offsetFilePattern="spindleDelays_offset_*.bdf_*.txt", 
+def computeSPF_allFiles(path, offsetFilePattern="spindleDelays_offset_*.bdf_*.txt", 
                includeElectrodePatterns=['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 
                                          'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 
                                          'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz', 'Oz'],
@@ -318,30 +410,68 @@ def computeSPF(path, offsetFilePattern="spindleDelays_offset_*.bdf_*.txt",
     # for each subject in the file list
     for night in unique(nights):
         
-        # FALSE DETECTION AND OUTLIERS REJECTION
-        dataProp = propagationRejection(path, night, nights, channels, electrodes, alpha, verbose)        
-    
-        # COMPUTING SPINDLE PROPAGATION FIELD      
-        dataProp = identifySPF(dataProp)            
-    
-    
-        # REMOVING DUPLICATE PROPAGATION DUE TO BIDIRECTIONNALITY
-        if verbose: 
-            print "removing duplicates"        
-        dataProp = removeBidirectionnalDuplicates(dataProp)  
-    
-                   
-        # CORRECTING DELAYS TO HAVE ONLY PROPAGATION WITH POSITIVE TIME DELAYS 
-        if verbose: 
-            print "correctin delays"   
-        dataProp = negativeDelayCorrection(dataProp)
-
-        # Saving the result.
-        dataProp.to_csv(path + "correctedData_" + night + ".csv", sep=";")
+        channelList     = [channel for strNight, channel in zip(nights, channels) if strNight == night ]
+        electrodeList   = [electrode for strNight, electrode in zip(nights, electrodes) if strNight == night ]
         
-               
-               
-               
+        fileNameSyncList  = []
+        fileNameAsyncList = [] 
+        # For eletrodes of this recording night (these are the reference electrodes)
+        for refElectrode, refChannel in zip(electrodeList, channelList):
+            
+            if verbose :
+                print "ref:", refElectrode        
+            
+            fileNameSyncList.append("spindleDelays_" + night + ".bdf_" + refChannel + ".txt")
+            fileNameAsyncList.append("spindleDelays_offset_" + night + ".bdf_" + refChannel + ".txt")
+    
+        computeSPF(path, night, fileNameSyncList, fileNameAsyncList, channelList, electrodeList, alpha, verbose)        
+        
+       
+       
+       
+       
+       
+def computeSPF(path, night, fileNameSyncList, fileNameAsyncList, channelList, electrodeList, alpha = 10.0, verbose = True):        
+                
+
+    if verbose :
+        print "Computing cutoff for night ", night
+    
+
+    # Computing cutoff threshold from asychronized comparisons
+    dataCutOff = computingCutOff(path, fileNameAsyncList, 
+                                    channelList, electrodeList, alpha)
+                                    
+    # Reading synchronized comparisons
+    dataProp = readingSyncData(path, night, fileNameSyncList,
+                                    channelList, electrodeList)
+    
+    
+    # Saving the result.
+    dataProp.to_csv(path + "test_" + night + ".csv", sep=";")    
+    
+    # CORRECTING DELAYS TO HAVE ONLY PROPAGATION WITH POSITIVE TIME DELAYS 
+    if verbose: 
+        print "correcting negative delays"   
+    dataProp = negativeDelayCorrection(dataProp)    
+
+    # FALSE DETECTION AND OUTLIERS REJECTION
+    dataProp = propagationRejection(night, dataProp, dataCutOff, alpha, verbose)
+
+    # COMPUTING SPINDLE PROPAGATION FIELD      
+    dataProp = identifySPF(dataProp)            
+
+    # REMOVING DUPLICATE PROPAGATION DUE TO BIDIRECTIONNALITY
+    if verbose: 
+        print "removing duplicates"        
+    dataProp = removeBidirectionnalDuplicates(dataProp)  
+
+    # Saving the result.
+    dataProp.to_csv(path + "correctedData_" + night + ".csv", sep=";")
+    
+           
+           
+           
                
                
                
