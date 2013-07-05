@@ -11,24 +11,7 @@
 #
 ###############################################################################
 
-
-
 # -*- coding: utf-8 -*-
-
-'''
-
-Reader for EDF+ files.
-TODO:
- - add support for log-transformed channels:
-   http://www.edfplus.info/specs/edffloat.html and test with 
-   data generated with 
-   http://www.edfplus.info/downloads/software/NeuroLoopGain.zip.
- - check annotations with Schalk's Physiobank data.
-
-ORIGINAL CODE from Boris Reuderink (Copyright (c) 2012).
-Modification by Christian O'Reilly (Copyright (c) 2013)
-'''
-
 
 '''
  We consider the record concept of EDF as equivalent to the page concept in
@@ -372,12 +355,11 @@ class EDFHeader :
 class EDFReader(EEGDBReaderBase) :
     def __init__(self, fname):        
         self.fileName = fname
-        self.file     = io.open(fname, 'rb')
+        with io.open(fname, 'rb') as fileObj:
+            self.header = EDFHeader(fileObj, self.fileName)  
         
-        self.header = EDFHeader(self.file, self.fileName)  
-        
-        super(EDFReader, self).__init__(self.getPageDuration())        
-        self.readEvents()        
+            super(EDFReader, self).__init__(self.getPageDuration())        
+            self.readEvents(fileObj)        
         
         
         
@@ -391,15 +373,15 @@ class EDFReader(EEGDBReaderBase) :
         return [v for v in self.header.channelLabels if not v == EVENT_CHANNEL]        
         
         
-    def readEvents(self):
+    def readEvents(self, fileObj):
         self.events          = []
         self.recordStartTime = []
         
-        self.file.seek(self.header.headerNbBytes)        
+        fileObj.seek(self.header.headerNbBytes)        
 
         #indEventChannel = self.header.label.index(EVENT_CHANNEL)
         for noPage in range(self.getNbPages()):   
-            rawRecord = self.readRawRecord()  
+            rawRecord = self.readRawRecord(fileObj)  
             tals      = tal(rawRecord[EVENT_CHANNEL])
                        
             #print rawRecord[EVENT_CHANNEL].decode('utf-8')            
@@ -441,42 +423,40 @@ class EDFReader(EEGDBReaderBase) :
         tempFileName = tempPath + "temp-" + str(uuid.uuid1()) + "-" + os.path.basename(self.fileName)
                 
         
-        self.fileWrite  = io.open(tempFileName, 'wb')
+        with io.open(tempFileName, 'wb') as fileWrite:
+            with io.open(self.fileName, 'rb') as fileObj:
+            
+                # Computing the strings representing the EDF annotations
+                eventStings = self.computeEDFAnnotations(fileWrite)       
+                               
+                # Any modifications to the header for the writing must be made in a copied
+                # header as it must not alter the reading of the file for the duration
+                # of the saving operation.
+                writeHeader = deepcopy(self.header)
+                
+                # Verifying if the annotation field is large enough to record the annotations.
+                # If not, enlarge it on the writing copy.
+                if max([len(s) for s in eventStings]) >= self.header.nbSamplesPerRecord[EVENT_CHANNEL]*self.header.nbBytes:       
+                    writeHeader.nbSamplesPerRecord[EVENT_CHANNEL] = int(max([len(s) for s in eventStings])*1.2)
         
-        # Computing the strings representing the EDF annotations
-        eventStings = self.computeEDFAnnotations()       
-                       
-        # Any modifications to the header for the writing must be made in a copied
-        # header as it must not alter the reading of the file for the duration
-        # of the saving operation.
-        writeHeader = deepcopy(self.header)
+               
+                # Write the header
+                writeHeader.write(fileWrite)
         
-        # Verifying if the annotation field is large enough to record the annotations.
-        # If not, enlarge it on the writing copy.
-        if max([len(s) for s in eventStings]) >= self.header.nbSamplesPerRecord[EVENT_CHANNEL]*self.header.nbBytes:       
-            writeHeader.nbSamplesPerRecord[EVENT_CHANNEL] = int(max([len(s) for s in eventStings])*1.2)
-
-       
-        # Write the header
-        writeHeader.write(self.fileWrite)
-
-        # Write the body. Actually, we leave the data intact, updating only
-        # the annotation field.
-        for eventStr in eventStings:
-            rawRecord = self.readRawRecord()    
-            for channel in self.header.channelLabels:
-                if channel == EVENT_CHANNEL:    
-                    encodedString = eventStr.encode("utf8")                     
-                    self.fileWrite.write(encodedString + "\0"*(writeHeader.nbSamplesPerRecord[channel]*self.header.nbBytes - len(encodedString)) )  
-                else: 
-                    self.fileWrite.write(rawRecord[channel])
-
+                # Write the body. Actually, we leave the data intact, updating only
+                # the annotation field.
+                for eventStr in eventStings:
+                    rawRecord = self.readRawRecord(fileObj)    
+                    for channel in self.header.channelLabels:
+                        if channel == EVENT_CHANNEL:    
+                            encodedString = eventStr.encode("utf8")                     
+                            fileWrite.write(encodedString + "\0"*(writeHeader.nbSamplesPerRecord[channel]*self.header.nbBytes - len(encodedString)) )  
+                        else: 
+                            fileWrite.write(rawRecord[channel])
         
-        assert(self.fileWrite.tell() == writeHeader.headerNbBytes + sum(writeHeader.nbSamplesPerRecord.values())*writeHeader.nbBytes*self.getNbPages())
-
-        self.file.close()  
-        self.fileWrite.close()   
-        
+                
+                assert(fileWrite.tell() == writeHeader.headerNbBytes + sum(writeHeader.nbSamplesPerRecord.values())*writeHeader.nbBytes*self.getNbPages())
+            
         # Delete the original file
         os.remove(self.fileName)
  
@@ -492,7 +472,7 @@ class EDFReader(EEGDBReaderBase) :
      Compute the EDFAnnotations strings for each pages (records) from the 
      events contrained in the reader. Used internally by self.save(...)
     """
-    def computeEDFAnnotations(self):
+    def computeEDFAnnotations(self, fileObj):
 
         def prepareEventStr(timeDiff, events):
             if not isinstance(timeDiff, float):
@@ -515,7 +495,7 @@ class EDFReader(EEGDBReaderBase) :
 
 
         # Position the file cursor just after the header.
-        self.file.seek(self.header.headerNbBytes)
+        fileObj.seek(self.header.headerNbBytes)
 
         # Computing the strings representing the EDF annotations
         eventStings = []
@@ -610,20 +590,21 @@ class EDFReader(EEGDBReaderBase) :
         if usePickled:
             raise NotImplementedError
         else:
-            self.file.seek(self.header.headerNbBytes)        
+            with io.open(self.fileName, 'rb') as fileObj:
+                fileObj.seek(self.header.headerNbBytes)        
 
-            data = RecordedChannel()         
-            data.samplingRate   = self.header.nbSamplesPerRecord[signalName]/self.header.recordDuration
-            data.type           = "EEG"
-            data.startTime      = self.header.startDateTime          
-            
-            signal = []
-            for noPage in range(self.getNbPages()):                  
-                dig = self.byteStr2integers(self.readRawRecord()[signalName])
-                signal.extend(self.digital2physical(dig, signalName))
+                data = RecordedChannel()         
+                data.samplingRate   = self.header.nbSamplesPerRecord[signalName]/self.header.recordDuration
+                data.type           = "EEG"
+                data.startTime      = self.header.startDateTime          
                 
-            data.signal = array(signal)
-            return data    
+                signal = []
+                for noPage in range(self.getNbPages()):                  
+                    dig = self.byteStr2integers(self.readRawRecord(fileObj)[signalName])
+                    signal.extend(self.digital2physical(dig, signalName))
+                    
+                data.signal = array(signal)
+                return data    
 
 
 
@@ -648,7 +629,7 @@ class EDFReader(EEGDBReaderBase) :
         return None 
 
 
-    def read(self, signalNames, startTime, timeDuration):
+    def read(self, signalNames, startTime, timeDuration, debug=False):
                 
         pages = []
         for noPage, startTimeEvent in enumerate(self.recordStartTime):
@@ -670,6 +651,14 @@ class EDFReader(EEGDBReaderBase) :
             for page in pages[1:]:
                 for key in page.recordedSignals:
                     info.recordedSignals[key] = concatenate((info.recordedSignals[key], page.recordedSignals[key]))
+
+
+        if debug:
+            channel = info.recordedSignals.keys()[0]
+            time = info.getStartTime() + arange(len(info.recordedSignals[channel]))/info.samplingRates[channel]
+            print "Reader : ", len(pages), startTime, timeDuration, time, info.samplingRates[channel]
+
+
 
 
         returnData = {}  
@@ -713,9 +702,10 @@ class EDFReader(EEGDBReaderBase) :
 
         # Position the file cursor to the begin of the page no. pageId :
         pagePosition = self.header.headerNbBytes  + (pageId-1)*self.header.recordSize
-        self.file.seek(pagePosition)
-   
-        record = self.readRecord()
+        with io.open(self.fileName, 'rb') as fileObj:
+            fileObj.seek(pagePosition)
+            record = self.readRecord(fileObj)
+            
         sigStart = record[0]        
         
         recordedSignals = {}
@@ -739,8 +729,6 @@ class EDFReader(EEGDBReaderBase) :
                
         
 
-    def __del__(self):
-        self.file.close()
 
       
       
@@ -749,13 +737,13 @@ class EDFReader(EEGDBReaderBase) :
      Read a record and return a dictionnary indexed by the signal labels
      containing arrays with raw bytes.  
     '''        
-    def readRawRecord(self):
+    def readRawRecord(self, fileObj):
 
         result = {}
         
         for channel in self.header.channelLabels:
             nbBytes = self.header.nbSamplesPerRecord[channel]*self.header.nbBytes
-            result[channel] = self.file.read(nbBytes)
+            result[channel] = fileObj.read(nbBytes)
             if len(result[channel]) != nbBytes :
                 raise EOFError  
                 
@@ -766,9 +754,9 @@ class EDFReader(EEGDBReaderBase) :
      Read a raw record, convert it to a (time, signals, events) tuple based on
      information in the header, and return it.
     '''    
-    def readRecord(self):
+    def readRecord(self, fileObj):
 
-        rawRecord = self.readRawRecord()    
+        rawRecord = self.readRawRecord(fileObj)    
         
         #dig_min, phys_min, gain = self.dig_min, self.phys_min, self.gain
             
@@ -794,11 +782,7 @@ class EDFReader(EEGDBReaderBase) :
         raise NotImplemented
 
 
-
-
-    
-
-
+    """
     def records(self):
         '''
         Record generator.
@@ -808,7 +792,7 @@ class EDFReader(EEGDBReaderBase) :
             yield self.readRecord()
         except EOFError:
           pass
-
+    """
 
         
         
