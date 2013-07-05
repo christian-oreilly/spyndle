@@ -34,6 +34,10 @@ OLE_TIME_ZERO = datetime(1899, 12, 30, 0, 0, 0)
 def ole2datetime(oledt):
     return OLE_TIME_ZERO + timedelta(days=float(oledt))
 
+def datetime2ole(dateTimeObj):
+    d = dateTimeObj - OLE_TIME_ZERO
+    return d.days + d.seconds/float(3600*24) + d.microseconds/float(3600*24*1000000)
+
 # Harmonie constants
 SIGNALFILE_FLAGS_READONLY =         0x00000001
 SIGNALFILE_FLAGS_WRITEONLY =        0x00000002
@@ -554,6 +558,37 @@ class HarmonieReader(EEGDBReaderBase):
 
 
 
+
+    """
+     The API does not seem to provide any convenient way to get the sample corresponding
+     to a time (using ISignalRecord.SetStartTime(startTime)  
+     and then reading the record does not work). Thus this function performe this
+     work.
+    """
+    def getSampleFromTime(self, time):
+        
+        approxTime   = 0.0
+        approxSample = 0
+        ISignalRecord = self.ISignalFile.CreateSignalRecord(10) 
+        
+        i = 0
+        while i < 30 and abs(time - approxTime) > 0.5/self.trueBaseFreq:
+            approxSample += int(round((time - approxTime)*self.trueBaseFreq))     
+            if approxSample > self.nbSamples:
+                approxSample = self.nbSamples
+                
+            ISignalRecord.SetStartSample(approxSample)        
+            self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
+            startDateTime = ole2datetime(ISignalRecord.GetStartTime())
+            
+            approxTime = (startDateTime - self.recordingStartDateTime).total_seconds()  
+        
+        if i == 30:
+            raise "Failed to get sample from time."
+        else:
+            return approxSample
+
+
     # La fonctionnalité ISignalRecord.SetStartTime ne semble pas pouvoir être utilisée
     # pour la lecture.
     #def readWithTime(self, signalNames, startTime, timeDuration):
@@ -561,20 +596,17 @@ class HarmonieReader(EEGDBReaderBase):
                 
         recordNbSample = timeDuration*self.trueBaseFreq
         ISignalRecord = self.ISignalFile.CreateSignalRecord(int(recordNbSample))
-        ISignalRecord.SetStartTime(secondToDays(startTime, self.startDay))
-  
+        ISignalRecord.SetStartSample(self.getSampleFromTime(startTime))   
         self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
 
         returnData = {}
         indS = 0
         
-       # print indChannels, channelFreqs, channelTypes, signalNames, self.labels
-                
         cBuffer = ISignalRecord.GetRecordBuffer()        
         npBuffer = numpy.core.multiarray.int_asbuffer(ctypes.addressof(cBuffer[0].contents), 8*cBuffer[1])
         record = numpy.frombuffer(npBuffer, float)
         
-        startDateTime = ole2datetime(ISignalRecord.GetStartTime()) #.strftime("%a, %d %b %Y %H:%M:%S +0000")   
+        startDateTime = ole2datetime(ISignalRecord.GetStartTime()) #.strftime("%a, %d %b %Y %H:%M:%S +0000")      
         for channel in self.labels:
             nbSamples = self.channelFreqs[channel]*timeDuration       
             if channel in signalNames:   
@@ -632,15 +664,15 @@ class HarmonieReader(EEGDBReaderBase):
 
     # Patch parce qu'il semble y avoir un problème avec le temps associé
     # aux fuseaux de Gaétan
-    def getSampleFromTime(self, approximativeSample, searchedDatetime):
-        ISignalRecord = self.ISignalFile.CreateSignalRecord(1)
-        ISignalRecord.SetStartSample(approximativeSample)
-        self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
-        guessedDatetime    = ole2datetime(ISignalRecord.GetStartTime())   
-        delta = searchedDatetime - guessedDatetime
-        deltaSec = delta.days*24.0*3600.0 + delta.seconds + delta.microseconds/1000000.0
-        print guessedDatetime, searchedDatetime, delta, deltaSec, int(round(deltaSec*self.trueBaseFreq) + approximativeSample)
-        return int(round(deltaSec*self.trueBaseFreq) + approximativeSample)
+    #def getSampleFromTime(self, approximativeSample, searchedDatetime):
+    #    ISignalRecord = self.ISignalFile.CreateSignalRecord(1)
+    #    ISignalRecord.SetStartSample(approximativeSample)
+    #    self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
+    #    guessedDatetime    = ole2datetime(ISignalRecord.GetStartTime())   
+    #    delta = searchedDatetime - guessedDatetime
+    #    deltaSec = delta.days*24.0*3600.0 + delta.seconds + delta.microseconds/1000000.0
+    #    print guessedDatetime, searchedDatetime, delta, deltaSec, int(round(deltaSec*self.trueBaseFreq) + approximativeSample)
+    #    return int(round(deltaSec*self.trueBaseFreq) + approximativeSample)
         
             
     def addEvent(self, eventName, startSample, sampleLength, channel, description=""):
@@ -950,12 +982,11 @@ class HarmonieReader(EEGDBReaderBase):
                         
                         recordedSignal = append(array(record[indS:(indS+channelPageNbSample)]), 
                                                 zeros(self.pageNbSamples[channel] - channelPageNbSample))
-                        indS += channelPageNbSample
                     else:
                         
                         recordedSignal = array(record[indS:(indS+self.pageNbSamples[channel])])
-                        indS += self.pageNbSamples[channel]
 
+                    indS += channelPageNbSample
                     
                     
                     # WRITE RECORDED SIGNAL....
