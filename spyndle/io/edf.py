@@ -424,8 +424,38 @@ class EDFReader(EEGDBReaderBase) :
         # to create a completely new file and swap it with the original.
         tempFileName = tempPath + "temp-" + str(uuid.uuid1()) + "-" + os.path.basename(self.fileName)
                 
+        self.saveAs(tempFileName)
+
+        # Try to delete the original file. This may failled because the file
+        # is used by another process (e.g., when running )        
+        for i in range(13):
+            try:
+                os.remove(self.fileName)
+            except WindowsError:
+                warn("Failed to remove " + self.fileName + ". Retrying in " + str(2**i) + " seconds.", UserWarning)
+                sleep(2**i)
+                continue
+            break            
+             
+        # rename the new file       
+        for i in range(13):
+            try:
+                os.rename(tempFileName, self.fileName)  
+            except WindowsError:
+                warn("Failed to remove " + self.fileName + ". Retrying in " + str(2**i) + " seconds.", UserWarning)
+                sleep(2**i)
+                continue
+            break          
         
-        with io.open(tempFileName, 'wb') as fileWrite:
+        # Reinit the object with the new file.
+        self.__init__(self.fileName)
+
+
+
+
+    def saveAs(self, saveFileName):
+
+        with io.open(saveFileName, 'wb') as fileWrite:
             with io.open(self.fileName, 'rb') as fileObj:
             
                 # Computing the strings representing the EDF annotations
@@ -444,6 +474,7 @@ class EDFReader(EEGDBReaderBase) :
                
                 # Write the header
                 writeHeader.write(fileWrite)
+                fileObj.seek(fileWrite.tell())
         
                 # Write the body. Actually, we leave the data intact, updating only
                 # the annotation field.
@@ -462,22 +493,7 @@ class EDFReader(EEGDBReaderBase) :
 
 
 
-        # Try to delete the original file. This may failled because the file
-        # is used by another process (e.g., when running )        
-        for i in range(13):
-            try:
-                os.remove(self.fileName)
-            except WindowsError:
-                warn("Failed to remove " + self.fileName + ". Retrying in " + 2**i + " seconds.", UserWarning)
-                sleep(2**i)
-                continue
-            break            
-             
-        # rename the new file       
-        os.rename(tempFileName, self.fileName)     
-        
-        # Reinit the object with the new file.
-        self.__init__(self.fileName)
+
 
 
 
