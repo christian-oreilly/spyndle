@@ -31,8 +31,11 @@ import numpy as np
 from scipy import array, arange, concatenate, where
 from copy import deepcopy
 from lxml import etree
-from spyndle.io import Event, RecordedChannel
+from tempfile import gettempdir 
+from time import sleep
+from warnings import warn
 
+from spyndle.io import Event, RecordedChannel
 
 
 EVENT_CHANNEL = 'EDF Annotations'
@@ -117,9 +120,6 @@ class EDFEvent(Event):
                
                
                self.groupeName = u"Stage"
-
-
-   
 
 
 
@@ -414,8 +414,10 @@ class EDFReader(EEGDBReaderBase) :
          2 - The data are not loaded in kept within the object, as opposed to 
              the header and the event informations.
     """
-    def save(self, tempPath="c:/"):
+    def save(self, tempPath=None):
 
+        if tempPath is None:
+            tempPath = gettempdir() 
  
         # Because the annotation field may change in size, records can be shifted 
         # so we cannot only alter the information in the annotation fields. We need
@@ -456,10 +458,21 @@ class EDFReader(EEGDBReaderBase) :
         
                 
                 assert(fileWrite.tell() == writeHeader.headerNbBytes + sum(writeHeader.nbSamplesPerRecord.values())*writeHeader.nbBytes*self.getNbPages())
-            
-        # Delete the original file
-        os.remove(self.fileName)
- 
+
+
+
+
+        # Try to delete the original file. This may failled because the file
+        # is used by another process (e.g., when running )        
+        for i in range(13):
+            try:
+                os.remove(self.fileName)
+            except WindowsError:
+                warn("Failed to remove " + self.fileName + ". Retrying in " + 2**i + " seconds.", UserWarning)
+                sleep(2**i)
+                continue
+            break            
+             
         # rename the new file       
         os.rename(tempFileName, self.fileName)     
         
