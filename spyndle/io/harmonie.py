@@ -889,13 +889,13 @@ class HarmonieReader(EEGDBReaderBase):
             # ns * 8 ascii : ns * physical minimum (e.g. -500 or 34)
             for i in range(ns): 
                 f.write(("%8.6f" %  self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)[0])[:8])
-            f.write("%08d" %  -1)     
+            f.write(("%8.6f" %  -1)[:8]) 
 
 
             # ns * 8 ascii : ns * physical maximum (e.g. 500 or 40)
             for i in range(ns): 
                 f.write(("%8.6f" %  self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)[2])[:8])
-            f.write("%08d" %  1)     
+            f.write(("%8.6f" %  1)[:8])  
 
 
             # ns * 8 ascii : ns * digital minimum (e.g. -2048)
