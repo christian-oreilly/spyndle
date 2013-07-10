@@ -216,90 +216,153 @@ class StateMachine:
             
 
 
-# Class representing a detected spindle.
+# Compare two detections. Can be either used to compare two detector objects
+# or two compare two detections already performed and retrieved with readers.
 class DetectorEvaluator:
-    def __init__(self, goldStandard, tested):
+    def __init__(self):
+        # goldStandard ans tested are two detectors correctly initiated
+        # with their internal reader.
 
-        self.goldStandard   = goldStandard
-        self.tested         = tested
-        
         self.N  = {}
         self.TP = {}
         self.TN = {}
         self.FP = {}
         self.FN = {}
 
+        self.spindlesLoaded = False
     
-    def printEvaluation(self, listChannels, listSleepStages):
-        self.computeStatistics(listChannels, listSleepStages)
-        for channel in listChannels:            
+    
+    def detectSpindlesAndDetectStatistics(self, goldStandardDetector, testedDetector, 
+                                          listChannels, listSleepStages, 
+                                          goldSpindleName = "goldSpindle", 
+                                          testedSpindleName = "testedSpindle"):
+        # goldStandardDetector ans testedDetector are two detectors correctly
+        # initiated with their internal reader.
+    
+
+        # We want the stage identification to be case-insensitive
+        #for i in range(len(listSleepStages)): 
+        #    listSleepStages[i] = listSleepStages[i].lower()
+    
+        ########### PERFORM SPINDLE DETECTION
+        print "Detecting spindles using the gold standard..."
+        self.goldStandard.setDetectionStages(listSleepStages)
+        self.goldStandard.detectSpindles(listChannels) 
+        self.goldStandard.saveSpindle(self.goldStandard.reader, goldSpindleName, "Spindle")
+
+
+        print "Detecting spindles using the tested detector..."
+        self.tested.setDetectionStages(listSleepStages)
+        self.tested.detectSpindles(listChannels) 
+        self.tested.saveSpindle(self.tested.reader, testedSpindleName, "Spindle")
+
+        self.computeStatistics(self, listChannels, listSleepStages, self.goldStandard.reader, 
+                               goldSpindleName, self.tested.reader, testedSpindleName)
+        
+        
+        
+        
+
+    def computeStatistics(self, listSleepStages, nameEventGold, 
+                          nameEventTested,  readerGold, readerTested=None, listChannels=None):
+
+        # If no tested reader is specified, we consider the that reader passed as
+        # readerGold contains the events for for both the gold and the tested detection
+        if readerTested is None:
+            readerTested = readerGold
+         
+        # If listChannels is not specified, we consider every channel present
+        # in the gold reader.
+        if listChannels is None:
+            listChannels = readerGold.getChannelLabels()
+         
+        def getSpindleTransitions(reader, eventName, channel, isGold):
+            channelSpindles = filter(lambda s: s.channel == channel and s.name == eventName, reader.events)     
+            if len(channelSpindles) :
+                if isGold :
+                    #for s in channelSpindles:
+                    #    print "Gold:", s                    
+                    return concatenate([[transition(spindle.timeStart(), "C"), 
+                                              transition(spindle.timeEnd(), "D")]  for spindle in channelSpindles])   
+                else:
+                    #for s in channelSpindles:
+                    #    print "Test:", s
+                    return concatenate([[transition(spindle.timeStart(), "E"), 
+                                              transition(spindle.timeEnd(), "F")]  for spindle in channelSpindles])          
+            return []
+            
+       
+        # COMPUTING THE TRANSITIONS ASSOCIATED TO SLEEP STAGES    
+        # computing arrays of sample index associated to every sleep stages for
+        # which we want to evaluate the spindle detection. We only use the changes
+        # of stage for this computation since we do not want to have, for example,
+        # a serie of endStage2, beginStage2, endStage2, beginStage2 creating artigicial
+        # discontinuities at each change of page
+        stageEventNames =  [e for e in readerGold.events if e.groupeName == "Stage"]  
+        
+        if stageEventNames[0].name in listSleepStages:
+            self.stageTransitions = [transition(stageEventNames[0].timeStart(), "A")]
+        else:             
+            self.stageTransitions = []
+            
+        for e1, e2 in zip(stageEventNames[:-1], stageEventNames[1:]):
+            if e1 != e2:
+                if e1.name in listSleepStages and not(e2.name in listSleepStages) :
+                    self.stageTransitions.append(transition(e1.timeEnd(), "B"))
+                if not(e1.name in listSleepStages) and e2.name in listSleepStages :
+                    self.stageTransitions.append(transition(e2.timeStart(), "A"))
+                
+        if stageEventNames[-1].name in listSleepStages:
+            self.stageTransitions.append(transition(stageEventNames[-1].timeEnd(), "B"))                      
+
+        #goldStageEvents = filter(lambda e: e.name in listSleepStages, readerGold.events)  
+        #if len(goldStageEvents) :                
+        #    self.stageTransitions = concatenate([[transition(event.timeStart(), "A"), 
+        #                                          transition(event.timeEnd(), "B")]  for event in goldStageEvents])  
+        #else:
+        #    self.stageTransitions = []
+            
+        for channel in listChannels:
+            
+            goldSpindleTransitions   = getSpindleTransitions(readerGold, nameEventGold, channel, True)
+            testedSpindleTransitions = getSpindleTransitions(readerTested, nameEventTested, channel, False)
+            transitions = concatenate([self.stageTransitions, goldSpindleTransitions, testedSpindleTransitions])
+
+            if len(goldSpindleTransitions) != 0 or len(testedSpindleTransitions) != 0 :
+
+                msa = StateMachine()
+                                           
+                # Sort transitions by time of occurence and apply finite state 
+                # machine to compute TP, TN, FP, FN
+                try:
+                    msa.run(sorted(transitions, key=attrgetter('time')))
+                except BadTransitionSequence:
+                    print "channel:", channel
+                    for trans in sorted(transitions, key=attrgetter('time')) :
+                        print trans
+                    raise                    
+                    
+                
+    
+                self.TP[channel] = msa.TP
+                self.TN[channel] = msa.TN
+                self.FP[channel] = msa.FP
+                self.FN[channel] = msa.FN
+                  
+                  
+    def printEvaluation(self, listSleepStages, nameEventGold, 
+                          nameEventTested, readerGold, readerTested=None, listChannels=None):
+
+        self.computeStatistics(listSleepStages, nameEventGold, 
+                               nameEventTested, readerGold, readerTested, listChannels)
+        for channel in self.FP:            
             print ("Channel:%s, sensitivity=%f, specificity=%f, PPV=%f, NPV=%f\n"
                    "            TP=%f, TN=%f, FP=%f, FN=%f" % (channel, 
                    self.sensitivity(channel), self.specificity(channel),
                    self.PPV(channel), self.NPV(channel), self.TP[channel], 
                    self.TN[channel], self.FP[channel], self.FN[channel]))
-    
-    
-    
-    
-    
-    def computeStatistics(self, listChannels, listSleepStages):
-    
-        print "Detecting spindles using the gold standard..."
-        self.goldStandard.setDetectionStages(listSleepStages)
-        self.goldStandard.detectSpindles(listChannels) 
 
-        print "Detecting spindles using the tested detector..."
-        self.tested.setDetectionStages(listSleepStages)
-        self.tested.detectSpindles(listChannels) 
-
-        # We want the stage identification to be case-insensitive
-        for i in range(len(listSleepStages)): 
-            listSleepStages[i] = listSleepStages[i].lower()
-
-
-        # computing arrays of sample index associated to every sleep stages for
-        # which we want to evaluate the spindle detection.
-        goldStageEvents = filter(lambda e: e.name.lower() in listSleepStages, self.goldStandard.reader.events)  
-        if len(goldStageEvents) :                
-            self.stageTransitions = concatenate([[transition(event.timeStart(), "A"), 
-                                                  transition(event.timeEnd(), "B")]  for event in goldStageEvents])  
-        else:
-            self.stageTransitions = []
-         
-         
-        def getSpindleTransitions(detector, channel, isGold):
-            channelSpindles = filter(lambda s: s.channel == channel, detector.detectedSpindles)     
-            if len(channelSpindles) :
-                if isGold :
-                    return concatenate([[transition(spindle.startTime(), "C"), 
-                                              transition(spindle.endTime(), "D")]  for spindle in channelSpindles])   
-                else:
-                    return concatenate([[transition(spindle.startTime(), "E"), 
-                                              transition(spindle.endTime(), "F")]  for spindle in channelSpindles])              
-            return []
-            
-            
-            
-        for channel in listChannels:
-            transitions = concatenate([self.stageTransitions, 
-                                       getSpindleTransitions(self.goldStandard, channel, True),
-                                       getSpindleTransitions(self.tested, channel, False)])
-
-            msa = StateMachine()
-                                       
-            # Sort transitions by time of occurence and apply finite state 
-            # machine to compute TP, TN, FP, FN
-            msa.run(sorted(transitions, key=attrgetter('time')))
-            
-
-            self.TP[channel] = msa.TP
-            self.TN[channel] = msa.TN
-            self.FP[channel] = msa.FP
-            self.FN[channel] = msa.FN
-                  
-                  
-                  
+          
     def sensitivity(self, channel):  
         if self.TP[channel] > 0 :
             return self.TP[channel]/float(self.TP[channel] + self.FN[channel])    
