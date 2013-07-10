@@ -301,6 +301,11 @@ class Event:
         return(str(self.groupeName) + " " + str(self.channel)
                 + " " + str(self.name) + " " + str(self.startTime) + " " + str(self.timeLength))
 
+
+    def __eq__(self, other): 
+        return self.__dict__ == other.__dict__
+
+
     def getXml(self):
         # create XML 
         try:

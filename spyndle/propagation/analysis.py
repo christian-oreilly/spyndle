@@ -75,8 +75,13 @@ def findBidirectionnality(Data, refRow, candidateInds):
 
 
 
-
-
+"""
+ Considering an EEG channel as constituted of two electrodes, a passive
+ (the reference) and an active (the other), this function return the 
+ active electrode name from the channel label. This is used, for example
+ to get 'F3' from 'F3-ref'. The function tries to 
+ find in channelLabel the presence of the strings electrodeNames
+"""
 def getActiveElectrode(electrodeNames, excludePatterns, channelLabel):
     
     retName = ""

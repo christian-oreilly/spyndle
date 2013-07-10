@@ -982,11 +982,11 @@ class HarmonieReader(EEGDBReaderBase):
                         
                         recordedSignal = append(array(record[indS:(indS+channelPageNbSample)]), 
                                                 zeros(self.pageNbSamples[channel] - channelPageNbSample))
-                    else:
+                        indS += channelPageNbSample
                         
+                    else:
                         recordedSignal = array(record[indS:(indS+self.pageNbSamples[channel])])
-
-                    indS += channelPageNbSample
+                        indS += self.pageNbSamples[channel]
                     
                     
                     # WRITE RECORDED SIGNAL....
