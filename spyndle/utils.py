@@ -50,6 +50,34 @@
 
 
 from scipy import zeros, arange
+import sys, os
+
+def setUnbufferedPrint():
+    sys.stdout=Unbuffered(sys.stdout)
+
+class Unbuffered:
+   def __init__(self, stream):
+       self.stream = stream
+   def write(self, data):
+       self.stream.write(data)
+       self.stream.flush()
+   def __getattr__(self, attr):
+       return getattr(self.stream, attr)
+
+
+
+def terminate_process(pid):
+    if sys.platform == 'win32':
+        import ctypes
+        PROCESS_TERMINATE = 1
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+        ctypes.windll.kernel32.TerminateProcess(handle, -1)
+        ctypes.windll.kernel32.CloseHandle(handle)
+    else:
+        os.kill(pid, signal.SIGTERM)
+
+
+
 
 def diff2(x, y) :
     # Second order numerical derivative. 
