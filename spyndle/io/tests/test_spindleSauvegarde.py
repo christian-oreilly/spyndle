@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 
 
-import os,sys, glob, unittest
+import os,sys, unittest, io
+
+from shutil import copyfile
 
 parentdir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0,parentdir + "\\..\\..\\..") 
 
 from spyndle.io.harmonie import HarmonieReader
 from spyndle.io.edf import EDFReader
-from spyndle.detector import SpindleDectectorRMS
 from spyndle.detector import SpindleDectectorAmp
 from spyndle.detector import DetectorEvaluator
 from spyndle.utils import setUnbufferedPrint
@@ -18,7 +19,8 @@ setUnbufferedPrint()
 
 
 class conversionSaveSpindleTest(unittest.TestCase) :
-    
+
+
     def testSaving1(self):
         
         print "Converting .sig file to .bdf file..."
@@ -32,7 +34,7 @@ class conversionSaveSpindleTest(unittest.TestCase) :
         detectionStages = ["Sleep stage N2", "Sleep stage 2"]
         listChannels    = ['F3-A1', 'F4-A1']
         
-        detector = SpindleDectectorRMS(reader, usePickled=False)
+        detector = SpindleDectectorAmp(reader, usePickled=False)
         detector.setDetectionStages(detectionStages)
         detector.detectSpindles(listChannels=listChannels)
         
@@ -89,8 +91,208 @@ class conversionSaveSpindleTest(unittest.TestCase) :
         
         for event1, event2 in zip(events1, events2):
             self.assertEqual(event1, event2)
-  
 
+
+
+
+    def testDoubleDetection(self):
+    
+        fpath           = parentdir #u'C:/DATA/Vickie_spindles/'
+        fileName        = "/test.bdf" #'PETCHn1.bdf'        
+    
+        channels = ["C4-A1"]
+
+        print "Converting .sig file to .bdf file..."
+        readerSIG =  HarmonieReader(fpath + fileName[:-3] + 'SIG')
+        readerSIG.saveAsEDF(fpath + fileName, "BDF", verbose=False)
+    
+        reader =  EDFReader(fpath + fileName)
+
+        data        = reader.readChannel(channels[0], usePickled=False)
+        signal      = data.signal
+        print signal[[1, 100, 200, 300, 400, 500]]       
+       
+        data        = reader.readChannel(channels[0], usePickled=False)
+        signal      = data.signal
+        print signal[[1, 100, 200, 300, 400, 500]]       
+
+
+
+    def testDoubleDetection(self):
+    
+        AmpEventName    = 'SpindleAmp'
+        RMSEventName    = 'SpindleRMS'
+        
+        fpath           = parentdir #u'C:/DATA/Vickie_spindles/'
+        fileName        = "/test.bdf" #'PETCHn1.bdf'        
+        
+        detectionStages = ["Sleep stage 2", "Sleep stage N2"]
+                
+        channels = ["C4-A1"]
+
+        print "Converting .sig file to .bdf file..."
+        readerSIG =  HarmonieReader(fpath + fileName[:-3] + 'SIG')
+        readerSIG.saveAsEDF(fpath + fileName, "BDF", verbose=False)
+    
+        reader =  EDFReader(fpath + fileName)
+
+        # Delete any present event with the name AmpEventName
+        #reader.events = [e for e in reader.events if e.name != AmpEventName]
+        #reader.events = [e for e in reader.events if e.name != RMSEventName]
+        
+        detector      =  SpindleDectectorAmp(reader, usePickled=False)  
+        detector.quantileThreshold = 0.925
+        detector.setDetectionStages(detectionStages)
+        detector.computeRMS       = False
+        detector.computeFreq      = False       
+        detector.computeSlopeFreq = False          
+        detector.detectSpindles(listChannels=channels)
+        nbSpins1 = len(detector.detectedSpindles)
+        detector.saveSpindle(reader, AmpEventName, "Spindle")      
+         
+        detector.detectSpindles(listChannels=channels)
+        nbSpins2 = len(detector.detectedSpindles)       
+        detector.saveSpindle(reader, RMSEventName, "Spindle")  
+       
+        try:
+            self.assertEqual(nbSpins1, nbSpins2)
+        except AssertionError:
+            print nbSpins1, nbSpins2
+            raise
+
+        evaluatorAmp = DetectorEvaluator()   
+        evaluatorAmp.computeStatistics(detectionStages, RMSEventName, 
+                                  AmpEventName, reader, listChannels=channels) 
+
+        for channel in channels:   
+            if channel in evaluatorAmp.TP:
+                self.assertEqual(evaluatorAmp.sensitivity(channel), 1.0)
+                self.assertEqual(evaluatorAmp.specificity(channel), 1.0)
+                self.assertEqual(evaluatorAmp.PPV(channel), 1.0)
+                self.assertEqual(evaluatorAmp.NPV(channel), 1.0)
+    
+
+
+    def testLoadSaveLoad(self):
+    
+        fpath           = parentdir #u'C:/DATA/Vickie_spindles/'
+        fileName        = "/test.bdf" #'PETCHn1.bdf'        
+
+        
+        print "Converting .sig file to .bdf file..."
+        readerSIG =  HarmonieReader(fpath + fileName[:-3] + 'SIG')
+        readerSIG.saveAsEDF(fpath + fileName, "BDF", verbose=False)
+    
+        reader =  EDFReader(fpath + fileName)
+        reader.saveAs(fpath + "temp.bdf")
+        del reader
+
+        with io.open(fpath + fileName, 'rb') as file1:
+            with io.open(fpath + "temp.bdf", 'rb') as file2:
+                
+                while 1:
+                    bytes1 = file1.read(100)
+                    bytes2 = file2.read(100)
+
+                    if not bytes1:
+                        break                
+                
+                    self.assertEqual(bytes1, bytes2)
+        
+        os.remove(fpath + "temp.bdf")
+
+ 
+    def testDoubleSave(self):
+    
+        fpath           = parentdir #u'C:/DATA/Vickie_spindles/'
+        fileName        = "/test.bdf" #'PETCHn1.bdf'        
+
+        
+        print "Converting .sig file to .bdf file..."
+        readerSIG =  HarmonieReader(fpath + fileName[:-3] + 'SIG')
+        readerSIG.saveAsEDF(fpath + fileName, "BDF", verbose=False)
+    
+        reader =  EDFReader(fpath + fileName)
+        reader.saveAs(fpath + "temp.bdf")
+        reader.saveAs(fpath + "temp2.bdf")
+        del reader
+
+        with io.open(fpath + "temp.bdf", 'rb') as file2:
+            with io.open(fpath + "temp2.bdf", 'rb') as file3:
+                    
+                while 1:
+                    bytes3 = file3.read(100)
+                    bytes2 = file2.read(100)
+                    if not bytes3:
+                        break
+                    self.assertEqual(bytes3, bytes2)
+                
+        os.remove(fpath + "temp.bdf")
+        os.remove(fpath + "temp2.bdf")
+
+
+    """
+     Convert from SIG to BDF, detect, save, make a copy, reopen the original
+     detect, save, compare the original with the copy
+    """
+    def testLoadDetectSaveLoad(self):
+    
+        fpath           = parentdir #u'C:/DATA/Vickie_spindles/'
+        fileName        = "/test.bdf" #'PETCHn1.bdf'        
+
+        AmpEventName    = 'SpindleAmp'
+        RMSEventName    = 'SpindleRMS'
+
+        detectionStages = ["Sleep stage 2", "Sleep stage N2"]
+                
+        channels = ["C4-A1"]
+
+        print "Converting .sig file to .bdf file..."
+        readerSIG =  HarmonieReader(fpath + fileName[:-3] + 'SIG')
+        readerSIG.saveAsEDF(fpath + fileName, "BDF", verbose=False)
+        
+        reader =  EDFReader(fpath + fileName)
+
+        # Delete any present event with the name AmpEventName
+        reader.events = [e for e in reader.events if e.name != AmpEventName]
+        reader.events = [e for e in reader.events if e.name != RMSEventName]
+        
+        detector      =  SpindleDectectorAmp(reader, usePickled=False)  
+        detector.quantileThreshold = 0.925
+        detector.setDetectionStages(detectionStages)
+        detector.computeRMS       = False
+        detector.computeFreq      = False       
+        detector.computeSlopeFreq = False          
+        detector.detectSpindles(listChannels=channels)
+        detector.saveSpindle(reader, AmpEventName, "Spindle")      
+
+        copyfile(fpath + fileName, fpath + "temp.bdf")         
+
+
+        reader =  EDFReader(fpath + fileName)
+
+        # Delete any present event with the name AmpEventName
+        reader.events = [e for e in reader.events if e.name != AmpEventName]
+        reader.events = [e for e in reader.events if e.name != RMSEventName]
+        
+        detector      =  SpindleDectectorAmp(reader, usePickled=False)  
+        detector.quantileThreshold = 0.925
+        detector.setDetectionStages(detectionStages)
+        detector.computeRMS       = False
+        detector.computeFreq      = False       
+        detector.computeSlopeFreq = False          
+        detector.detectSpindles(listChannels=channels)
+        detector.saveSpindle(reader, AmpEventName, "Spindle")    
+        
+
+        with io.open(fpath + fileName, 'rb') as file1:
+            with io.open(fpath + "temp.bdf", 'rb') as file2:
+                
+                byte1 = file1.read(1)
+                byte2 = file2.read(1)
+                self.assertEqual(byte1, byte2)
+        
+        os.remove(fpath + "temp.bdf")
 
 
 
@@ -99,5 +301,15 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+
+
+
+
+
+
+
+
 
 
