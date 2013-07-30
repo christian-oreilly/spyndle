@@ -12,7 +12,14 @@
 ###############################################################################
 
 from scipy import array
+from spyndle import Line, Point
+from spyndle.EEG.electrodesSVG import getElectrodeCoordinates
+from spyndle.EEG.mapping import getTransformedCoord
 
+
+electrodes = ['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 
+              'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 
+               'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz', 'Oz']
 
 def get10_20AdjacentElectrodes():
     electSource = array(["F4","F4","F4","F4","F4","F4",
@@ -57,3 +64,98 @@ def get10_20AdjacentElectrodes():
     
     return electSource, electTest
 
+
+
+"""
+ This function tries to determinate pairs of adjacents electrodes from a subset
+ of the electrodes of the 10-20 system (see the eeg_electrodes_10-20_small.svg
+ for the schema of the electrodes and of their placement)
+"""
+def getAdjacentsPairs_10_20(electrodes):
+    x, y, transform = getElectrodeCoordinates(electrodes)
+    for elect in electrodes:
+        x[elect], y[elect] = tuple(getTransformedCoord(x[elect], y[elect], transform[elect]))
+    
+    NbIntersectMax = 0
+    electRef  = []
+    electTest = []
+    for key1 in electrodes:
+        for key2 in [key for key in electrodes if key not in [key1]]:
+            l1 = Line(Point(x[key1], y[key1]), Point(x[key2], y[key2]))        
+            
+            nbIntersect = 0
+            for key3 in [key for key in electrodes if not key in [key1, key2]]:
+                for key4 in [key for key in electrodes if not key in [key1, key2, key3]]:
+                    l2 = Line(Point(x[key3], y[key3]), Point(x[key4], y[key4])) 
+                      
+                    if l1.isIntersecting(l2):
+                        if l1.length() > l2.length():
+                            nbIntersect += 1
+                    if nbIntersect > NbIntersectMax:
+                        break
+                if nbIntersect > NbIntersectMax:
+                    break
+                
+            if nbIntersect <= NbIntersectMax:
+                electRef.append(key1)
+                electTest.append(key2)
+        
+    
+    return zip(electRef, electTest)
+    
+    
+    
+    
+
+
+
+
+"""
+ Considering an EEG channel as constituted of two electrodes, a passive
+ (the reference) and an active (the other), this function return the 
+ active electrode name from the channel label. This is used, for example
+ to get 'F3' from 'F3-ref'. The function tries to 
+ find in channelLabel the presence of the strings electrodeNames
+"""
+def getActiveElectrode(channelLabel, electrodeNames=electrodes, excludePatterns=[], caseSensitive=False):
+    
+    retName = ""
+    for electrodeName in electrodeNames:
+        if caseSensitive:
+            if electrodeName in channelLabel :
+                if retName == "":
+                    retName = electrodeName
+                else:
+                    raise "Conficting electrode names."
+
+        else :
+            if electrodeName.lower() in channelLabel.lower():
+                if retName == "":
+                    retName = electrodeName
+                else:
+                    raise "Conficting electrode names."
+
+
+    for pattern in excludePatterns:
+        if pattern in channelLabel :
+            return ""
+            
+    return retName
+
+
+
+
+"""
+ Return the subset of channels which are EEG channels of the 10-20 system.
+"""
+def getEEGChannels(channelLabels, electrodeNames=electrodes, excludePatterns=[]):
+    
+    OK = len(channelLabels)*[False]
+    for ind, channel in enumerate(channelLabels):
+        if len([include for include in electrodeNames if include.lower() in channel.lower()]):
+            OK[ind] = True
+        if len([include for include in excludePatterns if include in channel]):
+            OK[ind] = False                
+            
+    return [channel for ind, channel in enumerate(channelLabels) if OK[ind]]
+    
