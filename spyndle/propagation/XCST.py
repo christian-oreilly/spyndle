@@ -49,8 +49,9 @@
 """
 
 import os
-from scipy import where, zeros, transpose, arange, shape, diff, sign
+from scipy import where, zeros, transpose, arange, shape, diff, sign, argmax, sqrt
 from scipy.integrate import trapz
+from scipy import fft, ifft
 
 
 from spyndle.utils import diff2
@@ -83,6 +84,9 @@ from spyndle.STransform import computeMST
 #    afterPad       : Padding of the observation windows after the ending 
 #                     of the spindle. Labeled delta_{sp} in [1]. (in seconds)
 #                     Default value: 0.5
+#    artifactPad    : Used to pad the ST to compute it on a larger window
+#                     that is afterward trucated such as to eliminate border
+#                     artifacts.
 #    offset         : Should be 0.0 for computing the delays. A value of 5.0
 #                     (in seconds)  can be used to compute false positive
 #                     propagation. See [1].
@@ -96,8 +100,10 @@ from spyndle.STransform import computeMST
 #                     
 #
 def computeXCST(readerClass, fileName, resPath, eventName, channelLst, 
-                 delta =0.5, beforePad=0.5, afterPad=0.5, offset=0.0, eventProperties = [],
-                 resFilesPrefix="spindleDelays") :  
+                 delta =0.5, beforePad=0.5, afterPad=0.5, 
+                 artifactPad=0.25,
+                 offset=0.0, eventProperties = [],
+                 resFilesPrefix="spindleDelays", similIndexType="inf") :  
 
     night = os.path.basename(fileName)
 
@@ -114,45 +120,65 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
     for refChannel in channelLst:        
         with open(resPath + resFilesPrefix + "_" + night + "_" + refChannel + ".txt", "w") as f:   
             
-            deltaSampleStart = int(delta*reader.getChannelFreq(refChannel))        
-            deltaStart       = deltaSampleStart/reader.getChannelFreq(refChannel)    
-            
-            deltaSampleEnd   = deltaSampleStart    
-            deltaEnd         = deltaStart
-            
             print "Processing propagation:", night, refChannel   
             
             events = filter(lambda e: e.name == eventName and e.channel == refChannel, reader.events)
             
+            artifactPadSample = int(artifactPad*reader.getChannelFreq(refChannel))  
             for i, event in zip(range(len(events)), events):
-     
+         
+                #### These are reinitialized at each event because their balue
+                # can be altered during the computation og the XCST for
+                # a given event
+                deltaSampleStart = int(delta*reader.getChannelFreq(refChannel))        
+                deltaStart       = deltaSampleStart/reader.getChannelFreq(refChannel)    
+                deltaSampleEnd   = deltaSampleStart    
+                deltaEnd         = deltaStart
+                ####    
+                    
+                    
+                startTime = event.startTime -  beforePad  - artifactPad    
+                duration  = event.timeLength + beforePad + afterPad + 2*artifactPad
                 
-                startTime = event.startTime -  beforePad      
-                duration  = event.timeLength + beforePad + afterPad
                 
                 
-                ###################################################################
-                # The signal at startTime - delta + offset or at startTime - delta 
-                # might not be available and the reader will start reading at the
-                # next available sample following the startTime requested. If this happens
-                # we may miss some samples in one of the signals. We remove these samples 
-                # in both signals for (for them to have the same size) and reduce the 
-                # delta accordingly.
-                cmpStartTime = reader.getNextSampleStartTime(refChannel, startTime - deltaStart + offset)
+
+                """
+                 The signal at startTime - delta might not be available and the 
+                 reader will start reading at the next available sample following 
+                 the startTime requested. If this happens we may miss some samples 
+                 in this signal. We remove these samples in both synchronous and
+                 asynchronous signals (for them to have the same size) by reducing  
+                 the delta accordingly.
+                """
                 refStartTime = reader.getNextSampleStartTime(refChannel, startTime - deltaStart)
-                
-                deltaStartCmp = int((cmpStartTime - (startTime - deltaStart + offset))*reader.getChannelFreq(refChannel))
                 deltaStartRef = int((refStartTime - (startTime - deltaStart ))*reader.getChannelFreq(refChannel))
                     
-                if max(deltaStartCmp, deltaStartRef) > 0 : 
-                    deltaSampleStart -= max(deltaStartCmp, deltaStartRef)
+                if deltaStartRef > 0 : 
+                    deltaSampleStart -= deltaStartRef
                     deltaStart        = deltaSampleStart/reader.getChannelFreq(refChannel)                  
+
+                signalsDataRef = reader.read([refChannel], startTime - deltaStart         , duration + deltaStart + deltaEnd)                  
                 
-                signalsDataCmp = reader.read(channelLst,   startTime - deltaStart + offset, duration + deltaStart + deltaEnd)  
-                signalsDataRef = reader.read([refChannel], startTime - deltaStart         , duration + deltaStart + deltaEnd)  
+                
+                """
+                 The signal at startTime - delta + offset might not be 
+                 available and the reader will start reading at the
+                 next available sample following the startTime requested. If this
+                 happens for the offset signal, just adjust the offset accordingly.
+                """
+                cmpStartTime = reader.getNextSampleStartTime(refChannel, startTime - deltaStart + offset)
+                deltaStartCmp = int((cmpStartTime - (startTime - deltaStart + offset))*reader.getChannelFreq(refChannel))
+
+                if deltaStartCmp > 0 : 
+                    signalsDataCmp = reader.read(channelLst, cmpStartTime                    , duration + deltaStart + deltaEnd)  
+                else:
+                    signalsDataCmp = reader.read(channelLst, startTime - deltaStart + offset , duration + deltaStart + deltaEnd)  
+                    
+                
                 ##############
 
-
+                #print signalsDataCmp[refChannel].signal.shape, signalsDataRef[refChannel].signal.shape
 
                 #################################################################
                 # Because of numerical approximation, the signal length between the
@@ -171,12 +197,20 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                 fs = signalsDataCmp[refChannel].samplingRate                   
     
                 # Spectra computation
-                X, fXtmp = computeMST(signalsDataRef[refChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)   
-                X = abs(transpose(X))
-                X = {"Ref":X[:, deltaSampleStart:-deltaSampleEnd]}
+                X, fXRef = computeMST(signalsDataRef[refChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)     
+                X = abs(transpose(X))                
+                try:
+                    #Y = zeros(X.shape)
+                    #Y[:, (deltaSampleStart+artifactPadSample):-(deltaSampleEnd+artifactPadSample)] = X[:, (deltaSampleStart+artifactPadSample):-(deltaSampleEnd+artifactPadSample)]
+                    X = {"Ref" :X[:, (deltaSampleStart+artifactPadSample):-(deltaSampleEnd+artifactPadSample)]}
+                    #X["Ref2"] = Y
+                except IndexError:
+                    print deltaSampleStart, deltaSampleEnd, X.shape, artifactPadSample
+                    raise               
+                
                 for testChannel in channelLst :      
                     Xtmp, fXtmp = computeMST(signalsDataCmp[testChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)         
-                    X[testChannel] = abs(transpose(Xtmp))              
+                    X[testChannel] = abs(transpose(Xtmp))[:, artifactPadSample:-artifactPadSample]              
             
                 refShape = list(shape(X["Ref"]))      
                 
@@ -197,16 +231,29 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                         XCmpSquare_colTrapz = trapz(XCmpSquare, axis=0)        
                         for indOffset in range(deltaSampleStart + deltaSampleEnd):
                             XCmp             = X[testChannel][:, indOffset:(indOffset+refShape[1])]
-                            CmpSelfCor       = trapz(XCmpSquare_colTrapz[indOffset:(indOffset+refShape[1])])
+                            CmpSelfCor       = trapz(XCmpSquare_colTrapz[indOffset:(indOffset+refShape[1])]) # possible optim
                             
-                            #print XCmp.shape, X["Ref"].shape
-                            crosscor[indOffset] = trapz(trapz(XCmp*X["Ref"]))/max(CmpSelfCor, refSelfCor)
+                            if similIndexType == "inf":
+                                den = max(CmpSelfCor, refSelfCor)
+                            elif similIndexType == "euclidean":
+                                den = sqrt(CmpSelfCor**2 + refSelfCor**2)                                
+                            else: 
+                                print "Error. The similarity index type " + similIndexType + "is unknown."
+                                raise TypeError
+                                
+                            crosscor[indOffset] = trapz(trapz(XCmp*X["Ref"]))/den
+
+                        # Alternative cross-correlation computation
+                        #crosscorTest = ifft(fft(X["Ref2"])*fft(X[testChannel]))
+                        #print crosscor.shape, crosscorTest    
     
-                        ind = where(crosscor == max(crosscor))[0][0]
-                        
+                        ind          = argmax(crosscor)                    
                         diffCrosscor = diff2(arange(deltaSampleStart + deltaSampleEnd), crosscor)                
-                        
-                        if ind == 0 or ind == deltaSampleStart + deltaSampleEnd-1:
+        
+                        # Interpolation to find the position of the true maximum
+                        # which normally falls between samples
+                        maxInd = len(crosscor)-1
+                        if ind == 0 or ind == maxInd:
                             maxDeltay[testChannel]   = time[ind]       
                             maxCrosscor[testChannel] = crosscor[ind]                      
                         else:
@@ -215,19 +262,47 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                             else:
                                 indm = 0
                                 
-                            if ind+2 < deltaSampleStart + deltaSampleEnd-1 :
+                            if ind+2 < maxInd :
                                 indp = ind+2
                             else:
-                                indp = deltaSampleStart + deltaSampleEnd-1
+                                indp = maxInd
         
                             pindinc = where(diff(sign(diffCrosscor[indm:(indp+1)])) != 0)[0][0]                
                             indFloor = indm +pindinc 
-                            indFrac  = (diffCrosscor[indFloor])/(diffCrosscor[indFloor] - diffCrosscor[indFloor+1])
+                            indCeil  = indFloor + 1
+                            indFrac  = diffCrosscor[indFloor]/(diffCrosscor[indFloor] - diffCrosscor[indCeil])
                           
-        
-                            maxDeltay[testChannel]   = time[indFloor]      + indFrac*(time[indFloor+1]-time[indFloor])       
-                            maxCrosscor[testChannel] = crosscor[indFloor]  + indFrac*(crosscor[indFloor+1]-crosscor[indFloor])       
+                            maxDeltay[testChannel]   = time[indFloor]      + indFrac*(time[indCeil]-time[indFloor])       
+                            maxCrosscor[testChannel] = crosscor[indFloor]  + indFrac*(crosscor[indCeil]-crosscor[indFloor])       
+                        
+                        
+                        """
+                        import pylab
+                        import numpy
+                        pylab.figure()
+                        
+                        vmin= min(numpy.min(X["Ref"]), numpy.min(X[testChannel])) 
+                        vmax= max(numpy.max(X["Ref"]), numpy.max(X[testChannel]))   
                             
+                        pylab.subplot(311)
+                        T, F = numpy.meshgrid(numpy.arange(X["Ref"].shape[1])/fs+maxDeltay[testChannel], fXRef)
+                        pylab.pcolor(T, F, X["Ref"], vmin=vmin, vmax=vmax)
+                        pylab.xlim([-0.5,X[testChannel].shape[1]/fs-0.5])
+                                 
+                        pylab.subplot(312)
+                        T, F = numpy.meshgrid(numpy.arange(X[testChannel].shape[1])/fs-0.5, fXRef)
+                        pylab.pcolor(T, F, X[testChannel], vmin=vmin, vmax=vmax)
+                        pylab.xlim([-0.5,X[testChannel].shape[1]/fs-0.5])
+                        
+                        pylab.subplot(313)
+                        pylab.plot(time, crosscor)
+                        pylab.plot(maxDeltay[testChannel], maxCrosscor[testChannel], 'o')
+                        pylab.xlim([-0.5,X[testChannel].shape[1]/fs-0.5])
+                        
+                        pylab.show()
+                        """
+                        
+                        assert(abs(maxDeltay[testChannel]) <= delta)
                         
     
                 # Print the header. A header is necessary as the column of these
@@ -244,8 +319,6 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                     
                     f.write(header) # Write a string to a file            
     
-    
-                #print event.toEDFStr()
                 result = str(i) + ";" + str(event.startTime) + ";" + str(event.timeLength) + ";" 
                 for testChannel in channelLst:
                     result += str(maxCrosscor[testChannel]) + ";"  +  str(maxDeltay[testChannel]) + ";"  
@@ -255,8 +328,6 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                     if eventProperty in event.properties:
                         result += str(event.properties[eventProperty])
                     result += ";" 
-    
-                #print night, refChannel, i, len(events)-1
     
                 f.write(result[:-1] + '\n') # Write a string to a file
             
