@@ -310,6 +310,11 @@ class HarmonieReader(EEGDBReaderBase):
 
 
 
+
+    def getFileName(self):
+        return self.fileName
+
+
     """
      Deines the pages and save it in the self.page attribute. This is useful
      for managing the discontinuity. Every HarmonyPage object of self.pages

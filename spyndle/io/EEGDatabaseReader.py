@@ -57,6 +57,8 @@ class EEGDBReaderBase(object) :
     @abstractmethod
     def getChannelFreq(self, channel): raise ErrPureVirtualCall
     
+    @abstractmethod
+    def getFileName(self): raise ErrPureVirtualCall
     
 
     # Should return a DateTime object indicating the time when the recording

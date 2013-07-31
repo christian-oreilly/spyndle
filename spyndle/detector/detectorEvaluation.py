@@ -256,14 +256,14 @@ class DetectorEvaluator:
         self.tested.detectSpindles(listChannels) 
         self.tested.saveSpindle(self.tested.reader, testedSpindleName, "Spindle")
 
-        self.computeStatistics(self, listChannels, listSleepStages, self.goldStandard.reader, 
-                               goldSpindleName, self.tested.reader, testedSpindleName)
+        self.computeStatistics(self, listSleepStages, goldSpindleName, testedSpindleName,
+                               self.goldStandard.reader, self.tested.reader, listChannels)
         
         
         
         
 
-    def computeStatistics(self, listSleepStages, nameEventGold, 
+    def computeStatistics(self, listDetectionStages, nameEventGold, 
                           nameEventTested,  readerGold, readerTested=None, listChannels=None):
 
         # If no tested reader is specified, we consider the that reader passed as
@@ -300,19 +300,19 @@ class DetectorEvaluator:
         # discontinuities at each change of page
         stageEventNames =  [e for e in readerGold.events if e.groupeName == "Stage"]  
         
-        if stageEventNames[0].name in listSleepStages:
+        if stageEventNames[0].name in listDetectionStages:
             self.stageTransitions = [transition(stageEventNames[0].timeStart(), "A")]
         else:             
             self.stageTransitions = []
             
         for e1, e2 in zip(stageEventNames[:-1], stageEventNames[1:]):
             if e1 != e2:
-                if e1.name in listSleepStages and not(e2.name in listSleepStages) :
+                if e1.name in listDetectionStages and not(e2.name in listDetectionStages) :
                     self.stageTransitions.append(transition(e1.timeEnd(), "B"))
-                if not(e1.name in listSleepStages) and e2.name in listSleepStages :
+                if not(e1.name in listDetectionStages) and e2.name in listDetectionStages :
                     self.stageTransitions.append(transition(e2.timeStart(), "A"))
                 
-        if stageEventNames[-1].name in listSleepStages:
+        if stageEventNames[-1].name in listDetectionStages:
             self.stageTransitions.append(transition(stageEventNames[-1].timeEnd(), "B"))                      
 
         #goldStageEvents = filter(lambda e: e.name in listSleepStages, readerGold.events)  
@@ -371,14 +371,18 @@ class DetectorEvaluator:
 
 
     def specificity(self, channel):  
-            if self.TN[channel] > 0 :
-                return self.TN[channel]/float(self.FP[channel] + self.TN[channel])
-            else:
-                return 0.0 
+        if self.TN[channel] > 0 :
+            return self.TN[channel]/float(self.FP[channel] + self.TN[channel])
+        else:
+            return 0.0 
 
 
     def accuracy(self, channel):  
-        return (self.TN[channel] + self.TP[channel])/self.N[channel]            
+        if self.TN[channel] > 0 :
+            N = self.FN[channel] + self.TN[channel] +  self.FP[channel] + self.TP[channel]
+            return (self.TN[channel] + self.TP[channel])/N
+        else:
+            return 0.0                
         
         
     def PPV(self, channel):    # Positive predictive value                 
