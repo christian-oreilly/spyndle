@@ -272,11 +272,11 @@ class SpindleDectector:
 
 
 
-    def computeStageIndicator(self, reader):
+    def computeStageIndicator(self, reader, channel=None):
 
         stages = filter(lambda e: e.groupeName == "Stage" , reader.events)   
         lstStage = concatenate((unique([stage.name.lower() for stage in stages]), ["No stage"]))    
-        stageIndicator = ones(reader.nbSamples)*(len(lstStage)-1)
+        stageIndicator = ones(reader.getNbSample(channel))*(len(lstStage)-1)
             
         for i in range(len(lstStage)):
             stageEvent23 = filter(lambda e: e.name.lower() == lstStage[i], stages)    
@@ -340,7 +340,8 @@ class SpindleDectector:
         
 
     # Used to save detected spindle in EEG data file. 
-    def saveSpindle(self, reader, eventName, eventGroupName, fileName = None):
+    def saveSpindle(self, reader, eventName, 
+                    eventGroupName="Spindle", fileName = None):
         for spindle in self.detectedSpindles:    
             event = Event( name = eventName, groupeName = eventGroupName, 
                           channel = spindle.channel, startTime = spindle.startTime(),
@@ -411,7 +412,7 @@ class SpindleDectectorRMS(SpindleDectector):
         ###############################################################################
     
         # Quantile of spindle amplitude used to determine spindle activity
-        self.quantileThreshold = 0.95
+        self.quantileThreshold = 0.925
 
         # We allow for a spindle activity region to contain samples having an
         # amplitude going bellow the quantileThreshold for a 
@@ -427,9 +428,9 @@ class SpindleDectectorRMS(SpindleDectector):
         # itself.
         self.useTeager = False
         
-        self.computeRMS       = True
-        self.computeFreq      = True       
-        self.computeSlopeFreq = True
+        self.computeRMS       = False
+        self.computeFreq      = False       
+        self.computeSlopeFreq = False
 
         ###############################################################################
 
@@ -654,13 +655,15 @@ class SpindleDectectorTeager(SpindleDectector):
 
         # Pickle data for each channel separatelly so simplify and accelerate
         # the reading of large files.       
-        reader.pickleCompleteRecord(self.listChannels)   
+        if self.usePickled :
+            self.reader.pickleCompleteRecord(self.listChannels)   
    
         for channel in self.listChannels:    
             if verbose:   print "Channel " + channel + "..."           
             
-            data        = reader.readPickledChannel(channel)
+            channelTime = self.reader.getChannelTime(channel)  
 
+            data        = self.reader.readChannel(channel, usePickled=self.usePickled)            
             signal      = data.signal
             fs          = data.samplingRate                      # sampling rate                        
                                                             
@@ -671,7 +674,8 @@ class SpindleDectectorTeager(SpindleDectector):
             
             # Defining EEG filters
             bandPassFilter = Filter(fs)
-            bandPassFilter.create(low_crit_freq=self.lowFreq, high_crit_freq=self.highFreq, order=1001, btype="bandpass", ftype="FIR", useFiltFilt=True)          
+            bandPassFilter.create(low_crit_freq=self.lowFreq, high_crit_freq=self.highFreq, 
+                                  order=1001, btype="bandpass", ftype="FIR", useFiltFilt=True)          
 
             # filtering can take a lot of memory. By making sure that the 
             # garbage collector as passed just before the filtering, we
@@ -717,24 +721,22 @@ class SpindleDectectorTeager(SpindleDectector):
                 startSpinInd = startSpinInd[concatenate(([0], gapToKeepInd+1))]
                 stopSpinInd  = stopSpinInd[concatenate((gapToKeepInd, [len(stopSpinInd)-1]))]
                 
-                
-                ## Careful : data are supporte contiguous. 
-                nbSampleDuration = stopSpinInd - startSpinInd
+            
+                ## Careful : Non contiguous datas not presently supported. 
+                duration = channelTime[stopSpinInd] - channelTime[startSpinInd]
                                
-                startSpinInd = startSpinInd[nbSampleDuration/fs >= self.minimalSpindleDuration]
-                stopSpinInd  = stopSpinInd[nbSampleDuration/fs >= self.minimalSpindleDuration]
-                
-                newSpindles = [DetectedSpindle(channel, start, end) for start, end in zip(startSpinInd, stopSpinInd)]   
+                startSpinInd = startSpinInd[duration >= self.minimalSpindleDuration]
+                stopSpinInd  = stopSpinInd[duration >= self.minimalSpindleDuration]
+                duration     = duration[duration >= self.minimalSpindleDuration]    
+
+                newSpindles = [DetectedSpindle(channel, start, end) for start, end in zip(channelTime[startSpinInd], channelTime[stopSpinInd])]   
+                    
                 self.detectedSpindles.extend(newSpindles)                   
                 print "Nb detected spindles", len(self.detectedSpindles) 
 
  
  
 
- 
- 
- 
- 
  
  
 class SpindleDectectorSigma(SpindleDectector):
@@ -758,6 +760,14 @@ class SpindleDectectorSigma(SpindleDectector):
         # maximum of maxAllowableGapBellowThreshold seconds.
         self.maxAllowableGapBellowThreshold = 0.1 # in seconds
 
+        # Duration of the window used to compute S-transform
+        # (in seconds)
+        self.computationWindow = 4.2   
+
+        # Overlapping of two consecutive windows used to compute the S-transform
+        # (in seconds)
+        self.windowOverlapping = 0.2
+
         ###############################################################################
 
 
@@ -779,6 +789,7 @@ class SpindleDectectorSigma(SpindleDectector):
         for channel in self.listChannels:    
             if verbose:   print "Channel " + channel + "..."           
             
+            channelTime = self.reader.getChannelTime(channel)  
             data        = self.reader.readChannel(channel, usePickled=self.usePickled)
 
             signal      = data.signal
@@ -798,8 +809,8 @@ class SpindleDectectorSigma(SpindleDectector):
                 self.sigmaIndex = zeros(self.reader.getNbSample(channel)) 
                         
                 
-                nbPad = int(0.1*fs)
-                nbWin = int(4.0*fs)
+                nbPad = int(self.windowOverlapping/2.0*fs)
+                nbWin = int(self.computationWindow*fs) - 2*nbPad
     
                 nbIter = int(self.reader.getNbSample(channel)/nbWin)
                 for i in range(nbIter):
@@ -863,30 +874,27 @@ class SpindleDectectorSigma(SpindleDectector):
                 startSpinInd = startSpinInd[concatenate(([0], gapToKeepInd+1))]
                 stopSpinInd  = stopSpinInd[concatenate((gapToKeepInd, [len(stopSpinInd)-1]))]
                 
-                
-                ## Careful : data are supposed contiguous. 
-                nbSampleDuration = stopSpinInd - startSpinInd
+                ## Careful : Non contiguous datas not presently supported. 
+                duration = channelTime[stopSpinInd] - channelTime[startSpinInd]
                                
-                startSpinInd = startSpinInd[nbSampleDuration/fs >= self.minimalSpindleDuration]
-                stopSpinInd  = stopSpinInd[nbSampleDuration/fs >= self.minimalSpindleDuration]
-                
-                newSpindles = [DetectedSpindle(channel, start, end) for start, end in zip(startSpinInd, stopSpinInd)]   
+                startSpinInd = startSpinInd[duration >= self.minimalSpindleDuration]
+                stopSpinInd  = stopSpinInd[duration >= self.minimalSpindleDuration]
+                duration     = duration[duration >= self.minimalSpindleDuration] 
+                              
+                newSpindles = [DetectedSpindle(channel, start, end) for start, end in zip(channelTime[startSpinInd], channelTime[stopSpinInd])]   
                 self.detectedSpindles.extend(newSpindles)                   
                 print "Nb detected spindles", len(self.detectedSpindles) 
 
  
  
  
-  
- 
 class SpindleDectectorRSP(SpindleDectector):
     
     
-    def __init__(self):
-        SpindleDectector.__init__(self)
-        self.detectStages = []
     
-
+    def __init__(self, reader=None, usePickled=False):
+        SpindleDectector.__init__(self, reader, usePickled)
+        
         ###############################################################################
         # Detection patameters
         ###############################################################################
@@ -913,15 +921,18 @@ class SpindleDectectorRSP(SpindleDectector):
         #################################### READING ##########################
         if verbose:   print "Start reading datafile..."
 
+
         # Pickle data for each channel separatelly so simplify and accelerate
         # the reading of large files.       
-        reader.pickleCompleteRecord(self.listChannels)   
+        if self.usePickled :
+            self.reader.pickleCompleteRecord(self.listChannels)   
    
         for channel in self.listChannels:    
             if verbose:   print "Channel " + channel + "..."           
             
-            data        = reader.readPickledChannel(channel)
+            channelTime = self.reader.getChannelTime(channel)  
 
+            data        = self.reader.readChannel(channel, usePickled=self.usePickled)
             signal      = data.signal
             fs          = data.samplingRate                      # sampling rate                     
                                                             
@@ -929,53 +940,53 @@ class SpindleDectectorRSP(SpindleDectector):
             ########################## Computing SIGMA INDEX ######################
             if verbose:   print "Computing relative spindle power..."
             
-            fileName = reader.fname + "_RSP_" + channel + ".mat"
+            fileName = self.reader.getFileName() + "_RSP_" + channel + ".mat"
     
             if os.path.exists(fileName):
                 print "Using saved RSP..."    
                 self.RSP = loadmat(fileName)["RSP"]
                 self.RSP = self.RSP.reshape(self.RSP.size)
             else:     
-                self.RSP = zeros(reader.getNbSample()) 
+                self.RSP = zeros(self.reader.getNbSample(channel)) 
                         
-                stageIndicator, lstStages = self.computeStageIndicator(reader)
-                indDetectStage = concatenate([where(lstStages[stageIndicator] == stage.lower())[0] for stage in self.detectionStages])
-                stageIndicator = zeros(stageIndicator.shape)
-                stageIndicator[indDetectStage] = 1
+                #stageIndicator, lstStages = self.computeStageIndicator(self.reader, channel)
+                #indDetectStage = concatenate([where(lstStages[stageIndicator] == stage.lower())[0] for stage in self.detectionStages])
+                #stageIndicator = zeros(stageIndicator.shape)
+                #stageIndicator[indDetectStage] = 1
 
                 nbPad = int(0.1*fs)
                 nbWin = int(4.0*fs)
     
-                nbIter = int(reader.getNbSample()/nbWin)
+                nbIter = int(self.reader.getNbSample(channel)/nbWin)
                 for i in range(nbIter):
                     if mod(i, 1000) == 0: print i, nbIter
                     
                     if i == 0 :            # First iteration
                         indexes = arange(nbPad + nbWin) 
                     elif i == nbIter-1 :   # Last iteration
-                        indexes = arange(i*nbWin-nbPad, reader.getNbSample())
+                        indexes = arange(i*nbWin-nbPad, self.reader.getNbSample(channel))
                     else:                       # Other iterations
                         indexes = arange(i*nbWin-nbPad, i*nbWin + nbWin+nbPad)
     
     
-                    if any(stageIndicator[indexes]):    
-                        X, fX = computeMST(signal[indexes], fs, fmin=0.5, fmax=40.0)  
+                    #if any(stageIndicator[indexes]):    
+                    X, fX = computeMST(signal[indexes], fs, fmin=0.5, fmax=40.0)  
+                    
+                    if i == 0 :            # First iteration
+                        indexesNoPad = arange(nbWin) 
+                    elif i == nbIter-1 :   # Last iteration
+                        indexesNoPad = arange(nbPad, nbPad + self.reader.getNbSample(channel)-i*nbWin)
+                    else:                       # Other iterations
+                        indexesNoPad = arange(nbPad, nbPad + nbWin)
                         
-                        if i == 0 :            # First iteration
-                            indexesNoPad = arange(nbWin) 
-                        elif i == nbIter-1 :   # Last iteration
-                            indexesNoPad = arange(nbPad, nbPad + reader.getNbSample()-i*nbWin)
-                        else:                       # Other iterations
-                            indexesNoPad = arange(nbPad, nbPad + nbWin)
-                            
-                        X       = abs(X[indexesNoPad])
-                        indexes = indexes[indexesNoPad]
-            
-            
-                        spindleBand = (fX >= self.lowFreq)*(fX <= self.highFreq)
-                        self.RSP[indexes] = trapz(X[:, spindleBand], fX[:, spindleBand], axis=1)/trapz(X, fX, axis=1)
-                    else:
-                        self.RSP[indexes] = 0.0
+                    X       = abs(X[indexesNoPad])
+                    indexes = indexes[indexesNoPad]
+        
+        
+                    spindleBand = (fX >= self.lowFreq)*(fX <= self.highFreq)
+                    self.RSP[indexes] = trapz(X[:, spindleBand], fX[:, spindleBand], axis=1)/trapz(X, fX, axis=1)
+                    #else:
+                    #    self.RSP[indexes] = 0.0
  
                 savemat(fileName, {"RSP":self.RSP})
 
@@ -1007,14 +1018,16 @@ class SpindleDectectorRSP(SpindleDectector):
                 
                 startSpinInd = startSpinInd[concatenate(([0], gapToKeepInd+1))]
                 stopSpinInd  = stopSpinInd[concatenate((gapToKeepInd, [len(stopSpinInd)-1]))]
-                
-                
-                ## Careful : data are supposed contiguous. 
-                nbSampleDuration = stopSpinInd - startSpinInd
+
+                ## Careful : Non contiguous datas not presently supported. 
+                duration = channelTime[stopSpinInd] - channelTime[startSpinInd]
                                
-                startSpinInd = startSpinInd[nbSampleDuration/fs >= self.minimalSpindleDuration]
-                stopSpinInd  = stopSpinInd[nbSampleDuration/fs >= self.minimalSpindleDuration]
+                               
+                startSpinInd = startSpinInd[duration >= self.minimalSpindleDuration]
+                stopSpinInd  = stopSpinInd[duration >= self.minimalSpindleDuration]
+                duration     = duration[duration >= self.minimalSpindleDuration] 
                 
-                newSpindles = [DetectedSpindle(channel, start, end) for start, end in zip(startSpinInd, stopSpinInd)]   
+                newSpindles = [DetectedSpindle(channel, start, end) for start, end in zip(channelTime[startSpinInd], channelTime[stopSpinInd])]   
                 self.detectedSpindles.extend(newSpindles)                
+        
         
