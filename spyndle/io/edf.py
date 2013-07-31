@@ -27,6 +27,7 @@ import uuid
 import os, io
 import re, datetime, logging
 import numpy as np
+import scipy.weave as weave
 
 from scipy import array, arange, concatenate, where
 from copy import deepcopy
@@ -34,6 +35,7 @@ from lxml import etree
 from tempfile import gettempdir 
 from time import sleep
 from warnings import warn
+
 
 from spyndle.io import Event, RecordedChannel
 
@@ -361,7 +363,9 @@ class EDFReader(EEGDBReaderBase) :
             super(EDFReader, self).__init__(self.getPageDuration())        
             self.readEvents(fileObj)        
         
-        
+
+    def getFileName(self): 
+        return self.fileName       
         
     def getRecordingStartTime(self): 
         return self.header.startDateTime        
@@ -585,16 +589,41 @@ class EDFReader(EEGDBReaderBase) :
             # Inserting a fourth byte to read it as 4-byte floats
             # byteStr = "\0".join([samples[(noByte*3):(noByte*3+3)] for noByte in range(int(len(samples)/3))]) + "\0"
             # ==>> cannot use this because we do not always need to pad with zeros...                     
-            
             # Pad witth zeros or ones depending on wheter the number is 
             # positive or negative
-            byteStr = ""
-            for noByte in range(int(len(samples)/3)):
-                byteStr += samples[(noByte*3):(noByte*3+3)] + ('\0' if samples[noByte*3+2] < '\x80' else '\xff')                        
-                                             
-            return np.fromstring(byteStr, '<i')          
+
+            ##### This implementation is about 75% slower than            
+            #byteStr = ""                                            
+            #for noByte in range(0, len(samples), 3):
+            #    byteStr += samples[noByte:(noByte+3)] + ('\0' if samples[noByte+2] < '\x80' else '\xff')                        
+            #return np.fromstring(byteStr, '<i')  
+            # A ticket has been placed for the implementation of a '<3i' dtype in numpy (https://github.com/numpy/numpy/issues/664)
+
+            ##### this one... which is about ten time slower than
+            #import struct
+            #return array([struct.unpack('<i', samples[noByte:(noByte+3)] + ('\0' if samples[noByte+2] < '\x80' else '\xff'))[0] for noByte in range(0, len(samples), 3)])
+            
+            ##### this one
+            samples = np.fromstring(samples, '<i1')
+            
+            N   = len(samples)
+            ret = np.zeros(N/3, dtype='int32')
+            
+            code = """
+                        int i, i2;
+                        for (i=0, i2=0; i<N; i+=3, i2++)
+                            ret(i2) = ((samples(i+2) < 128 ? 0 : 255) << 24) | (samples(i+2) << 16) | (samples(i+1) << 8) | samples(i)  ;
+                              
+                        return_val = 1;
+                 """  
+            
+            weave.inline(code, [ 'N', 'ret', 'samples'], type_converters=weave.converters.blitz, compiler = 'gcc')
+            return ret            
+            
         else:
             raise IOError
+
+
 
 
 
@@ -648,9 +677,12 @@ class EDFReader(EEGDBReaderBase) :
             pageDuration  = startTimeEvent.timeLength
             
             if pageStartTime + pageDuration >= startTime:
-                page = self.readPage([signalName], noPage+1)   
                 
-                time = page.getStartTime() + arange(len(page.recordedSignals[signalName]))/page.samplingRates[signalName]
+                pageNbRecords = self.header.nbSamplesPerRecord[signalName]
+                samplingRate  = float(self.header.nbSamplesPerRecord[signalName])/self.header.recordDuration
+                
+                time = pageStartTime + arange(pageNbRecords)/samplingRate
+                #time = page.getStartTime() + arange(len(page.recordedSignals[signalName]))/page.samplingRates[signalName]
                 IND = where(time >= startTime)[0]
                 if len(IND) :
                     return time[IND[0]]                      
