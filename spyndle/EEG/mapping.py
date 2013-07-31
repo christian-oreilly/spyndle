@@ -38,65 +38,47 @@ import numpy as np
 import re
 import math
 
+
+from matplotlib.colors import hsv_to_rgb    
 import matplotlib.image as mpimg
 import matplotlib.gridspec as gridspec
 import matplotlib            
 
 from scipy.interpolate import griddata
-from scipy import array, reshape, concatenate, dot, arange, meshgrid, nan, unique
-from scipy import arctan2, pi, cos, sin, zeros, where, isnan
+from scipy import array, reshape, concatenate, dot, arange, meshgrid, nan, unique, \
+    arctan2, pi, cos, sin, zeros, where, isnan, maximum, minimum, ones
 
 from spyndle.EEG import electrodesSVG
 
 
-
-def hsv2rgb(h, s, v):
-    h = float(h)
-    s = float(s)
-    v = float(v)
-    h60 = h / 60.0
-    h60f = math.floor(h60)
-    hi = int(h60f) % 6
-    f = h60 - h60f
-    p = v * (1 - s)
-    q = v * (1 - f * s)
-    t = v * (1 - (1 - f) * s)
-    r, g, b = 0, 0, 0
-    if hi == 0: r, g, b = v, t, p
-    elif hi == 1: r, g, b = q, v, p
-    elif hi == 2: r, g, b = p, v, t
-    elif hi == 3: r, g, b = p, q, v
-    elif hi == 4: r, g, b = t, p, v
-    elif hi == 5: r, g, b = v, p, q
-    r, g, b = int(r * 255), int(g * 255), int(b * 255)
-    return r, g, b
-
 def getTransformedCoord(cx, cy, transform):
     coord = array(map(float, [cx, cy, 1.0]))
     
-    mat = map(float, re.split(r'\(|\)|,', transform)[1:-1])
-    mat = reshape(mat, (2, 3), order='F')
-    mat = reshape(mat, (6))
-    mat = concatenate((mat, [0, 0, 1]))
-    mat = reshape(mat, (3, 3))
+    mat = transforToMatrix(transform)
     
     return dot(mat, coord)[:-1]
 
 
-
-def getHeadCircle():
-    cx, cy, rx, ry, transform = electrodesSVG.getHeadCircleProp()
-
-    r = arange(0, 2.0*pi+0.1, 0.1)
-    xl = float(rx)*cos(r) + float(cx)
-    yl = float(ry)*sin(r) + float(cy)
-
+def transforToMatrix(transform):
     mat = map(float, re.split(r'\(|\)|,', transform)[1:-1])
     mat = reshape(mat, (2, 3), order='F')
     mat = reshape(mat, (6))
     mat = concatenate((mat, [0, 0, 1]))
     mat = reshape(mat, (3, 3))
+    return mat
 
+
+
+
+# For an ellipse with center (cx, cy) and rays rx and ry, transformed following
+# the affine transform "transform", compute the Cartesian coordinates arround the
+# ellipse for angulare value r in (rads).
+def transformEllipticalCoordinates(r, cx, cy, rx, ry, transform):
+    xl = float(rx)*cos(r) + float(cx)
+    yl = float(ry)*sin(r) + float(cy)
+
+    mat = transforToMatrix(transform)
+    
     res = zeros((len(xl), 2))
     for x, y, i in zip(xl, yl, range(len(xl))):
          #print mat.shape, array([x, y, 1.0]).shape
@@ -104,8 +86,31 @@ def getHeadCircle():
 
     return res
 
-#listeElectrodes = ['Fp1', 'Fp2', 'F3', 'F4', 'F7', 'F8', 'C3', 'C4', 'P3', 
- #                           'P4', 'O1', 'O2', 'T3', 'T4', 'T5', 'T6', 'Fz', 'Cz', 'Pz']
+
+
+
+def getHeadCircle():
+    cx, cy, rx, ry, transform = electrodesSVG.getHeadCircleProp()
+
+    r = arange(0, 2.0*pi+0.1, 0.1)
+    return transformEllipticalCoordinates(r, cx, cy, rx, ry, transform)
+
+
+
+def transformCircle((cx, cy, rx, ry, transform)):
+
+    r = array([0.0, 0.5])*pi
+    res = transformEllipticalCoordinates(r, cx, cy, rx, ry, transform)
+         
+    cx = res[1, 0]
+    rx = abs(res[0, 0] - cx)
+    cy = res[0, 1]
+    ry = abs(res[1, 1] - cy)
+    res[:, 1]
+
+    return cx, cy, rx, ry
+
+
 
 
 def showColorMap(listeElectrodes, zVal):
@@ -130,30 +135,31 @@ def getZZ(listeElectrodes, zVal):
 
     cx, cy, transform = electrodesSVG.getElectrodeCoordinates(listeElectrodes)
     
-    x = []
-    y = []
-    z = []
+    # Computing the coordinate of the electrodes.
+    x_electrode = []
+    y_electrode = []
+    z_electrode = []
     for electrode in listeElectrodes:
         transformedCoord = getTransformedCoord(cx[electrode], cy[electrode], transform[electrode])
-        x.append(transformedCoord[0])
-        y.append(transformedCoord[1])
-        z.append(zVal[electrode])
+        x_electrode.append(transformedCoord[0])
+        y_electrode.append(transformedCoord[1])
+        z_electrode.append(zVal[electrode])
        
 
-    points  = array([x,y]).T
-        
+    # Computing inter/extrapolated amplitude of the zVal variable at coordinates
+    # along the head circle. 
     circle = getHeadCircle()
-    headZ = griddata(points, array(z), (circle[:, 0], circle[:, 1]), method='nearest')        
+    z_head = griddata((x_electrode, y_electrode), array(z_electrode), 
+                     (circle[:, 0], circle[:, 1]), method='nearest')        
         
-    points  = array([x,y]).T
-
-    points2 = array([concatenate((x, circle[:, 0])), concatenate((y, circle[:, 1]))]).T
+    x = concatenate((x_electrode, circle[:, 0]))
+    y = concatenate((y_electrode, circle[:, 1]))
+    z = concatenate((z_electrode, z_head))
         
-    xnew = arange(min(x)-100, max(x)+100, 1)
-    ynew = arange(min(y)-100, max(y)+100, 1)
-    xx, yy = meshgrid(xnew, ynew)
+    xx, yy = meshgrid(arange(min(x), max(x)), 
+                      arange(min(y), max(y)))
     
-    return griddata(points2, concatenate((z, headZ)), (xx, yy), method='cubic')
+    return griddata((x, y), z, (xx, yy), method='cubic')
             
 
 
@@ -172,34 +178,21 @@ def computeColorMapPval(listeElectrodes, zVal, pVal, minZZ=-0.02, maxZZ=0.02):
     circle = getHeadCircle()
     pylab.plot(circle[:, 0], circle[:, 1], 'k')    
             
-    img=mpimg.imread(os.path.dirname(os.path.realpath(__file__))  + "\\eeg_electrodes_10-20_small.png")  
     
-
-    M = zz.shape[0]
-    N = zz.shape[1]
-    Mat = zeros((M, N, 3))    
-
-    deltaZZ = maxZZ-minZZ
-
-    print np.min(zz), np.max(zz)
-
-    #print minZZ, maxZZ    
-    
-    #s = -(pp -0.001)/(0.2-0.001) + 1.0
     s = (pp -0.2)/(0.8-0.2)
-    h = (zz-minZZ)/deltaZZ*240.0
-    v = 1.0
-    for i1 in range(M):
-        for i2 in range(N):
-            r, g, b = hsv2rgb(min(max(h[i1, i2], 0.0), 240.0), min(max(s[i1, i2], 0.0), 1.0), v)
-            Mat[i1, i2, 0] = float(r)/255.0
-            Mat[i1, i2, 1] = float(g)/255.0
-            Mat[i1, i2, 2] = float(b)/255.0
- 
+    h = (zz-minZZ)/(maxZZ-minZZ)
+
+    Mat = ones((zz.shape[0], zz.shape[1], 3))    
+    Mat[:, :, 0] = minimum(maximum(h, 0.0))   # H
+    Mat[:, :, 1] = minimum(maximum(s, 0.0), 1.0)     # S
+    # V = 1
+    
+    Mat = hsv_to_rgb(Mat)
 
     #extent: [ None | scalars (left, right, bottom, top) ]
     pylab.imshow(Mat, origin="upper", extent=[0.025, 0.97, -0.015, 0.935])       
-    #pylab.colorbar()
+
+    img=mpimg.imread(os.path.dirname(os.path.realpath(__file__))  + "\\eeg_electrodes_10-20_small.png")  
     pylab.imshow(img, extent=[0.0, 1.0, 0.0, 1.0])    
 
 
@@ -221,7 +214,6 @@ def computeColorMap(listeElectrodes, zVal, minZZ=0.00, maxZZ=0.02):
     circle = getHeadCircle()
     pylab.plot(circle[:, 0], circle[:, 1], 'k')    
             
-    img=mpimg.imread(os.path.dirname(os.path.realpath(__file__))  + "\\eeg_electrodes_10-20_small_whiteContour.png")  
     
 
     M = zz.shape[0]
@@ -244,10 +236,10 @@ def computeColorMap(listeElectrodes, zVal, minZZ=0.00, maxZZ=0.02):
             #Mat[i1, i2, 2] = float(b)/255.0
             Mat[i1, i2] = hij
  
-
-    #extent: [ None | scalars (left, right, bottom, top) ]
     pylab.imshow(Mat, origin="upper", extent=[0.025, 0.97, -0.015, 0.935])       
-    #pylab.colorbar()
+
+
+    img=mpimg.imread(os.path.dirname(os.path.realpath(__file__))  + "\\eeg_electrodes_10-20_small_whiteContour.png")  
     pylab.imshow(img, extent=[0.0, 1.0, 0.0, 1.0])    
 
 
@@ -277,33 +269,6 @@ def saveColorMap(listeElectrodes, zVal, pVal, filename, minZZ=0.00, maxZZ=0.02):
 
 
 
-def transformCircle((cx, cy, rx, ry, transform)):
-
-    r = array([0.0, 0.5])*pi
-    xl = float(rx)*cos(r) + float(cx)
-    yl = float(ry)*sin(r) + float(cy)
-
-    mat = map(float, re.split(r'\(|\)|,', transform)[1:-1])
-    mat = reshape(mat, (2, 3), order='F')
-    mat = reshape(mat, (6))
-    mat = concatenate((mat, [0, 0, 1]))
-    mat = reshape(mat, (3, 3))
-
-    res = zeros((len(xl), 2))
-    for x, y, i in zip(xl, yl, range(len(xl))):
-         #print mat.shape, array([x, y, 1.0]).shape
-         res[i, :] = dot(mat, array([x, y, 1.0]))[:-1]
-         
-    cx = res[1, 0]
-    rx = abs(res[0, 0] - cx)
-    cy = res[0, 1]
-    ry = abs(res[1, 1] - cy)
-    res[:, 1]
-
-    return cx, cy, rx, ry
-
-
-
 
 class HeadDrawing:
     def __init__(self):
@@ -322,10 +287,11 @@ class HeadDrawing:
             self.electrodePatch[elect] = patches.Ellipse((self.cx[elect], self.cy[elect]), 2.0*self.rx[elect], 
                                                                               2.0*self.ry[elect], angle=0.0, fc="white")
     
-        self.arrowPatch = []
+        self.arrowPatch     = []
         
-        self.ColorMap = None
-        self.s        = None
+        self.ColorMap       = None
+        self.s              = None
+        self.colorbarDict   = None
     
     
     def setElectrodeList(self, electrodeList):
@@ -347,7 +313,8 @@ class HeadDrawing:
         self.arrowPatch.append(patches.FancyArrowPatch((x1, y1), (x2, y2), arrowstyle='-|>',mutation_scale=20, color=color, alpha=alpha))
 
 
-    def addColorMap(self, listeElectrodes, zVal, minZZ=None, maxZZ=None, sVal=None, smin=0.0, smax=1.0):
+    def addColorMap(self, listeElectrodes, zVal, minZZ=None, maxZZ=None, 
+                                           sVal=None, smin=0.0, smax=1.0):
         
         valDict = {}      
         for elect, val in zip(listeElectrodes, zVal):
@@ -358,19 +325,9 @@ class HeadDrawing:
         if maxZZ is None:
             maxZZ = max(zVal)
         
-        #print valDict
-        zz = getZZ(listeElectrodes, valDict)        
-            
-        M = zz.shape[0]
-        N = zz.shape[1]
-
-        self.ColorMap = zeros((M, N, 3))    
-    
-        deltaZZ = maxZZ-minZZ
-    
-        h = (zz-minZZ)/deltaZZ            
-            
-            
+                        
+        h = (getZZ(listeElectrodes, valDict)-minZZ)/(maxZZ-minZZ)            
+        
         s = None            
         if not sVal is None:
             sDict = {}      
@@ -387,27 +344,43 @@ class HeadDrawing:
                     
             self.s = ss
 
+
+        self.ColorMap = ones((h.shape[0], h.shape[1], 3))                
+        self.ColorMap[:, :, 0] = -(minimum(maximum(h, 0.0), 1.0)-1)*2.0/3.0      # H
+        if not s is None:
+            self.ColorMap[:, :, 1] = minimum(maximum(s, 0.0), 1.0)          # S
+        #else S = 1
+        # V = 1
+        self.ColorMap[isnan(h), :] = [0.0, 0.0, 1.0]  #use white for nans       
+        self.ColorMap = hsv_to_rgb(self.ColorMap)
      
-        v = 1.0
-        for i1 in range(M):
-            for i2 in range(N):
-                if isnan(zz[i1, i2]):
-                    self.ColorMap[i1, i2, 0] = 1.0
-                    self.ColorMap[i1, i2, 1] = 1.0
-                    self.ColorMap[i1, i2, 2] = 1.0                    
-                else:             
-                    if s is None:
-                        sij = 1.0
-                    else:
-                        sij = min(max(s[i1, i2], 0.0), 1.0)   
-                    hij = min(max(h[i1, i2], 0.0), 1.0)   
-                    r, g, b = hsv2rgb(hij*240.0, sij, v)
-                    self.ColorMap[i1, i2, 0] = float(r)/255.0
-                    self.ColorMap[i1, i2, 1] = float(g)/255.0
-                    self.ColorMap[i1, i2, 2] = float(b)/255.0
-     
+
+        if s is None:    
+            steps = arange(0, 1.1, 0.1)
+            hsv = ones((1, 11, 3))
+            hsv[:, :, 0] = -(steps-1)*2.0/3.0
+            rgb = hsv_to_rgb(hsv)
+            R = [((step, r, r)) for step, r in zip(steps, rgb[0, :, 0])]
+            G = [((step, g, g)) for step, g in zip(steps, rgb[0, :, 1])]
+            B = [((step, b, b)) for step, b in zip(steps, rgb[0, :, 2])]
+                
+            self.colorbarDict = {'red'  : tuple(R),
+                                 'green': tuple(G),
+                                 'blue' : tuple(B),
+                                 'min':minZZ,
+                                 'max':maxZZ}       
+
     
-    def plot(self, save=False, filename="fig.svg", colorbarDict=None):
+    
+    def setColorBarDict(self, cdict):
+        self.colorbarDict = cdict
+    
+    
+    def getColorBarDict(self):
+        return self.colorbarDict
+
+
+    def plot(self, save=False, filename="fig.svg", showColorBar=False):
             
         if save:
             matplotlib.use('Agg')
@@ -418,24 +391,21 @@ class HeadDrawing:
         
         fig = pylab.figure(figsize=(10, 10.5))   
         
-        if not colorbarDict is None:    
+        if showColorBar and not self.colorbarDict is None:    
             gs = gridspec.GridSpec(1, 2, width_ratios=[10, 0.5]) 
             ax = pylab.subplot(gs[0])            
         else:
             ax = pylab.gca()        
         
-        #thismanager = pylab.get_current_fig_manager()
-        #thismanager.window.wm_geometry("500x500+0+0")     
-    
         if not self.ColorMap is None:
-            pylab.imshow(self.ColorMap, origin="upper", extent=[cx-rx-52, cx+rx+50, cy+ry+44, cy-ry-43])  
+            pylab.imshow(self.ColorMap, origin="upper", extent=[cx-rx, cx+rx, cy+ry, cy-ry])  
             if not self.s is None:
                 pylab.contour(self.s, [-1, 0.95], colors='k',  origin="upper", linestyles="dashed", 
-                              linewidths=3.0, extent=[cx-rx-52, cx+rx+50, cy+ry+44, cy-ry-43])
+                              linewidths=3.0, extent=[cx-rx, cx+rx, cy+ry, cy-ry])
              
     
         img=mpimg.imread(os.path.dirname(os.path.realpath(__file__))  + "\\eeg_electrodes_10-20_small_clear.png")  
-        pylab.imshow(img, extent=[cx-rx-65, cx+rx+65, cy+ry+27, cy-ry-80.5])  
+        pylab.imshow(img, extent=[cx-rx-59, cx+rx+59, cy+ry+17, cy-ry-72])  
     
     
         for elect in self.__electrodeList : 
@@ -455,16 +425,17 @@ class HeadDrawing:
                 
         pylab.axis('off')
         
-        if not colorbarDict is None:      
+        if showColorBar and not self.colorbarDict is None:
             ax = pylab.subplot(gs[1])
-            my_cmap = matplotlib.colors.LinearSegmentedColormap('my_colormap',colorbarDict, 256)
+            my_cmap = matplotlib.colors.LinearSegmentedColormap('my_colormap',self.colorbarDict, 256)
             data = np.outer(np.arange(101),np.ones(5)) 
             pylab.imshow(data, cmap=my_cmap, origin="lower")
             ax.get_xaxis().set_visible(False)
             ax.get_yaxis().tick_right()
             ticks = np.arange(0, 101, 25)
             ax.set_yticks(ticks)
-            ax.set_yticklabels(np.round(ticks/100.0*(colorbarDict["max"]-colorbarDict["min"])+colorbarDict["min"], 4))
+            ax.set_yticklabels(np.round(ticks/100.0*(self.colorbarDict["max"]-
+                        self.colorbarDict["min"])+self.colorbarDict["min"], 4))
             gs.tight_layout(fig)
 
 
@@ -558,33 +529,26 @@ def plotArrowDiagram(listVal, pairs, minDelay=None, maxDelay=None,
                           (0.5, 0.0, 0.0),
                           (1.0, 200./255., 200./255.)),
                  'min':minDelay,
-                 'max':maxDelay}    
-    else:
-        cdict = None
+                 'max':maxDelay}   
+        drawing.setColorBarDict(cdict)
     
     if filename is None:
-        drawing.plot(False, colorbarDict=cdict)
+        drawing.plot(False, showColorBar=addColorbar)
     else:
-        drawing.plot(True, filename, colorbarDict=cdict)
+        drawing.plot(True, filename, showColorBar=addColorbar)
 
 
 
 def plotColorMap(electrodes, var, filename=None, addColorbar=True):
-    
+    if not filename is None:
+        matplotlib.use('Agg')
+        
     drawing = HeadDrawing()
+    
     drawing.addColorMap(electrodes, var)
-    
-    from matplotlib.cm import jet
 
-    if addColorbar:
-        cdict = jet.__dict__['_segmentdata']    
-        cdict['min'] = min(var)
-        cdict['max'] = max(var)
-    else:
-        cdict = None
-    
     if filename is None:
-        drawing.plot(False, colorbarDict=cdict)
+        drawing.plot(False, showColorBar=addColorbar)
     else:
-        drawing.plot(True, filename, colorbarDict=cdict)
+        drawing.plot(True, filename, showColorBar=addColorbar)
 
