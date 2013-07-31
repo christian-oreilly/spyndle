@@ -10,9 +10,12 @@ import re
 
 from pandas import DataFrame, read_csv
 from glob import glob
-from scipy import unique, where, percentile, concatenate, array, mod, arange
+from scipy import unique, where, percentile, concatenate, array, arange
 from scipy import isnan, sqrt, nan, logical_not, reshape, median, std
 from sklearn.covariance import MinCovDet
+
+from spyndle.EEG import getActiveElectrode
+
 
 
 ###############################################################################
@@ -61,6 +64,8 @@ def findBidirectionnality(Data, refRow, candidateInds):
     if refRow in candidateInds:
         candidateInds = candidateInds[candidateInds != refRow]
         
+    if len(candidateInds) == 0:
+        return None
     
     # S'il y a plusieurs candidats, on ne garde que celui dont l'occurence est 
     # la plus proche de celle de noRow. Cela correspond
@@ -75,14 +80,20 @@ def findBidirectionnality(Data, refRow, candidateInds):
 
 
 
+## Déplacé dans EEG.system_10_20 
 """
  Considering an EEG channel as constituted of two electrodes, a passive
  (the reference) and an active (the other), this function return the 
  active electrode name from the channel label. This is used, for example
  to get 'F3' from 'F3-ref'. The function tries to 
  find in channelLabel the presence of the strings electrodeNames
-"""
-def getActiveElectrode(electrodeNames, excludePatterns, channelLabel):
+def getActiveElectrode(channelLabel, electrodeNames=['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 
+                                                'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 
+                                                'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz', 'Oz',
+                                                'fp1', 'fp2', 'f7', 'f8', 'f3', 'f4', 
+                                                't3', 't4', 'c3', 'c4', 't5', 't6', 'p3', 
+                                                'p4', 'o1', 'o2', 'fz', 'cz', 'pz', 'oz'], 
+                                                excludePatterns=[]):
     
     retName = ""
     for electrodeName in electrodeNames:
@@ -97,7 +108,7 @@ def getActiveElectrode(electrodeNames, excludePatterns, channelLabel):
             return ""
             
     return retName
-
+"""
 
 
 """
@@ -124,12 +135,12 @@ def getNotOutliers(data, coef=1.5):
 ###########################################################################    
 # Computing the cutoff
 ###########################################################################
-def computingCutOff(path, fileNameAsyncList, channelList, electrodeList, alpha):        
+def computingCutOff(path, fileNameAsyncList, channelList, electrodeList, alpha = 10.0):        
 
     dataCutOff = DataFrame()
     # For eletrodes of this recording night (these are the reference electrodes)
     for refElectrode, refChannel, fileNameAsync in zip(electrodeList, channelList, fileNameAsyncList):
-        async = read_csv(path + fileNameAsync, sep=';') #"spindleDelays_offset_" + night + ".bdf_" + refChannel + ".txt", sep=";") 
+        async = read_csv(path + fileNameAsync, sep=';') 
 
         for testElectrode, testChannel in zip(unique(electrodeList), unique(channelList)) :
             if testElectrode != refElectrode: # and not any(is.na(async[nameSim])) :
@@ -154,7 +165,6 @@ def computingCutOff(path, fileNameAsyncList, channelList, electrodeList, alpha):
 ###########################################################################
 def readingSyncData(path, night, fileNameSyncList, channelList, electrodeList):        
 
-    
     DataProp = DataFrame()
     # For eletrodes of this recording night (these are the reference electrodes)
     for refElectrode, refChannel, fileNameSync in zip(electrodeList, channelList, fileNameSyncList):
@@ -165,17 +175,13 @@ def readingSyncData(path, night, fileNameSyncList, channelList, electrodeList):
                      
             if testElectrode != refElectrode: # and not any(is.na(async[nameSim])) :
                 
-                nameSim   = "similarity_" + testChannel   
-                nameDelay = "delay_" + testChannel   
-                   
-                sim       = sync[nameSim]
-                delays    = sync[nameDelay]
+                sim       = sync["similarity_" + testChannel]
+                delays    = sync["delay_"      + testChannel]
                 
-                          
                 if len(sim):  
                     # Keep all the fields exctep the delay and similarity related ones
-                    colNames =  [colName for colName in sync.columns.tolist() if not ("delay_" in colName or "similarity_" in colName)] 
-                    newData = sync[colNames]
+                    colNames = [colName for colName in sync.columns.tolist() if not ("delay_" in colName or "similarity_" in colName)] 
+                    newData  = sync[colNames]
                     
                     # Add the other fields
                     newData["ref"]          = refElectrode
@@ -211,17 +217,24 @@ def propagationRejection(night, dataIn, dataCutOff, alpha, verbose = True):
                 # Rejection because of a too low similarity
                 cutoff    = dataCutOff["cutoff"].iloc[where((dataCutOff["ref"]  == refElectrode)*
                                                             (dataCutOff["test"] == testElectrode))[0]]
+                                 
+                # Cutoff should be either equal to a float or to []
+                # The "if" clause is necessary to avoid using len() on
+                # a fload, raising an error.
                 if isinstance(cutoff, float): 
                     pass                   
                 elif len(cutoff) == 0: 
-                    continue                                                         
-                                                      
-                IND1      = where(dataIn2["similarity"] >= float(cutoff))[0] 
+                    continue 
+                else:
+                    raise TypeError                                                        
+                                   
+                N    = len(dataIn2["similarity"])
+                IND1 = where(dataIn2["similarity"] >= float(cutoff))[0] 
                 if len(IND1) == 0: 
                     continue
                 
                 # Expected false detection rate
-                FDR = (alpha/100.0)/(float(len(IND1))/len(dataIn2["similarity"]))
+                FDR = (alpha/100.0)/(float(len(IND1))/float(N))
                 
                 # Rejection of delays outliers
                 IND2      = getNotOutliers(dataIn2["delay"].iloc[IND1])
@@ -267,8 +280,8 @@ def identifySPF(dataProp) :
           break
     
     for noRow in range(N):
-        if mod(noRow, 1000) == 0:
-            print noRow, N
+        #if mod(noRow, 1000) == 0:
+        #    print noRow, N
         
         rowBiDir = dataProp.bidirect[noRow]        
         if rowBiDir > -1 :
@@ -364,7 +377,10 @@ def removeBidirectionnalDuplicates(dataProp):
  CORRECTING DELAYS TO HAVE ONLY PROPAGATION WITH POSITIVE TIME DELAYS 
 """
 def negativeDelayCorrection(dataProp): 
-            
+    
+    if not "delay" in dataProp:
+        return dataProp
+        
     indNeg                          = dataProp["delay"] < 0.0   
     test                            = dataProp["test"][indNeg]
     ref                             = dataProp["ref"][indNeg]
@@ -375,6 +391,9 @@ def negativeDelayCorrection(dataProp):
     dataProp["inverted"][indNeg]    = 1
 
     return dataProp
+
+
+
 
 
 
@@ -404,13 +423,12 @@ def computeSPF_allFiles(path, offsetFilePattern="spindleDelays_offset_*.bdf_*.tx
     files = glob(path + offsetFilePattern)
     rePattern =  offsetFilePattern.replace("*", "|").replace(".", '\.')
         
-    tmp = map(lambda file: re.split(rePattern, file)[1:3], files)
+    tmp = map(lambda f: re.split(rePattern, f)[1:3], files)
     nights = [record[0] for record in tmp]
     channels = [record[1] for record in tmp]
     
     # Keeping only the part of the channel name identifying the active electrode.
-    electrodes = map(lambda electrode: getActiveElectrode(includeElectrodePatterns, 
-                                                 excludeElectrodePatterns, electrode), channels)
+    electrodes = map(lambda channel: getActiveElectrode(channel, includeElectrodePatterns, excludeElectrodePatterns), channels)
 
     # for each subject in the file list
     for night in unique(nights):
@@ -446,25 +464,48 @@ def computeSPF(path, night, fileNameSyncList, fileNameAsyncList, channelList, el
     # Computing cutoff threshold from asychronized comparisons
     dataCutOff = computingCutOff(path, fileNameAsyncList, 
                                     channelList, electrodeList, alpha)
-                                    
+              
+    """
+    print path
+    print night
+    print fileNameSyncList
+    print fileNameAsyncList
+    print channelList
+    print electrodeList
+    print alpha
+    print verbose   
+                 
+    import pandas
+    pandas.set_option('display.max_rows', 500)
+    pandas.set_option('display.height', 500)
+    print dataCutOff                                    
+    """
     # Reading synchronized comparisons
     dataProp = readingSyncData(path, night, fileNameSyncList,
                                     channelList, electrodeList)
     
     
     # Saving the result.
-    dataProp.to_csv(path + "test_" + night + ".csv", sep=";")    
+    dataProp.to_csv(path + "test_" + night + ".csv", sep=";")                  #######################
     
+
+    # FALSE DETECTION AND OUTLIERS REJECTION
+    dataProp = propagationRejection(night, dataProp, dataCutOff, alpha, verbose)
+
+    dataProp.to_csv(path + "test3_" + night + ".csv", sep=";")                   ########################
+
     # CORRECTING DELAYS TO HAVE ONLY PROPAGATION WITH POSITIVE TIME DELAYS 
     if verbose: 
         print "correcting negative delays"   
     dataProp = negativeDelayCorrection(dataProp)    
 
-    # FALSE DETECTION AND OUTLIERS REJECTION
-    dataProp = propagationRejection(night, dataProp, dataCutOff, alpha, verbose)
+    dataProp.to_csv(path + "test2_" + night + ".csv", sep=";")                   ########################
+
 
     # COMPUTING SPINDLE PROPAGATION FIELD      
     dataProp = identifySPF(dataProp)            
+
+    dataProp.to_csv(path + "test4_" + night + ".csv", sep=";")                   ########################
 
     # REMOVING DUPLICATE PROPAGATION DUE TO BIDIRECTIONNALITY
     if verbose: 
@@ -486,9 +527,12 @@ def computeSPF(path, night, fileNameSyncList, fileNameAsyncList, channelList, el
   aggeragationlevels.
 """            
 def computeAveragePropagation(path, aggeragationlevels,
-                              observationVariables, pattern="correctedData_*.csv", verbose=True):
+                              observationVariables, pattern="correctedData_*.csv", 
+                              verbose=True, minNbValid=40, deltaWindow = 0.5, 
+                              alphaSD = 0.2):
 
-    def computeCellAverages(data, observationVariables, aggeragationlevels, levelInstanciation):
+    def computeCellAverages(data, observationVariables, 
+                            aggeragationlevels, levelInstanciation):
 
         dataOut = {}
         # For the N variables ....
@@ -502,7 +546,7 @@ def computeAveragePropagation(path, aggeragationlevels,
             validX     = validX[logical_not(isnan(validX))]                    
             
             #valids = !(X %in% outTau$out) & !is.na(X)
-            if len(validX) >= 10 :
+            if len(validX) >= minNbValid :   # criterion c4
                 try:
                     # MinCovDet().fit() crashes if we don't make this reshape...
                     validX = reshape(validX, (len(validX), 1))
@@ -534,63 +578,6 @@ def computeAveragePropagation(path, aggeragationlevels,
             
         return DataFrame(dataOut, [1])   
         
-        
-    """                  
-    def computeCellAverages(data, observationVariables, levelInstanciation):
-
-        dataOut = {}
-        # For the N variables ....
-        NbTotal = len(data)
-        for observationVariable in observationVariables:
-            X          = array(data[observationVariable])
-            notOutInd  = getNotOutliers(X, coef=1.5)
-            nbOut      = NbTotal-len(notOutInd)
-            
-            validX     = X[notOutInd]    
-            validX     = validX[logical_not(isnan(validX))]                    
-            
-            #valids = !(X %in% outTau$out) & !is.na(X)
-            if len(validX) >= 10 :
-                # MinCovDet().fit() crashes if we don't make this reshape...
-                validX = reshape(validX, (len(validX), 1))
-                
-                covX    = MinCovDet().fit(validX)
-                meanX   = covX.location_[0]
-                sdX     = sqrt(covX.covariance_[0, 0])
-            else:
-                meanX   = nan
-                sdX     = nan     
-                
-            dataOut[observationVariable + "_mean"]    = meanX
-            dataOut[observationVariable + "_sd"]      = sdX
-            dataOut[observationVariable + "_nbOut"]   = nbOut
-            dataOut[observationVariable + "_nbValid"] = len(validX)
-        
-        for key in levelInstanciation:
-            dataOut[key] = levelInstanciation[key]
-        
-        return dataOut   
-        
-
-
-        
-
-        
-        
-    def recursiveExecution(data, aggeragationlevels, observationVariables, levelInstanciation={}):                              
-    
-        if len(aggeragationlevels) :
-            meanData = []
-            for item in unique(data[aggeragationlevels[0]]) :    
-                levelInstanciation[aggeragationlevels[0]] = item
-                meanData.extend(recursiveExecution(data[data[aggeragationlevels[0]] == item], 
-                                               aggeragationlevels[1:], observationVariables, 
-                                                levelInstanciation))
-            return meanData
-        else:
-            return [computeCellAverages(data, observationVariables, levelInstanciation)]
-    """
-                 
                         
     ##########################################################################
     # Code execution   
@@ -604,23 +591,13 @@ def computeAveragePropagation(path, aggeragationlevels,
         if verbose:
             print night        
         levelInstanciation = {"night":night}
-        #from datetime import datetime        
-        #a= datetime.now()
-        #dataTmp = recursiveExecution(read_csv(f, sep=";"), aggeragationlevels, 
-        #                             observationVariables, levelInstanciation) 
-        #meanData =  meanData.append(DataFrame(dataTmp), ignore_index=True)               
-        #b= datetime.now()
+
         dat          = read_csv(f, sep=";").groupby(aggeragationlevels).apply(lambda x: computeCellAverages(x, observationVariables, aggeragationlevels, levelInstanciation))
         meanData     = meanData.append(dat, ignore_index=True)           
-        #print len(dat), dat
-        
-        #c = datetime.now()
-        #print b-a, c-b
          
-    meanData.to_csv(path + "meanData.csv", sep=";")
+         
+         
+    # Applying rejection criterion c3 and saving the result
+    sdThreshold = deltaWindow*alphaSD/sqrt(12)  
+    meanData.iloc[where(meanData["delay_sd"] < sdThreshold)[0]].to_csv(path + "meanData.csv", sep=";")
     
-#path= 'C:\\DATA\\Julie\\Results\\'
-#computeAveragePropagation(path, aggeragationlevels = ["ref", "test"],
-#                              observationVariables = ["RMSamp", "delay", "duration", "meanFreq", 
-#                                                      "similarity", "slope", "slopeOrigin"], 
-#                                                      pattern="correctedData_*.csv",  verbose=True)    
