@@ -305,7 +305,7 @@ def transformCircle((cx, cy, rx, ry, transform)):
 
 
 
-class headDrawing:
+class HeadDrawing:
     def __init__(self):
         from matplotlib import patches
         
@@ -347,11 +347,16 @@ class headDrawing:
         self.arrowPatch.append(patches.FancyArrowPatch((x1, y1), (x2, y2), arrowstyle='-|>',mutation_scale=20, color=color, alpha=alpha))
 
 
-    def addColorMap(self, listeElectrodes, zVal, minZZ=0.00, maxZZ=0.02, sVal=None, smin=0.0, smax=1.0):
+    def addColorMap(self, listeElectrodes, zVal, minZZ=None, maxZZ=None, sVal=None, smin=0.0, smax=1.0):
         
         valDict = {}      
         for elect, val in zip(listeElectrodes, zVal):
             valDict[elect] = val
+        
+        if minZZ is None:
+            minZZ = min(zVal)
+        if maxZZ is None:
+            maxZZ = max(zVal)
         
         #print valDict
         zz = getZZ(listeElectrodes, valDict)        
@@ -532,7 +537,7 @@ def plotArrowDiagram(listVal, pairs, minDelay=None, maxDelay=None,
     normDelay = np.maximum(normDelay, 0.0)
     normDelay = np.minimum(normDelay, 1.0)
 
-    drawing = headDrawing()
+    drawing = HeadDrawing()
     refs = unique([pair[0] for pair in pairs])
     drawing.setElectrodeList(refs)
 
@@ -561,3 +566,25 @@ def plotArrowDiagram(listVal, pairs, minDelay=None, maxDelay=None,
         drawing.plot(False, colorbarDict=cdict)
     else:
         drawing.plot(True, filename, colorbarDict=cdict)
+
+
+
+def plotColorMap(electrodes, var, filename=None, addColorbar=True):
+    
+    drawing = HeadDrawing()
+    drawing.addColorMap(electrodes, var)
+    
+    from matplotlib.cm import jet
+
+    if addColorbar:
+        cdict = jet.__dict__['_segmentdata']    
+        cdict['min'] = min(var)
+        cdict['max'] = max(var)
+    else:
+        cdict = None
+    
+    if filename is None:
+        drawing.plot(False, colorbarDict=cdict)
+    else:
+        drawing.plot(True, filename, colorbarDict=cdict)
+
