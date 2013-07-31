@@ -124,6 +124,7 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
             
             events = filter(lambda e: e.name == eventName and e.channel == refChannel, reader.events)
             
+            printHeader = True
             artifactPadSample = int(artifactPad*reader.getChannelFreq(refChannel))  
             for i, event in zip(range(len(events)), events):
          
@@ -134,12 +135,10 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                 deltaStart       = deltaSampleStart/reader.getChannelFreq(refChannel)    
                 deltaSampleEnd   = deltaSampleStart    
                 deltaEnd         = deltaStart
-                ####    
-                    
+                #### 
                     
                 startTime = event.startTime -  beforePad  - artifactPad    
                 duration  = event.timeLength + beforePad + afterPad + 2*artifactPad
-                
                 
                 
 
@@ -155,8 +154,18 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                 deltaStartRef = int((refStartTime - (startTime - deltaStart ))*reader.getChannelFreq(refChannel))
                     
                 if deltaStartRef > 0 : 
+                    # In case that the signal is not sufficiently long signal 
+                    # before the spindle to compute delays that are at least half
+                    # of the limit asked by the parameter delta, we reject this spindle
+                    if deltaStartRef >  deltaSampleStart/2:      
+                        # The condition of this assert should never be met if 
+                        # there is no bug in spindle detection and EEG data readers.
+                        assert(startTime - deltaStart <= event.startTime)
+                        continue
+                    
                     deltaSampleStart -= deltaStartRef
                     deltaStart        = deltaSampleStart/reader.getChannelFreq(refChannel)                  
+
 
                 signalsDataRef = reader.read([refChannel], startTime - deltaStart         , duration + deltaStart + deltaEnd)                  
                 
@@ -307,7 +316,8 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
     
                 # Print the header. A header is necessary as the column of these
                 # files may changes depending on avaiablement event properties.
-                if i == 0:        
+                if printHeader:        
+                    printHeader = False
                     keys = event.properties.keys()
                     
                     header = "no;startTime;duration;"

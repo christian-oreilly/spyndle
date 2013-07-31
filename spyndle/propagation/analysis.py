@@ -528,8 +528,7 @@ def computeSPF(path, night, fileNameSyncList, fileNameAsyncList, channelList, el
 """            
 def computeAveragePropagation(path, aggeragationlevels,
                               observationVariables, pattern="correctedData_*.csv", 
-                              verbose=True, minNbValid=40, deltaWindow = 0.5, 
-                              alphaSD = 0.2):
+                              verbose=True, minNbValid=40):
 
     def computeCellAverages(data, observationVariables, 
                             aggeragationlevels, levelInstanciation):
@@ -595,9 +594,10 @@ def computeAveragePropagation(path, aggeragationlevels,
         dat          = read_csv(f, sep=";").groupby(aggeragationlevels).apply(lambda x: computeCellAverages(x, observationVariables, aggeragationlevels, levelInstanciation))
         meanData     = meanData.append(dat, ignore_index=True)           
          
-         
-         
+    meanData.to_csv(path + "meanData.csv", sep=";")
+    
+def applyRejectionC3(data, deltaWindow = 0.5, alphaSD = 0.2):
     # Applying rejection criterion c3 and saving the result
     sdThreshold = deltaWindow*alphaSD/sqrt(12)  
-    meanData.iloc[where(meanData["delay_sd"] < sdThreshold)[0]].to_csv(path + "meanData.csv", sep=";")
+    return data.iloc[where(data["delay_sd"] < sdThreshold)[0]]
     
