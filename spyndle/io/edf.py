@@ -161,7 +161,23 @@ class EDFHeader :
         # misc
         self.headerNbBytes      = int(f.read(8))
         self.subtype            = f.read(44)[:5]
-        self.contiguous         = self.subtype != 'EDF+D'
+        
+        if self.fileType == "EDF":
+            if self.subtype == 'EDF+C':             
+                self.fileType   = "EDF+"
+                self.contiguous = True
+            elif self.subtype == 'EDF+D': 
+                self.fileType   = "EDF+"
+                self.contiguous = False           
+            elif self.subtype == '     ': 
+                self.fileType   = "EDF"
+                self.contiguous = True   
+                
+        elif self.fileType == "BDF":
+            self.contiguous = False           
+ 
+
+             
         self.nbRecords          = int(f.read(8))
         self.recordDuration      = float(f.read(8))  # in seconds
         self.nbChannels         = int(f.read(4))
@@ -284,8 +300,14 @@ class EDFHeader :
         # 44 ascii : reserved
         if self.fileType == "EDF":
             f.write(" "*44) 
+        elif self.fileType == "EDF+" and self.contiguous:
+            f.write("EDF+C" + " "*39)     
+        elif self.fileType == "EDF+" and not self.contiguous:
+            f.write("EDF+D" + " "*39)              
         elif self.fileType == "BDF":
             f.write("24BIT" + " "*39)            
+        
+        
         
         
         # 8 ascii : number of data records (-1 if unknown)
@@ -360,8 +382,10 @@ class EDFReader(EEGDBReaderBase) :
         with io.open(fname, 'rb') as fileObj:
             self.header = EDFHeader(fileObj, self.fileName)  
         
-            super(EDFReader, self).__init__(self.getPageDuration())        
-            self.readEvents(fileObj)        
+            super(EDFReader, self).__init__(self.getPageDuration()) 
+            
+            if self.header.fileType == "EDF+" or self.header.fileType == "BDF" :
+                self.readEvents(fileObj)        
         
 
     def getFileName(self): 
