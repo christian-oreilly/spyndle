@@ -411,6 +411,8 @@ class EDFReader(EEGDBReaderBase) :
         for noPage in range(self.getNbPages()):   
             rawRecord = self.readRawRecord(fileObj)  
             tals      = tal(rawRecord[EVENT_CHANNEL])
+            #print rawRecord[EVENT_CHANNEL]
+            #print tals
                        
             #print rawRecord[EVENT_CHANNEL].decode('utf-8')            
             
@@ -628,7 +630,7 @@ class EDFReader(EEGDBReaderBase) :
             #return array([struct.unpack('<i', samples[noByte:(noByte+3)] + ('\0' if samples[noByte+2] < '\x80' else '\xff'))[0] for noByte in range(0, len(samples), 3)])
             
             ##### this one
-            samples = np.fromstring(samples, '<i1')
+            samples = np.fromstring(samples, '<u1')
             
             N   = len(samples)
             ret = np.zeros(N/3, dtype='int32')
@@ -636,8 +638,7 @@ class EDFReader(EEGDBReaderBase) :
             code = """
                         int i, i2;
                         for (i=0, i2=0; i<N; i+=3, i2++)
-                            ret(i2) = ((samples(i+2) < 128 ? 0 : 255) << 24) | (samples(i+2) << 16) | (samples(i+1) << 8) | samples(i)  ;
-                              
+                            ret(i2) = ((samples(i+2) < 128 ? 0 : 255) << 24) | (samples(i+2) << 16) | (samples(i+1) << 8) | samples(i);
                         return_val = 1;
                  """  
             

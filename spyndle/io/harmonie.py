@@ -1004,9 +1004,9 @@ class HarmonieReader(EEGDBReaderBase):
                     dig_range = digital_max - digital_min
                     assert numpy.all(phys_range > 0)
                     assert numpy.all(dig_range > 0)
-                    gain = phys_range / dig_range                          
+                    gain = dig_range/phys_range                          
                     
-                    recordedSignal = (recordedSignal - physical_min)/gain + digital_min       
+                    recordedSignal = (recordedSignal - physical_min)*gain + digital_min       
 
 
 
