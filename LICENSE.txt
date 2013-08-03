@@ -1,3 +1,15 @@
+For personnal, educationnal, and research purpose, this software is 
+provided under the Gnu GPL (V.3) license. To use this software in
+commercial application, please contact the author. 
+
+Author: Christian O'Reilly (christian.oreilly@umontreal.ca)
+Date  : August 2, 2013
+
+Please find below a copy of the Gnu GPL (V.3) license: 
+
+
+
+
                     GNU GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
 
