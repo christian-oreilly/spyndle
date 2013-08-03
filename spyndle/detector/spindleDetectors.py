@@ -38,8 +38,8 @@ import os, gc, copy, numpy
 
 from abc import ABCMeta, abstractmethod
 
-from scipy import concatenate, zeros, mean, sqrt, mod, diff, where, fft, linspace
-from scipy import array, arange, ones, unique, logical_and
+from scipy import concatenate, zeros, mean, sqrt, mod, diff, where, fft
+from scipy import array, arange, ones, unique
 from scipy.stats.mstats import mquantiles
 from scipy.fftpack import fftfreq
 from scipy.io import savemat, loadmat
@@ -49,7 +49,7 @@ from datetime import timedelta
 
 from spyndle import Filter
 from spyndle import cycleDefinitions, computeDreamCycles
-from spyndle import computeMST
+from spyndle import computeST
 from spyndle.errorMng import ErrPureVirtualCall
 from spyndle.io import EEGDBReaderBase, Event
 
@@ -406,7 +406,7 @@ class SpindleDectector:
          for startInd, stopInd, spindle in zip(startSpinInd, stopSpinInd, newSpindles):
             sig       = signal[startInd:stopInd]
    
-            X, fX = computeMST(sig, fs, 0.0, 1.0, fmin=self.lowFreq-1, fmax=self.highFreq+1)  
+            X, fX = computeST(sig, fs, fmin=self.lowFreq-1, fmax=self.highFreq+1)  
             
             Y = abs(numpy.transpose(X))
                             
@@ -877,7 +877,7 @@ class SpindleDectectorSigma(SpindleDectector):
                     else:                       # Other iterations
                         indexes = arange(i*nbWin-nbPad, i*nbWin + nbWin+nbPad)
     
-                    X, fX = computeMST(signal[indexes], fs, fmin=4.0, fmax=40.0)  
+                    X, fX = computeST(signal[indexes], fs, fmin=4.0, fmax=40.0)  
                     
                     if i == 0 :            # First iteration
                         indexesNoPad = arange(nbWin) 
@@ -896,7 +896,7 @@ class SpindleDectectorSigma(SpindleDectector):
     
                     sigmaTMP = array(2*maxsigma/(meanlow + meanhigh))
                     self.sigmaIndex[indexes[where(maxalpha <= maxsigma)[0]]] = sigmaTMP[where(maxalpha <= maxsigma)[0]]
- 
+                
                 savemat(fileName, {"sigma":self.sigmaIndex})
 
 
@@ -1073,7 +1073,7 @@ class SpindleDectectorRSP(SpindleDectector):
     
     
                     #if any(stageIndicator[indexes]):    
-                    X, fX = computeMST(signal[indexes], fs, fmin=0.5, fmax=40.0)  
+                    X, fX = computeST(signal[indexes], fs, fmin=0.5, fmax=40.0)  
                     
                     if i == 0 :            # First iteration
                         indexesNoPad = arange(nbWin) 
