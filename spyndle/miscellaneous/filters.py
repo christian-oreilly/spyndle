@@ -387,7 +387,7 @@ unavoidable.
     # x's 'axis' dimension must be bigger than edge.
     #if x.shape[axis] <= edge:
     if len(x) <= edge:
-        raise ValueError("The length of the input vector x must be at least "
+        raise ValueError("The length of the input vector x must be larger than "
                          "padlen, which is %d." % edge)
 
     if padtype is not None and edge > 0:
@@ -525,7 +525,7 @@ unavoidable.
     # x's 'axis' dimension must be bigger than edge.
     #if x.shape[axis] <= edge:
     if len(x) <= edge:
-        raise ValueError("The length of the input vector x must be at least "
+        raise ValueError("The length of the input vector x must be larger than "
                          "padlen, which is %d." % edge)
 
     if padtype is not None and edge > 0:
