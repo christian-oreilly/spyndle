@@ -21,7 +21,7 @@ from datetime import datetime
 from scipy import array, concatenate, zeros
 from scipy.io import savemat            
             
-from spyndle.filters import channelType
+from spyndle.miscellaneous import channelType
 from spyndle.io import Event, EEGDBReaderBase, RecordedChannel
 
 
