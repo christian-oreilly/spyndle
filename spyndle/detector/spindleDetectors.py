@@ -541,90 +541,86 @@ class SpindleDectectorRMS(SpindleDectector):
                 for stage in self.detectionStages :
                     currentStageEvents.extend(filter(lambda e: e.name.lower() == stage.lower(), stageEvent)  ) 
 
-                if len(currentStageEvents) :
-                    samplesIndexes = concatenate([where((channelTime >= event.timeStart())*
-                                                        (channelTime <= event.timeEnd()))[0] 
-                                                  for event in currentStageEvents])
-
-    
-                    treshold = mquantiles(self.rectSig[samplesIndexes], self.quantileThreshold)[0]
-                    
-                    #0.375179523976 #
-                    #print "Threshold:", treshold
-                    
-                    spinMarkers = concatenate(([0], diff((self.rectSig[samplesIndexes] > treshold).astype(int))))
-                    
-                    # The signal indexes corresponding to spinMarkers are kept in samplesIndexes                
-                    
-                    startSpinInd = samplesIndexes[where(spinMarkers == 1)[0]]
-                    stopSpinInd  = samplesIndexes[where(spinMarkers == -1)[0]]
-                          
-                          
-                    if len(stopSpinInd) == 0 or len(startSpinInd) == 0:
-                        continue
-                    
-                    #The first marker should be a start marker.                
-                    if stopSpinInd[0] < startSpinInd[0]:
-                        stopSpinInd = stopSpinInd[1:]
-    
-                    indEnd = min(len(startSpinInd), len(stopSpinInd))
-                    
-                    startSpinInd = startSpinInd[:indEnd]
-                    stopSpinInd  = stopSpinInd[:indEnd] 
-        
-                    if len(stopSpinInd) == 0 or len(startSpinInd) == 0:
-                        continue
-
-                    assert(all(stopSpinInd - startSpinInd > 0))
-                    assert(all(startSpinInd[1:] - stopSpinInd[:-1] > 0))
-    
-                    gapToKeepInd = where(channelTime[startSpinInd[1:]] - channelTime[stopSpinInd[:-1]] > self.maxAllowableGapBellowThreshold)[0]
-                    
-                    startSpinInd = startSpinInd[concatenate(([0], gapToKeepInd+1))]
-                    stopSpinInd  = stopSpinInd[concatenate((gapToKeepInd, [len(stopSpinInd)-1]))]
-                    
-                    
-
-                    duration = channelTime[stopSpinInd] - channelTime[startSpinInd]
-                    ##Accept discontinuity of up to 3 time samples.
-                    continuous = [(max(diff(channelTime[start:stop])) <= 3.0/fs if stop - start > 10 else False ) for start, stop in zip(startSpinInd, stopSpinInd)]    
-                    
-                    valid        = (duration >= self.minimalSpindleDuration)*\
-                                   (duration <= self.maximalSpindleDuration)*(continuous)      
-                    startSpinInd = startSpinInd[valid]
-                    stopSpinInd  = stopSpinInd[valid]
-                    duration     = duration[valid]               
-                    
-                    newSpindles = [DetectedSpindle(channel, start, end) for start, end in zip(channelTime[startSpinInd], channelTime[stopSpinInd])]   
-                    
-                    # As the spindles are localized and the signal is extracted and filtred,
-                    # it is efficient to compute spindles characteristics directly here.
-                    if self.computeRMS :
-                        for startInd, stopInd, spindle in zip(startSpinInd, stopSpinInd, newSpindles):
-                            spindle.RMSamp = sqrt(mean(signal[startInd:stopInd]**2))
+                if len(currentStageEvents) == 0:  continue
                 
-                    if self.computeFreq :
-                        for startInd, stopInd, spindle in zip(startSpinInd, stopSpinInd, newSpindles):
-                            sig       = signal[startInd:stopInd]
+                samplesIndexes = concatenate([where((channelTime >= event.timeStart())*
+                                                    (channelTime <= event.timeEnd()))[0] 
+                                              for event in currentStageEvents])
 
-                            if sig.size < 512:
-                                sig = concatenate((sig, zeros(512 - sig.size)))
-                            
-                            FFT = abs(fft(sig))
-                            freqs = fftfreq(sig.size, 1.0/fs)        
-                            
-                            FFT   = FFT[(freqs >= self.lowFreq)*(freqs <= self.highFreq)]
-                            freqs = freqs[(freqs >= self.lowFreq)*(freqs <= self.highFreq)]
-                            
-                            spindle.meanFreq = sum(freqs*FFT)/sum(FFT)
-                                                
-                    
-                    if self.computeSlopeFreq :
-                        self.computeFreqSlope_atDetection(signal, fs, startSpinInd, stopSpinInd, newSpindles, channelTime)
+                if len(samplesIndexes) == 0:  continue
+                
+                treshold = mquantiles(self.rectSig[samplesIndexes], self.quantileThreshold)[0]
+                
+                spinMarkers = concatenate(([0], diff((self.rectSig[samplesIndexes] > treshold).astype(int))))
+
+                # The signal indexes corresponding to spinMarkers are kept in samplesIndexes                
+                startSpinInd = samplesIndexes[where(spinMarkers == 1)[0]]
+                stopSpinInd  = samplesIndexes[where(spinMarkers == -1)[0]]
+                      
+                      
+                if len(stopSpinInd) == 0 or len(startSpinInd) == 0:  continue
+                
+                #The first marker should be a start marker.                
+                if stopSpinInd[0] < startSpinInd[0]:
+                    stopSpinInd = stopSpinInd[1:]
+
+                indEnd = min(len(startSpinInd), len(stopSpinInd))
+                
+                startSpinInd = startSpinInd[:indEnd]
+                stopSpinInd  = stopSpinInd[:indEnd] 
+    
+                if len(stopSpinInd) == 0 or len(startSpinInd) == 0:  continue
+
+                assert(all(stopSpinInd - startSpinInd > 0))
+                assert(all(startSpinInd[1:] - stopSpinInd[:-1] > 0))
+
+                gapToKeepInd = where(channelTime[startSpinInd[1:]] - channelTime[stopSpinInd[:-1]] > self.maxAllowableGapBellowThreshold)[0]
+                
+                startSpinInd = startSpinInd[concatenate(([0], gapToKeepInd+1))]
+                stopSpinInd  = stopSpinInd[concatenate((gapToKeepInd, [len(stopSpinInd)-1]))]
+                
+                
+
+                duration = channelTime[stopSpinInd] - channelTime[startSpinInd]
+                ##Accept discontinuity of up to 3 time samples.
+                continuous = [(max(diff(channelTime[start:stop])) <= 3.0/fs if stop - start > 10 else False ) for start, stop in zip(startSpinInd, stopSpinInd)]    
+                
+                valid        = (duration >= self.minimalSpindleDuration)*\
+                               (duration <= self.maximalSpindleDuration)*(continuous)      
+                startSpinInd = startSpinInd[valid]
+                stopSpinInd  = stopSpinInd[valid]
+                duration     = duration[valid]               
+                
+                newSpindles = [DetectedSpindle(channel, start, end) for start, end in zip(channelTime[startSpinInd], channelTime[stopSpinInd])]   
+                
+                # As the spindles are localized and the signal is extracted and filtred,
+                # it is efficient to compute spindles characteristics directly here.
+                if self.computeRMS :
+                    for startInd, stopInd, spindle in zip(startSpinInd, stopSpinInd, newSpindles):
+                        spindle.RMSamp = sqrt(mean(signal[startInd:stopInd]**2))
+            
+                if self.computeFreq :
+                    for startInd, stopInd, spindle in zip(startSpinInd, stopSpinInd, newSpindles):
+                        sig       = signal[startInd:stopInd]
+
+                        if sig.size < 512:
+                            sig = concatenate((sig, zeros(512 - sig.size)))
+                        
+                        FFT = abs(fft(sig))
+                        freqs = fftfreq(sig.size, 1.0/fs)        
+                        
+                        FFT   = FFT[(freqs >= self.lowFreq)*(freqs <= self.highFreq)]
+                        freqs = freqs[(freqs >= self.lowFreq)*(freqs <= self.highFreq)]
+                        
+                        spindle.meanFreq = sum(freqs*FFT)/sum(FFT)
+                                            
+                
+                if self.computeSlopeFreq :
+                    self.computeFreqSlope_atDetection(signal, fs, startSpinInd, stopSpinInd, newSpindles, channelTime)
 
 
-                    self.detectedSpindles.extend(newSpindles) 
-         
+                self.detectedSpindles.extend(newSpindles) 
+     
 
 
 # For backward compatibility.
