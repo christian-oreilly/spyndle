@@ -34,7 +34,7 @@
 
 """
 
-from scipy import concatenate
+from scipy import concatenate, sqrt
 from operator import attrgetter
 
 
@@ -398,8 +398,42 @@ class DetectorEvaluator:
         else:
             return 0.0 
         
+                          
+    def MCC(self, channel):    # Negative predictive value                        
+        if self.TN[channel] > 0 :
+            num = float(self.TP[channel]*self.TN[channel] - self.FP[channel]*self.FN[channel])
+            P   = self.TP[channel] + self.FN[channel]
+            P2  = self.TP[channel] + self.FP[channel]
+            N   = self.FP[channel] + self.TN[channel]
+            N2  = self.FN[channel] + self.TN[channel]
+            den = sqrt(P*P2*N*N2)
+            return num/den
+        else:
+            return 0.0 
+        
         
                 
+                
+                          
+    def randomAggreProb(self, channel):    # Negative predictive value                        
+        if self.TN[channel] > 0 :
+            P   = self.TP[channel] + self.FN[channel]
+            P2  = self.TP[channel] + self.FP[channel]
+            N   = self.FP[channel] + self.TN[channel]
+            N2  = self.FN[channel] + self.TN[channel]
+            return float((P2*P + N2*N))/float((P+N)**2)
+        else:
+            return 0.0 
+        
+        
+    def cohenk(self, channel):    # Negative predictive value                        
+        if self.TN[channel] > 0 :
+            Pe  = self.randomAggreProb(channel)
+            acc = self.accuracy(channel) 
+            return (acc - Pe)/(1-Pe)
+        else:
+            return 0.0 
+                        
         
 
             
