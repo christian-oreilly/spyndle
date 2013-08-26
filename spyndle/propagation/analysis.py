@@ -13,6 +13,7 @@ from glob import glob
 from scipy import unique, where, percentile, concatenate, array, arange
 from scipy import isnan, sqrt, nan, logical_not, reshape, median, std
 from sklearn.covariance import MinCovDet
+from numpy import in1d
 
 from spyndle.EEG import getActiveElectrode
 
@@ -26,32 +27,53 @@ from spyndle.EEG import getActiveElectrode
 # Retourne la liste des indices, parmis candidateInds, qui sont des électrodes
 # liées avec l'électrode référence de refRow.
 def getLinkedInd(Data, refRow, candidateInds):
+
     filteredData =  Data.iloc[candidateInds, ]
+    refs  = array(filteredData["ref"], dtype=str)
+    tests = array(filteredData["test"], dtype=str)
+    
     lastLinked = array([Data["ref"].iloc[refRow]], dtype=str)
     lastLinked  = unique(concatenate((lastLinked, 
-                               array(filteredData["test"][[ref  in lastLinked for ref  in filteredData["ref" ]]], dtype=str),
-                               array(filteredData["ref" ][[test in lastLinked for test in filteredData["test"]]], dtype=str)
-                              )))  
+                                       tests[in1d(refs, lastLinked)],
+                                       refs[in1d(tests, lastLinked)]  
+                                     )))  
+                                          
                                   
     newLinked = unique(concatenate((lastLinked, 
-                           array(filteredData["test"].iloc[[ref  in lastLinked for ref  in filteredData["ref" ]]], dtype=str),
-                           array(filteredData["ref" ].iloc[[test in lastLinked for test in filteredData["test"]]], dtype=str)
-                          )))  
+                                       tests[in1d(refs, lastLinked)],
+                                       refs[in1d(tests, lastLinked)]  
+                                     )))  
                                   
     # Les lignes ci-dessus pourraient être intégrées dans la boucle ci-dessous. Cependant, cela 
     # causerait de évaluation inutile de la condition du while, ce que l'on veut éviter puisque le
     # temps d'exécution de cette fonction est critique.
-    while not all([newL in lastLinked for newL in newLinked]) :
+    while not all(in1d(newLinked, lastLinked)) :
         lastLinked = newLinked
         newLinked = unique(concatenate((newLinked, 
-                           array(filteredData["test"].iloc[[ref  in lastLinked for ref  in filteredData["ref" ]]], dtype=str),
-                           array(filteredData["ref" ].iloc[[test in lastLinked for test in filteredData["test"]]], dtype=str)
-                          )))  
+                                       tests[in1d(refs, lastLinked)],
+                                       refs[in1d(tests, lastLinked)]  
+                                     )))   
+                                  
+                                 
                                   
     # Non nécessaire de vérifier les références ET les électrodes tests étant donné la définition même
     # de ce que sont des électrodes liées.
     #return(candidateInds[inlist(filteredData$elect, lastLinked) | inlist(filteredData$ref, lastLinked)])
-    return array([candidateInd for candidateInd, test in zip(candidateInds, filteredData["test"]) if test in lastLinked])
+    return array(candidateInds[in1d(tests, lastLinked)])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -430,6 +452,8 @@ def computeSPF_allFiles(path, offsetFilePattern="spindleDelays_offset_*.bdf_*.tx
     # Keeping only the part of the channel name identifying the active electrode.
     electrodes = map(lambda channel: getActiveElectrode(channel, includeElectrodePatterns, excludeElectrodePatterns), channels)
 
+    tokens =  offsetFilePattern.split("*")
+    
     # for each subject in the file list
     for night in unique(nights):
         
@@ -444,8 +468,8 @@ def computeSPF_allFiles(path, offsetFilePattern="spindleDelays_offset_*.bdf_*.tx
             if verbose :
                 print "ref:", refElectrode        
             
-            fileNameSyncList.append("spindleDelays_" + night + ".bdf_" + refChannel + ".txt")
-            fileNameAsyncList.append("spindleDelays_offset_" + night + ".bdf_" + refChannel + ".txt")
+            fileNameSyncList.append(tokens[0][:-7] + night + tokens[1] + refChannel + tokens[2])
+            fileNameAsyncList.append(tokens[0] + night + tokens[1] + refChannel + tokens[2])
     
         computeSPF(path, night, fileNameSyncList, fileNameAsyncList, channelList, electrodeList, alpha, verbose)        
         
@@ -464,48 +488,22 @@ def computeSPF(path, night, fileNameSyncList, fileNameAsyncList, channelList, el
     # Computing cutoff threshold from asychronized comparisons
     dataCutOff = computingCutOff(path, fileNameAsyncList, 
                                     channelList, electrodeList, alpha)
-              
-    """
-    print path
-    print night
-    print fileNameSyncList
-    print fileNameAsyncList
-    print channelList
-    print electrodeList
-    print alpha
-    print verbose   
-                 
-    import pandas
-    pandas.set_option('display.max_rows', 500)
-    pandas.set_option('display.height', 500)
-    print dataCutOff                                    
-    """
+
     # Reading synchronized comparisons
     dataProp = readingSyncData(path, night, fileNameSyncList,
                                     channelList, electrodeList)
-    
-    
-    # Saving the result.
-    dataProp.to_csv(path + "test_" + night + ".csv", sep=";")                  #######################
-    
+
 
     # FALSE DETECTION AND OUTLIERS REJECTION
     dataProp = propagationRejection(night, dataProp, dataCutOff, alpha, verbose)
-
-    dataProp.to_csv(path + "test3_" + night + ".csv", sep=";")                   ########################
 
     # CORRECTING DELAYS TO HAVE ONLY PROPAGATION WITH POSITIVE TIME DELAYS 
     if verbose: 
         print "correcting negative delays"   
     dataProp = negativeDelayCorrection(dataProp)    
 
-    dataProp.to_csv(path + "test2_" + night + ".csv", sep=";")                   ########################
-
-
     # COMPUTING SPINDLE PROPAGATION FIELD      
     dataProp = identifySPF(dataProp)            
-
-    dataProp.to_csv(path + "test4_" + night + ".csv", sep=";")                   ########################
 
     # REMOVING DUPLICATE PROPAGATION DUE TO BIDIRECTIONNALITY
     if verbose: 
@@ -559,7 +557,7 @@ def computeAveragePropagation(path, aggeragationlevels,
                     # with a "ValueError: expected square matrix" error. In these
                     # time we fall back to simple statistics. 
                     meanX   = median(validX)
-                    sdX     = std(0.0)                        
+                    sdX     = std(validX)                        
             else:
                 meanX   = nan
                 sdX     = nan     
@@ -590,6 +588,7 @@ def computeAveragePropagation(path, aggeragationlevels,
         if verbose:
             print night        
         levelInstanciation = {"night":night}
+
 
         dat          = read_csv(f, sep=";").groupby(aggeragationlevels).apply(lambda x: computeCellAverages(x, observationVariables, aggeragationlevels, levelInstanciation))
         meanData     = meanData.append(dat, ignore_index=True)           
