@@ -44,5 +44,6 @@ setup(
     license='LICENSE.txt',
     packages=packages.keys(),
     url=URL,
-    setup_requires=['bitbucket-distutils >= 0.1.2', 'pandas >= 0.11.0', 'lxml', 'comtypes'])
+    setup_requires=['bitbucket-distutils >= 0.1.2',
+                    'pandas >= 0.11.0', 'lxml', 'comtypes'])
 
