@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 
 """
-    Code showing a complete working example of how to use the spyndle toolbox.
-    It has been developped for the presentation of paper [1].
+    Code showing how the results published in [1] have been computed.
     
     Copyright (C) 2013  Christian O'Reilly
 
@@ -26,14 +25,16 @@
 
 
  Author: Christian O'Reilly (christian.oreilly@umontreal.ca)
- Date  : July 1, 2013
+ Date  : April 24, 2013
 
- [1] O'Reilly, C. & Nielsen, T. The Spyndle toolbox: an open source software 
-     package for the investigation of EEG transient events, Submitted to the 
-     Revue internationale des technologies avancées, August 2013.
+ [1] O'Reilly, C. & Nielsen, T. Sleep spindle detection: Automatic detection 
+     and evaluation of performance with a fine temporal resolution, Submitted 
+     to Expert Systems with Applications, 2013.
 
 """
 
+##### Copy and paste from the RITA example. Has to be changed to reflect the 
+##### computation of the ESA paper.
 
 from spyndle.io import EDFReader
 from spyndle.detector import SpindleDectectorRMS
@@ -48,7 +49,7 @@ from scipy import unique, array
 import pandas 
 from datetime import datetime                                                  
 A = datetime.now()                                                             
-"""
+
 fileName        = "RITA_example.BDF"
 detectionStages = ["Sleep stage 2"]
 eventName       = "SpindleRMS"
@@ -109,17 +110,16 @@ computeAveragePropagation("", aggeragationlevels = ["ref", "test"],
                   pattern="correctedData_*.csv",  verbose=False)
 G = datetime.now()                                                             
 print G-F                                                                      
-"""
+
 propData = pandas.read_csv("meanData.csv", sep=";")
 
 print "Plotting the results in result_example_a.png..."
 medData    = propData.groupby("ref").median()
 electrodes = array(medData.index, dtype=str)
 plotColorMap(electrodes, medData.duration_mean, "result_example_a.png")
-                          
+                            
 print "Plotting the results in result_example_b.png..."
-#propData = applyRejectionC3(propData)
+propData = applyRejectionC3(propData)
 adjPairs = getAdjacentsPairs_10_20(unique(array(propData.ref)))
 medData  = propData.groupby(["ref", "test"]).median()["delay_mean"]
-print medData  
 plotArrowsBidirect(medData, adjPairs, filename="result_example_b.png")
