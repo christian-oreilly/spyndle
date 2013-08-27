@@ -16,8 +16,9 @@
 ###############################################################################
 
 
-from scipy import array, arange
+from scipy import array, arange, sqrt, mean, concatenate, zeros, fft
 from scipy.io import loadmat
+from scipy.fftpack import fftfreq
 
 import re
 import datetime
@@ -26,6 +27,7 @@ from lxml import etree
 from abc import ABCMeta, abstractmethod
     
 from spyndle.errorMng import ErrPureVirtualCall
+from spyndle import Filter
 
 """
  Abstract class describing an EEG reader.
@@ -136,6 +138,56 @@ class EEGDBReaderBase(object) :
 
 
   
+
+
+    def computeRMS(self, event, fmin=11, fmax=16):
+
+        # The filters need the signal to be at least 3*nbTaps
+        nbTaps      = 1001.0        
+        fs          = self.getChannelFreq(event.channel) 
+        duration    = max(nbTaps*3.0/fs+1, event.duration())   
+        data        = self.read([event.channel], event.timeStart(), duration)
+        signal      = data[event.channel].signal
+        
+        # In some cases, the signal will be shorter than nbTaps*3.0/fs+1,
+        # for example, when the spindle is too close to the end of the recording
+        # epoch. In these time, we have to accept lower number of taps.
+        if len(signal) <  nbTaps*3.0+1:
+            nbTaps = int((len(signal)-1)/3)
+        
+        # Defining EEG filters
+        bandPassFilter = Filter(fs)
+        bandPassFilter.create(low_crit_freq=fmin, high_crit_freq=fmax, 
+                              order=nbTaps, btype="bandpass", ftype="FIR", useFiltFilt=True)          
+             
+        try :
+            signal = bandPassFilter.applyFilter(signal)[0:int(event.duration()*fs)]                                
+        except ValueError:
+            print len(signal), nbTaps, max(nbTaps*3.0/fs, event.duration()), nbTaps*3.0/fs, event.duration() 
+            raise
+        
+        event.properties["RMSamp"] = sqrt(mean(signal**2))
+
+    
+    def computeMeanFreq(self, event, fmin=11, fmax=16):
+   
+        fs          = self.getChannelFreq(event.channel) 
+        data        = self.read([event.channel], event.timeStart(), event.duration())
+        signal      = data[event.channel].signal
+
+        if signal.size < 512:
+            signal = concatenate((signal, zeros(512 - signal.size)))
+        
+        
+        FFT = abs(fft(signal))
+        freqs = fftfreq(signal.size, 1.0/fs)        
+        
+        FFT   = FFT[(freqs >= fmin)*(freqs <= fmax)]
+        freqs = freqs[(freqs >= fmin)*(freqs <= fmax)]
+        
+        event.properties["meanFreq"] = sum(freqs*FFT)/sum(FFT)
+
+
 
   
 # TODO: Manage discontinuous signals.
@@ -275,6 +327,8 @@ class RecordedChannel:
         Sleep stage N3
 """    
 class Event:
+    __metaclass__ = ABCMeta
+    
     def __init__(self, name = "", groupeName = "", channel = "", startTime = -1.0,
                  timeLength = -1.0, dateTime = None, properties = {}):
                      
@@ -286,17 +340,15 @@ class Event:
         self.dateTime    = dateTime    # datetime  object giving the begining time of the event.
 
         self.properties  = properties
-
-    
-    def sampleEnd(self):
-        return self.startSample + self.sampleLength        
-    def sampleStart(self):
-        return self.startSample    
+        
+        
         
     def timeEnd(self):
         return self.startTime + self.timeLength        
     def timeStart(self):
-        return self.startTime
+        return self.startTime   
+    def duration(self):
+        return self.timeLength  
 
             
     def __str__(self):
