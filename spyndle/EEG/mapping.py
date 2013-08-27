@@ -509,8 +509,9 @@ def plotArrowDiagram(listVal, pairs, minDelay=None, maxDelay=None,
     normDelay = np.minimum(normDelay, 1.0)
 
     drawing = HeadDrawing()
-    refs = unique([pair[0] for pair in pairs])
-    drawing.setElectrodeList(refs)
+    refs  = unique([pair[0] for pair in pairs])
+    tests = unique([pair[1] for pair in pairs])
+    drawing.setElectrodeList(unique(concatenate((refs, tests))))
 
     for pair, delay in zip(pairs, normDelay) :
         if not isnan(delay):
