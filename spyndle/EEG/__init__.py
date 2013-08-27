@@ -2,4 +2,4 @@
 
 from system10_20 import get10_20AdjacentElectrodes, getAdjacentsPairs_10_20, getActiveElectrode
 from electrodesSVG import getElectrodeCoordinates
-from mapping import plotArrowsBidirect, HeadDrawing, plotColorMap
+from mapping import plotArrowsBidirect, HeadDrawing, plotColorMap, plotArrowsDifferential
