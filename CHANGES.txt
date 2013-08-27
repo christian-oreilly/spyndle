@@ -3,3 +3,5 @@ v0.1.0a.dev1, 2013-04-10 -- Initial release.
 v0.1.1a.dev1, 2013-06-05 -- Adding an EDF/BDF reader. Making the code compatible with the EDF reader has resulted in an important refactoring of large portions of code.
 
 v0.2.0.dev1, 2013-08-02 -- Initially, the package was used to generate intermediate results. R scripts were used to make various manipulations to transform these data in final results and generate summary figures. With this version, all these functionnalities have been added to the package.
+
+v0.2.1.dev1, 2013-08-27 -- This version corrects some packaging problems with the previous version. Also, some code related to the computation of spindle propagation has been optimized.

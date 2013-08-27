@@ -1,4 +1,4 @@
-pushd C:\Users\revestech\Dropbox\code\Spyndle
+pushd C:\Users\oreichri\Dropbox\code\Spyndle
 
 # register the package with PyPI, creates a source and
 # an egg distribution. Do not upload it to PyPI because of 
