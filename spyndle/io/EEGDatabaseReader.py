@@ -71,8 +71,23 @@ class EEGDBReaderBase(object) :
     @abstractmethod
     def getChannelLabels(self): raise ErrPureVirtualCall
         
-    @abstractmethod
-    def getEvents(self): raise ErrPureVirtualCall
+
+    def getEvents(self, startTime=None, endTime=None) :
+        if startTime is None and endTime is None:
+            return self.events
+            
+        if startTime is None :
+            return filter(lambda e: e.startTime < endTime or 
+                                 e.startTime + e.timeLength < endTime , self.events)                  
+            
+        if endTime is None :            
+            return filter(lambda e: e.startTime >= startTime or 
+                                    e.startTime + e.timeLength >= startTime, self.events)       
+                
+        return filter(lambda e: (e.startTime >= startTime and e.startTime < endTime) or 
+                     (e.startTime + e.timeLength >= startTime and e.startTime + e.timeLength < endTime) , self.events)       
+                            
+        
         
     @abstractmethod        
     def getNbPages(self): raise ErrPureVirtualCall
@@ -98,6 +113,12 @@ class EEGDBReaderBase(object) :
     def getPageDuration(self):
         return self.pageDuration
         
+        
+    def getPages(self):
+        stageEvents = filter(lambda e: e.groupeName == "Stage", self.events)    
+        return map(lambda e: e.startSample, stageEvents), \
+               map(lambda e: e.startTime  , stageEvents), \
+               map(lambda e: e.dateTime   , stageEvents)
         
     def getSleepStage_REM(self):
         return [e for e in self.reader.events if e.name == "Sleep stage R"]      

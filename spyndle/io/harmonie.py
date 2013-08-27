@@ -360,18 +360,7 @@ class HarmonieReader(EEGDBReaderBase):
     def getChannelLabels(self):
         return self.labels 
 
-
-
-    def getPages(self):
-        stageEvents = filter(lambda e: e.groupeName == "Stage", self.events)    
-        return map(lambda e: e.startSample, stageEvents), map(lambda e: e.startTime , stageEvents), map(lambda e: e.dateTime , stageEvents)
-
                 
-    #TODO: Optimiser...
-    def getEvents(self, startTime, endTime) :   #TODO: time
-        return filter(lambda e: (e.startTime >= startTime and e.startTime < endTime) or 
-                         (e.startTime + e.timeLength >= startTime and e.startTime + e.timeLength < endTime) , self.events)       
-        
     def getEventsBySample(self, startSample, endSample) :
         return filter(lambda e: (e.startSample >= startSample and e.startSample < endSample) or 
                          (e.startSample + e.sampleLength >= startSample and e.startSample + e.sampleLength < endSample) , self.events)       

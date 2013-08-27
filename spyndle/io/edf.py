@@ -763,17 +763,6 @@ class EDFReader(EEGDBReaderBase) :
     
         return returnData
 
-
-
-
-
-
-
-
-    def getEvents(self): 
-        return self.events
-     
-        
         
     def setPageDuration(self, duration):
         if duration != self.getPageDuration():
