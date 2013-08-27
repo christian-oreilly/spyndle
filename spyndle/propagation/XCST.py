@@ -52,11 +52,13 @@ import os
 from scipy import where, zeros, transpose, arange, shape, diff, sign, argmax, sqrt
 from scipy.integrate import trapz
 from scipy import fft, ifft
+from scipy.signal import correlate2d
+import numpy as np
 
 
-from spyndle.utils import diff2
+from spyndle import diff2
 #from ..filters import Filter
-from spyndle.STransform import computeMST
+from spyndle import computeMST
 
 
 
@@ -97,13 +99,17 @@ from spyndle.STransform import computeMST
 #                     Default value: []
 #   resFilesPrefix  : Prefix that is used to name the output files. 
 #                     Default value: "spindleDelays"
+#   intFct          : Allows to choose the function used in integration. By
+#                     default nympy.sum is used fut numpy.trapz could be used
+#                     for more precision (at cost of a much slower execution).
 #                     
 #
 def computeXCST(readerClass, fileName, resPath, eventName, channelLst, 
                  delta =0.5, beforePad=0.5, afterPad=0.5, 
                  artifactPad=0.25,
                  offset=0.0, eventProperties = [],
-                 resFilesPrefix="spindleDelays", similIndexType="inf") :  
+                 resFilesPrefix="spindleDelays", similIndexType="inf",
+                 intFct=np.sum) :  
 
     night = os.path.basename(fileName)
 
@@ -226,35 +232,62 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                 maxCrosscor = {}
                 maxDeltay   = {}
                 
-                crosscor    = zeros(deltaSampleStart + deltaSampleEnd)
+                unnormCrossCorr = zeros(deltaSampleStart + deltaSampleEnd)
                 time        = (arange(deltaSampleStart + deltaSampleEnd)-deltaSampleStart)/fs
-                refSelfCor  = trapz(trapz(X["Ref"]*X["Ref"])) 
+                refSelfCor  = intFct(intFct(X["Ref"]*X["Ref"])) 
+                indOffsets = arange(deltaSampleStart + deltaSampleEnd)
                 
-    
+
                 for testChannel in channelLst :
                     if testChannel == refChannel:
                         maxDeltay[testChannel]   = 0       
                         maxCrosscor[testChannel] = 1.0              
                     else:                
                         XCmpSquare = X[testChannel]*X[testChannel]
-                        XCmpSquare_colTrapz = trapz(XCmpSquare, axis=0)        
-                        for indOffset in range(deltaSampleStart + deltaSampleEnd):
-                            XCmp             = X[testChannel][:, indOffset:(indOffset+refShape[1])]
-                            CmpSelfCor       = trapz(XCmpSquare_colTrapz[indOffset:(indOffset+refShape[1])]) # possible optim
-                            
-                            if similIndexType == "inf":
-                                den = max(CmpSelfCor, refSelfCor)
-                            elif similIndexType == "euclidean":
-                                den = sqrt(CmpSelfCor**2 + refSelfCor**2)                                
-                            else: 
-                                print "Error. The similarity index type " + similIndexType + "is unknown."
-                                raise TypeError
-                                
-                            crosscor[indOffset] = trapz(trapz(XCmp*X["Ref"]))/den
+                        XCmpSquare_colTrapz = intFct(XCmpSquare, axis=0)     
+                        
+                        
+                        """
+                        equivalent to:
+                        CmpSelfCor  = zeros(deltaSampleStart + deltaSampleEnd)                        
+                        for indOffset in indOffsets:
+                            CmpSelfCor[indOffset]       = sum(XCmpSquare_colTrapz[indOffset:(indOffset+refShape[1])])                         
+                        """
+                        cums = np.cumsum(XCmpSquare_colTrapz)
+                        CmpSelfCor = np.concatenate(( [cums[refShape[1]-1]], 
+                                                    cums[indOffsets[1:] + refShape[1]-1] - cums[indOffsets[:-1]]))
 
-                        # Alternative cross-correlation computation
-                        #crosscorTest = ifft(fft(X["Ref2"])*fft(X[testChannel]))
-                        #print crosscor.shape, crosscorTest    
+    
+                                          
+                        # This...                        
+                        #unnormCrossCorr = correlate2d(X[testChannel], X["Ref"], mode="valid")[0][indOffsets]   
+
+                        # and this...
+                        #K = X[testChannel].shape[1] 
+                        #H = X["Ref"].shape[0]
+                        #N = X["Ref"].shape[1]   
+                        #y = np.concatenate((X["Ref"], zeros((H, K-1))), axis=1)           
+                        #FFTy = np.conjugate(np.fft.fft(y, axis=1)) 
+                        #x = np.concatenate((zeros((H, N-1)), X[testChannel]), axis=1)                        
+                        #unnormCrossCorr = np.real(np.fft.ifft(np.fft.fft(x, axis=1)*FFTy, axis=1)[:, (N-1):(N-1 + deltaSampleStart + deltaSampleEnd)]) 
+                        #unnormCrossCorr = np.sum(unnormCrossCorr, axis=0)                        
+
+
+                        # are slower than that:
+                        for indOffset in indOffsets:
+                            XCmp                        = X[testChannel][:, indOffset:(indOffset+refShape[1])]
+                            unnormCrossCorr[indOffset]  = intFct(intFct(XCmp*X["Ref"]))            
+
+
+                        if similIndexType == "inf":
+                            den = np.maximum(CmpSelfCor, refSelfCor)
+                        elif similIndexType == "euclidean":
+                            den = sqrt(CmpSelfCor**2 + refSelfCor**2)                                
+                        else: 
+                            print "Error. The similarity index type " + similIndexType + "is unknown."
+                            raise TypeError
+                            
+                        crosscor = unnormCrossCorr/den
     
                         ind          = argmax(crosscor)                    
                         diffCrosscor = diff2(arange(deltaSampleStart + deltaSampleEnd), crosscor)                
