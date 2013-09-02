@@ -370,6 +370,67 @@ class HeadDrawing:
                                  'min':minZZ,
                                  'max':maxZZ}       
 
+
+
+
+
+    def addColorMap_grey(self, listeElectrodes, zVal, minZZ=None, maxZZ=None, 
+                                           sVal=None, smin=0.0, smax=1.0):
+        
+        valDict = {}      
+        for elect, val in zip(listeElectrodes, zVal):
+            valDict[elect] = val
+        
+        if minZZ is None:
+            minZZ = min(zVal)
+        if maxZZ is None:
+            maxZZ = max(zVal)
+        
+                        
+        h = (getZZ(listeElectrodes, valDict)-minZZ)/(maxZZ-minZZ)            
+        
+        s = None            
+        if not sVal is None:
+            sDict = {}      
+            for elect, val in zip(listeElectrodes, sVal):
+                sDict[elect] = val
+            
+            ss = getZZ(listeElectrodes, sDict)              
+
+            deltaSS = smax-smin     
+            if deltaSS == 0 :
+                s = (ss >= smin).astype(np.float32)
+            else:            
+                s = (ss-smin)/deltaSS
+                    
+            self.s = ss
+        
+        
+        self.ColorMap = ones((h.shape[0], h.shape[1], 3))         
+        self.ColorMap[:, :, 0] = minimum(maximum(h, 0.0), 1.0)
+        self.ColorMap[:, :, 1] = self.ColorMap[:, :, 0]
+        self.ColorMap[:, :, 2] = self.ColorMap[:, :, 0]
+        #else S = 1
+        # V = 1
+        self.ColorMap[isnan(h), :] = [1.0, 1.0, 1.0]  #use white for nans       
+     
+     
+
+        steps = arange(0, 1.1, 0.1)
+        hsv = ones((1, 11, 3))
+        hsv[:, :, 0] = -(steps-1)*2.0/3.0
+        rgb = hsv_to_rgb(hsv)
+        R = [((step, r, r)) for step, r in zip(steps, rgb[0, :, 0])]
+        G = [((step, g, g)) for step, g in zip(steps, rgb[0, :, 1])]
+        B = [((step, b, b)) for step, b in zip(steps, rgb[0, :, 2])]
+            
+        self.colorbarDict = {'red'  : tuple(R),
+                             'green': tuple(G),
+                             'blue' : tuple(B),
+                             'min':minZZ,
+                             'max':maxZZ}       
+
+
     
     
     def setColorBarDict(self, cdict):
