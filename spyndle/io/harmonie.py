@@ -80,43 +80,46 @@ class HarmonieEvent(Event):
         
         self.name = item.GetName()  
         
-        # Tore's lab
-        if self.groupeName.lower() == u"stage":
-            if  self.name.lower() == u"stage1":   
-                self.name = u"Sleep stage 1"
-            elif  self.name.lower() == u"stage2":   
-                self.name = u"Sleep stage 2"
-            elif  self.name.lower() == u"stage3":   
-                self.name = u"Sleep stage 3"
-            elif  self.name.lower() == u"stage4":   
-                self.name = u"Sleep stage 4"
-            elif  self.name.lower() == u"rem":   
-                self.name = u"Sleep stage R"
-            elif  self.name.lower() == u"wake":   
-                self.name = u"Sleep stage W"
-            else:   
-                self.name = u"Sleep stage ?"
 
-
-        # Julie's lab
-        if self.groupeName.lower() == u"stade":
-            if  self.name.lower() == u"stade1":   
+        
+        # Names for sleep stages in Harmonie are not constrained such that
+        # there is no standard nqmes. Tore's lab, Julie's lab and clinical
+        # lab use diffrent namings. So we must check for all possibles names.
+        if self.groupeName.lower() == u"stage" or self.groupeName.lower() == u"stade":
+            if  self.name.lower() == u"stage1" or self.name.lower() == u"stade1" \
+                                               or self.name.lower() == u"std1" :   
                 self.name = u"Sleep stage 1"
-            elif  self.name.lower() == u"stade2":   
+                
+            elif  self.name.lower() == u"stage2" or self.name.lower() == u"stade2" \
+                                                 or self.name.lower() == u"std2":   
                 self.name = u"Sleep stage 2"
-            elif  self.name.lower() == u"stade3":   
+ 
+            elif  self.name.lower() == u"stage3" or self.name.lower() == u"stade3" \
+                                                 or self.name.lower() == u"std3" :   
                 self.name = u"Sleep stage 3"
-            elif  self.name.lower() == u"stade4":   
+                  
+            elif  self.name.lower() == u"stage4" or self.name.lower() == u"stade4" \
+                                                 or self.name.lower() == u"std4":   
                 self.name = u"Sleep stage 4"
-            elif  self.name.lower() == u"sp":   
+                
+            elif  self.name.lower() == u"rem" or self.name.lower() == u"sp" \
+                                              or self.name.lower() == u"mor":   
                 self.name = u"Sleep stage R"
-            elif  self.name == u"\xc9veil":   
+                
+            elif  self.name.lower() == u"wake" or self.name == u"\xc9veil" \
+                                               or self.name == u"ÉV.":   
                 self.name = u"Sleep stage W"
+                
+            elif  self.name.lower() == u"unstaged" or self.name.lower() == u"stdnd":                  
+                self.name = u"Sleep stage ?"                   
+                
             else:   
+                print self.name             
                 self.name = u"Sleep stage ?"
                 
+                
             self.groupeName = u"stage"
-
+                                                         
 
         
         # OLE complete date-time object giving the begining time of the event.
@@ -637,6 +640,7 @@ class HarmonieReader(EEGDBReaderBase):
         sampleTransitions = concatenate((discontinuitySample, [self.getNbSample(channel)]))
 
         time = []
+        samplingRate = self.getSamplingRate(channel)
         for i in range(len(sampleTransitions)-1):
             nbSamples = sampleTransitions[i+1] - sampleTransitions[i]
             time = concatenate((time, discontinuityEvent[i].startTime + arange(nbSamples)/samplingRate))       
@@ -855,6 +859,7 @@ class HarmonieReader(EEGDBReaderBase):
             f.write("%08d" % nbPages)  
             
             # 8 ascii : duration of a data record, in seconds
+            print "duration", self.pageDuration, ("%8.6f" % self.pageDuration)[:8]
             f.write(("%8.6f" % self.pageDuration)[:8] )  
             
             # 4 ascii : number of signals (ns) in data record
