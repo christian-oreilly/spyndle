@@ -23,6 +23,8 @@ from scipy.fftpack import fftfreq
 import re
 import datetime
 import time
+import numpy as np
+
 from lxml import etree  
 from abc import ABCMeta, abstractmethod
     
@@ -116,8 +118,7 @@ class EEGDBReaderBase(object) :
         
     def getPages(self):
         stageEvents = filter(lambda e: e.groupeName == "Stage", self.events)    
-        return map(lambda e: e.startSample, stageEvents), \
-               map(lambda e: e.startTime  , stageEvents), \
+        return map(lambda e: e.startTime  , stageEvents), \
                map(lambda e: e.dateTime   , stageEvents)
         
     def getSleepStage_REM(self):
@@ -209,6 +210,27 @@ class EEGDBReaderBase(object) :
         event.properties["meanFreq"] = sum(freqs*FFT)/sum(FFT)
 
 
+    def setStagesToEventTypes(self, eventName):
+        for event in filter(lambda e: e.name == eventName, self.events) :
+            self.setStagesToEvent(event)
+
+    def setStagesToEvent(self, event):
+
+        # Select the stage where the spindle begin as the sleep stage
+        # of the spindle.
+        stages = filter(lambda e: e.groupeName == "Stage" and
+                                            e.timeStart() <=  event.startTime and 
+                                            e.timeEnd() >= event.startTime, self.events)                         
+        if len(stages) > 0 :
+            event.properties["stage"] = stages[0].name
+                
+        else:
+            event.properties["stage"] = "No stage"
+
+
+
+
+
 
   
 # TODO: Manage discontinuous signals.
@@ -288,7 +310,6 @@ class EEGPageInfo:
         
     def getNbSamples(self):
         return self.endSample - self.startSample
-  
   
   
   
