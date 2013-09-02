@@ -33,17 +33,20 @@ def find_packages(path, base="" ):
 
 packages=find_packages(".")
 
+
 setup(
     name=NAME,
+    packages=packages.keys(),
     package_dir=packages,
+    package_data={'spyndle.io.tests': ['*.SIG', '*.STS', '*.bdf'],
+                  'spyndle.EEG': ['*.png', '*.svg'],
+                  'spyndle.DevuystDB': ['*.txt', '*.edf']},
     version=VERSION,
     description=DESCRIPTION,
     long_description=open("README.txt").read(),
     author=AUTHOR,
     author_email=AUTHOR_EMAIL,
     license='LICENSE.txt',
-    packages=packages.keys(),
     url=URL,
     setup_requires=['bitbucket-distutils >= 0.1.2',
                     'pandas >= 0.11.0', 'lxml', 'comtypes'])
-
