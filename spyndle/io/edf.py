@@ -16,7 +16,7 @@
 '''
  We consider the record concept of EDF as equivalent to the page concept in
  Harmony and in sleep stage scoring in general. Thus, to use 30 second pages, 
- the EDF file must be reformated if the record duration is different than
+ the EDF file must be reformatted if the record duration is different than
  30 seconds.
 '''
 
@@ -40,7 +40,8 @@ from warnings import warn
 from spyndle.io import Event, RecordedChannel
 
 
-EVENT_CHANNEL = 'EDF Annotations'
+EVENT_CHANNEL    = 'EDF Annotations'
+REFORMAT_CHANNEL = 'EDF Reformat'
 log = logging.getLogger(__name__)
 
 
@@ -124,10 +125,118 @@ class EDFEvent(Event):
                self.groupeName = u"Stage"
 
 
+# Channel labes must be enclosed bu []. Accepted operators so far are
+# +, -, /, *. Pathenthesis can be used.
+# E.g. "(2*[C3-A1]-[A2-A1])/2" can be used to obtain a reformatted ear-linked reference.
+class ReformatExpressionMng:
+    def __init__(self, channelExpr, originalHeader):
+        self.channelExpr    = channelExpr
+        self.originalHeader = originalHeader
+        
+        for channel in self.channelExpr :
+            exprChannels = self.getExprChannels(self.channelExpr[channel])
+            if len(np.unique([originalHeader.nbSamplesPerRecord[chan] for chan in exprChannels])) != 1:
+                print channel, self.channelExpr[channel], exprChannels, [originalHeader.nbSamplesPerRecord(chan) for chan in exprChannels]
+                raise "All channels used in the expression of a reformatted "\
+                       "channel must have the same sampling frequency"
+    
+    
+    def getUsedChannels(self):
+        channelLst = []
+        for channel in self.channelExpr :
+            channelLst.extend(self.getExprChannels(self.channelExpr[channel]) )
+        return np.unique(channelLst)
+    
+    def getExprChannels(self, expression):
+        return re.findall("\[(.*?)\]", expression) #"(2*[C3-A1]-[A2-A1])/2") 
+        
+    #def getExprNonChannels(self, expression):
+     #   tokens = re.split("\[(.*?)\]", "(2*[C3-A1]-[A2-A1])/2") 
+      #  return tokens[0:len(tokens):2]
+                
+                
+    
+    def physicalMinMax(self, channel):    
+
+        expr         = self.channelExpr[channel]
+        exprChannels = self.getExprChannels(expr)
+        minMaxValues = np.array(np.concatenate([[self.originalHeader.physicalMin[exprChannel],
+                                                  self.originalHeader.physicalMax[exprChannel]] 
+                                                  for exprChannel in exprChannels]))
+          
+               
+        candidates   = eval(re.sub("\[(.*?)\]", np.array_repr(minMaxValues, precision=32),  expr))
+        return min(candidates), max(candidates)
+      
+      
+    def physicalMin(self, channel):  
+        return self.physicalMinMax(channel)[0]
+        
+    def physicalMax(self, channel):
+        return self.physicalMinMax(channel)[1]
+        
+        
+        
+        
+    
+    def digitalMinMax(self, channel):    
+
+        expr         = self.channelExpr[channel]
+        exprChannels = self.getExprChannels(expr)
+        minMaxValues = np.array(np.concatenate([[self.originalHeader.digitalMin[exprChannel],
+                                                  self.originalHeader.digitalMax[exprChannel]] 
+                                                  for exprChannel in exprChannels]))
+          
+
+        candidates   = eval(re.sub("\[(.*?)\]",np.array_repr(minMaxValues, precision=32),  expr))
+        return min(candidates), max(candidates)
+              
+         
+    def digitalMin(self, channel):
+        return self.digitalMinMax(channel)[0]
+        
+    def digitalMax(self, channel):
+        return self.digitalMinMax(channel)[1]
+        
+        
+        
+        
+        
+        
+    def nbSamplesPerRecord(self, channel):
+        exprChannels = self.getExprChannels(self.channelExpr[channel])
+        return self.originalHeader.nbSamplesPerRecord[exprChannels[0]]  
+        
+        
+        
+        
+    def getRawRecord(self, channel, page):
+        
+        expr         = self.channelExpr[channel]
+        exprChannels = self.getExprChannels(expr)
+        
+        np.set_printoptions(threshold=np.nan)
+        string = ""
+        globals = {}
+        novar = 0
+        for token in re.split("\[(.*?)\]", expr) :  
+            if token in exprChannels:
+                globals["X" + str(novar)] = page.recordedSignals[token]
+                string += "X" + str(novar)
+                novar +=1
+            else:
+                string += token
+                
+        return eval(string, globals)
+        
+
+
+
+
 
 class EDFHeader :
     # BDF is a 24-bit version of the 16-bit EDF format, so we read it with the
-    # the same re
+    # the same reader
     def __init__(self, f, fileName):
 
         assert f.tell() == 0  # check file position
@@ -210,6 +319,7 @@ class EDFHeader :
             self.prefiltering[channel]          = f.read(80).strip()            
         for channel in self.channelLabels : 
             self.nbSamplesPerRecord[channel]    = int(f.read(8))  
+
 
         f.read(32 * self.nbChannels)  # reserved
           
@@ -369,12 +479,84 @@ class EDFHeader :
 
 
 
+    def reformatHeader(self, reformattedChannels):
+        originalHeader = deepcopy(self)        
+        
+        self.recordingIR += " (reformatted)"
+        if len(self.recordingIR) > 80:
+            self.recordingIR = self.recordingIR[0:80]
+        
+        
+        self.reformattedChannels = reformattedChannels
+           
+ 
+        self.nbChannels         = len(reformattedChannels)+2
+        
+        # read channel info
+        self.channelLabels      = reformattedChannels.keys()
+        for i, channel in enumerate(self.channelLabels):
+            if len(channel) > 16:
+                self.channelLabels[i] = channel[:16]
+        
+        self.transducerType     = {}
+        self.units              = {}
+        self.physicalMin        = {}
+        self.physicalMax        = {}          
+        self.digitalMin         = {}
+        self.digitalMax         = {}
+        self.prefiltering       = {}          
+        self.nbSamplesPerRecord = {} 
+        
+        for channel in self.channelLabels : 
+            expressionMng                       = ReformatExpressionMng(reformattedChannels, originalHeader)
+            self.transducerType[channel]        = "Reformatted"
+            self.prefiltering[channel]          = "Reformatted"   
+            self.units[channel]                 = "Reformat" 
+            self.physicalMin[channel]           = expressionMng.physicalMin(channel)
+            self.physicalMax[channel]           = expressionMng.physicalMax(channel)   
+            self.digitalMin[channel]            = expressionMng.digitalMin(channel)
+            self.digitalMax[channel]            = expressionMng.digitalMax(channel)
+            self.nbSamplesPerRecord[channel]    = expressionMng.nbSamplesPerRecord(channel)     
+
+
+        self.channelLabels.extend([EVENT_CHANNEL, REFORMAT_CHANNEL])
+
+        self.transducerType[EVENT_CHANNEL]        = ""
+        self.prefiltering[EVENT_CHANNEL]          = ""   
+        self.units[EVENT_CHANNEL]                 = "" 
+        self.physicalMin[EVENT_CHANNEL]           = -1
+        self.physicalMax[EVENT_CHANNEL]           =  1
+        self.digitalMin[EVENT_CHANNEL]            = -32768
+        self.digitalMax[EVENT_CHANNEL]            =  32767
+        self.nbSamplesPerRecord[EVENT_CHANNEL]    = 400
+
+        self.transducerType[REFORMAT_CHANNEL]        = ""
+        self.prefiltering[REFORMAT_CHANNEL]          = ""   
+        self.units[REFORMAT_CHANNEL]                 = "" 
+        self.physicalMin[REFORMAT_CHANNEL]           = -1
+        self.physicalMax[REFORMAT_CHANNEL]           =  1
+        self.digitalMin[REFORMAT_CHANNEL]            = -32768
+        self.digitalMax[REFORMAT_CHANNEL]            =  32767
+        self.nbSamplesPerRecord[REFORMAT_CHANNEL]    = len(str(self.reformattedChannels))/self.nbRecords/self.nbBytes + 1
+
+
+        # calculate ranges for rescaling
+        self.gain = {}
+        for channel in self.channelLabels :         
+            physicalRange = self.physicalMax[channel] - self.physicalMin[channel]
+            digitalRange  = self.digitalMax[channel]  - self.digitalMin[channel]
+            assert np.all(physicalRange > 0)
+            assert np.all(digitalRange > 0)
+            self.gain[channel] = physicalRange / digitalRange        
+        
+        self.headerNbBytes = 8 + 80 + 80 + 8 + 8 + 8 + 44 + 8 + 8 + 4 + \
+                              self.nbChannels*(16 + 80+ 8 + 8 + 8 + 8 + 8 + 80 + 8 + 32)
 
 
 
 
 
-
+ 
    
 class EDFReader(EEGDBReaderBase) :
     def __init__(self, fname):        
@@ -398,7 +580,7 @@ class EDFReader(EEGDBReaderBase) :
         return self.header.nbRecords          
                 
     def getChannelLabels(self):
-        return [v for v in self.header.channelLabels if not v == EVENT_CHANNEL]        
+        return [v for v in self.header.channelLabels if not v == EVENT_CHANNEL and not v == REFORMAT_CHANNEL]        
         
         
     def readEvents(self, fileObj):
@@ -408,18 +590,15 @@ class EDFReader(EEGDBReaderBase) :
         fileObj.seek(self.header.headerNbBytes)        
 
         #indEventChannel = self.header.label.index(EVENT_CHANNEL)
-        for noPage in range(self.getNbPages()):   
+        for noPage in range(self.getNbPages()):            
             rawRecord = self.readRawRecord(fileObj)  
-            tals      = tal(rawRecord[EVENT_CHANNEL])
-            #print rawRecord[EVENT_CHANNEL]
-            #print tals
-                       
-            #print rawRecord[EVENT_CHANNEL].decode('utf-8')            
+            tals      = tal(rawRecord[EVENT_CHANNEL])        
             
             # The first index is the mendatory time keeping event. We record it separately.
             # The time duration of this time keeping event is left blank but we know that records
             # are of a duration given by self.header.recordDuration
             self.recordStartTime.append(EDFEvent((tals[0][0], self.header.recordDuration, ""))) 
+
             
             for talEvent in tals[1:] : 
                 # One TAL can contain many events wit the same startTime/Duration properties
@@ -432,6 +611,84 @@ class EDFReader(EEGDBReaderBase) :
 
     def addEvent(self, event):
         self.events.append(event)   
+
+
+
+
+
+
+    def reformatMontage(self, channelExpressions, saveFileName = ""):
+        if saveFileName == "":
+            saveFileName = self.fileName[:-4] + "_reformatted" + self.fileName[-4:]
+            
+            
+        reformattedReader = deepcopy(self)
+        reformattedReader.fileName = saveFileName
+        reformattedReader.header.reformatHeader(channelExpressions)
+
+
+        with io.open(saveFileName, 'wb') as fileWrite:
+            with io.open(self.fileName, 'rb') as fileObj:
+            
+                # Computing the strings representing the EDF annotations
+                eventStings     = reformattedReader.computeEDFAnnotations()   
+                reformatStrings = reformattedReader.computeReformatStrings()
+
+                
+                # Verifying if the annotation field is large enough to record the annotations.
+                # If not, enlarge it on the writing copy.
+                nbBytesEvent    = reformattedReader.header.nbSamplesPerRecord[EVENT_CHANNEL]*reformattedReader.header.nbBytes
+                nbBytesReformat = reformattedReader.header.nbSamplesPerRecord[REFORMAT_CHANNEL]*reformattedReader.header.nbBytes
+                if max([len(s) for s in eventStings]) >= nbBytesEvent:       
+                    reformattedReader.header.nbSamplesPerRecord[EVENT_CHANNEL] = int(max([len(s) for s in eventStings])*1.2/reformattedReader.header.nbBytes)
+                    nbBytesEvent    = reformattedReader.header.nbSamplesPerRecord[EVENT_CHANNEL]*reformattedReader.header.nbBytes
+
+               
+                # Write the header
+                reformattedReader.header.write(fileWrite)
+                fileObj.seek(self.header.headerNbBytes)
+        
+                expressionMng = ReformatExpressionMng(reformattedReader.header.reformattedChannels, self.header) 
+                for nopage in range(self.getNbPages()):   
+                    
+                    page = self.readPage(expressionMng.getUsedChannels(), nopage+1) 
+                        
+                    for channel in reformattedReader.header.channelLabels:
+                        if channel == EVENT_CHANNEL:    
+                            encodedString = eventStings[nopage].encode("utf8")  
+                            fileWrite.write(encodedString + "\0"*(nbBytesEvent - len(encodedString)) )  
+                        elif channel == REFORMAT_CHANNEL:
+                            encodedString = reformatStrings[nopage].encode("utf8")                     
+
+                            fileWrite.write(encodedString + "\0"*(nbBytesReformat - len(encodedString)) )  
+                        else: 
+                                                        
+                            formatedSignal = expressionMng.getRawRecord(channel, page)
+                            phys_range = reformattedReader.header.physicalMax[channel]  - reformattedReader.header.physicalMin[channel]
+                            dig_range = reformattedReader.header.digitalMax[channel] - reformattedReader.header.digitalMin[channel]
+                            assert np.all(phys_range > 0)
+                            assert np.all(dig_range > 0)
+                            gain = dig_range/phys_range                          
+                            
+                            formatedSignal = (formatedSignal -  reformattedReader.header.physicalMin[channel])*gain + reformattedReader.header.digitalMin[channel]       
+        
+                            if reformattedReader.header.nbBytes == 2: # EDF
+                                fileWrite.write(formatedSignal.astype('<h').tostring())
+                            elif reformattedReader.header.nbBytes == 3: #BDF
+                                # Writing in a string of 32-bit integers and removing every fourth byte
+                                # to obtain a string of 24-bit integers
+                                formatedSignal = formatedSignal.astype('<i').tostring()
+                                formatedSignal = "".join([formatedSignal[noBit] for noBit in range(len(formatedSignal)) if (noBit+1)%4])
+                                
+                                fileWrite.write(formatedSignal)
+
+
+        return reformattedReader
+
+
+
+
+
 
 
 
@@ -481,15 +738,13 @@ class EDFReader(EEGDBReaderBase) :
         self.__init__(self.fileName)
 
 
-
-
     def saveAs(self, saveFileName):
 
         with io.open(saveFileName, 'wb') as fileWrite:
             with io.open(self.fileName, 'rb') as fileObj:
             
                 # Computing the strings representing the EDF annotations
-                eventStings = self.computeEDFAnnotations(fileWrite)       
+                eventStings = self.computeEDFAnnotations()       
                                
                 # Any modifications to the header for the writing must be made in a copied
                 # header as it must not alter the reading of the file for the duration
@@ -499,7 +754,7 @@ class EDFReader(EEGDBReaderBase) :
                 # Verifying if the annotation field is large enough to record the annotations.
                 # If not, enlarge it on the writing copy.
                 if max([len(s) for s in eventStings]) >= self.header.nbSamplesPerRecord[EVENT_CHANNEL]*self.header.nbBytes:       
-                    writeHeader.nbSamplesPerRecord[EVENT_CHANNEL] = int(max([len(s) for s in eventStings])*1.2)
+                    writeHeader.nbSamplesPerRecord[EVENT_CHANNEL] = int(max([len(s) for s in eventStings])/self.header.nbBytes*1.2)
         
                
                 # Write the header
@@ -531,7 +786,7 @@ class EDFReader(EEGDBReaderBase) :
      Compute the EDFAnnotations strings for each pages (records) from the 
      events contrained in the reader. Used internally by self.save(...)
     """
-    def computeEDFAnnotations(self, fileObj):
+    def computeEDFAnnotations(self):
 
         def prepareEventStr(timeDiff, events):
             if not isinstance(timeDiff, float):
@@ -553,35 +808,59 @@ class EDFReader(EEGDBReaderBase) :
             return timeKeepingStr
 
 
-        # Position the file cursor just after the header.
-        fileObj.seek(self.header.headerNbBytes)
-
         # Computing the strings representing the EDF annotations
         eventStings = []
         nbEvents = 0
         for nopage, startTimeEvent in enumerate(self.recordStartTime):
             startTime = startTimeEvent.startTime
-            for channel in self.header.channelLabels:
-                if channel == EVENT_CHANNEL:
                     
-                    if nopage == 0:
-                        filteredEvents = filter(lambda e: e.startTime < self.recordStartTime[1].startTime, self.events)     
-                        
-                    elif nopage == len(self.recordStartTime) - 1:
-                        filteredEvents = filter(lambda e: e.startTime >= startTime, self.events)  
-                        
-                    else:                    
-                        filteredEvents = filter(lambda e: e.startTime <  self.recordStartTime[nopage+1].startTime and 
-                                                          e.startTime >= startTime, self.events)     
-                        
-                    eventStings.extend([prepareEventStr(startTime, filteredEvents)])         
+            if nopage == 0:                                      # first page 
+                filteredEvents = filter(lambda e: e.startTime < self.recordStartTime[1].startTime, self.events)     
+                
+            elif nopage == len(self.recordStartTime) - 1:       # last page
+                filteredEvents = filter(lambda e: e.startTime >= startTime, self.events)  
+                
+            else:                                               # other pages
+                filteredEvents = filter(lambda e: e.startTime <  self.recordStartTime[nopage+1].startTime and 
+                                                  e.startTime >= startTime, self.events)     
+                
+            eventStings.extend([prepareEventStr(startTime, filteredEvents)])         
 
-                    nbEvents += len(filteredEvents)  
+            nbEvents += len(filteredEvents)  
 
         # Verify that the number of recorded events correspond to the number of events within the object.                          
         assert(nbEvents == len(self.events))    
 
         return eventStings
+
+
+
+
+
+    def computeReformatStrings(self):
+        
+        # Computing the strings representing the reformating operations
+        formatStings = []
+        if hasattr(self.header, "reformattedChannels"):
+            computeString = str(self.header.reformattedChannels)
+        else:
+            computeString = ""            
+        
+        nbSamplesRecord = self.header.nbSamplesPerRecord[REFORMAT_CHANNEL]*self.header.nbBytes       
+        
+        indStart = 0
+        for nopage in range(self.getNbPages()):
+            indEnd = min(indStart + nbSamplesRecord, len(computeString))
+            formatStings.append(computeString[indStart:indEnd]) 
+            indStart = indEnd
+
+        return formatStings
+
+
+
+
+
+
 
 
 
@@ -765,7 +1044,11 @@ class EDFReader(EEGDBReaderBase) :
 
         
     def setPageDuration(self, duration):
-        if duration != self.getPageDuration():
+        dtMax = 1.0/max(array(self.header.nbSamplesPerRecord.values())/self.header.recordDuration)
+        # We change the duration only if its greater than half the size of the 
+        # smaller sampling period. Else, because of the digitization resolution,
+        # the change has no effet.
+        if abs(duration - self.getPageDuration()) > dtMax:
             self.changeRecordDuration(duration)
         
     def getPageDuration(self):
@@ -794,7 +1077,11 @@ class EDFReader(EEGDBReaderBase) :
         
         
         
-    def getNbSample(self, channel):
+    def getNbSample(self, channel=None):
+
+        if channel is None:
+            return max(self.header.nbSamplesPerRecord.values())*self.header.nbRecords
+        
         if not isinstance(channel, str):
             raise TypeError
                     
@@ -844,6 +1131,8 @@ class EDFReader(EEGDBReaderBase) :
                 ann = tal(rawRecord[channel])
                 time = self.header.startDateTime + datetime.timedelta(0,ann[0][0]) 
                 events.extend(ann[1:])
+            elif channel == REFORMAT_CHANNEL:
+                signals[channel] = rawRecord[channel]
             else:
                 dig = self.byteStr2integers(rawRecord[channel])
                 signals[channel] = self.digital2physical(dig, channel)
@@ -856,18 +1145,3 @@ class EDFReader(EEGDBReaderBase) :
         #TODO: Implement.
         raise NotImplemented
 
-
-    """
-    def records(self):
-        '''
-        Record generator.
-        '''
-        try:
-          while True:
-            yield self.readRecord()
-        except EOFError:
-          pass
-    """
-
-        
-        
