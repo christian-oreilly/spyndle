@@ -37,7 +37,7 @@ from time import sleep
 from warnings import warn
 
 
-from spyndle.io import Event, RecordedChannel
+from spyndle.io import Event, RecordedChannel, EventList
 
 
 EVENT_CHANNEL    = 'EDF Annotations'
@@ -320,7 +320,6 @@ class EDFHeader :
         for channel in self.channelLabels : 
             self.nbSamplesPerRecord[channel]    = int(f.read(8))  
 
-
         f.read(32 * self.nbChannels)  # reserved
           
         assert(f.tell() == self.headerNbBytes)
@@ -584,16 +583,15 @@ class EDFReader(EEGDBReaderBase) :
         
         
     def readEvents(self, fileObj):
-        self.events          = []
-        self.recordStartTime = []
-        
+        #self.events          = []
+        self.recordStartTime = []        
         fileObj.seek(self.header.headerNbBytes)        
 
         #indEventChannel = self.header.label.index(EVENT_CHANNEL)
         for noPage in range(self.getNbPages()):            
             rawRecord = self.readRawRecord(fileObj)  
             tals      = tal(rawRecord[EVENT_CHANNEL])        
-            
+
             # The first index is the mendatory time keeping event. We record it separately.
             # The time duration of this time keeping event is left blank but we know that records
             # are of a duration given by self.header.recordDuration
@@ -603,14 +601,14 @@ class EDFReader(EEGDBReaderBase) :
             for talEvent in tals[1:] : 
                 # One TAL can contain many events wit the same startTime/Duration properties
                 for noEventStr in talEvent[2]:
-                    self.events.append(EDFEvent((talEvent[0], talEvent[1], noEventStr)))            
+                    self.events.add(EDFEvent((talEvent[0], talEvent[1], noEventStr)))  
                     
 
             
             
 
     def addEvent(self, event):
-        self.events.append(event)   
+        self.events.add(event)   
 
 
 
@@ -884,9 +882,9 @@ class EDFReader(EEGDBReaderBase) :
      Convert a String of bytes to an array of integers.
     """
     def byteStr2integers(self, samples):
-        if self.header.fileType == "EDF":
+        if self.header.fileType == "EDF" or  self.header.fileType == "EDF+":
             # 2-byte little-endian integers
-            return np.fromstring(samples, '<h')
+            return np.fromstring(samples, '<i2').astype(np.int32)
         elif self.header.fileType == "BDF":
             #print "reading BDF..."
             # 3-byte little-endian integers
@@ -904,11 +902,11 @@ class EDFReader(EEGDBReaderBase) :
             #return np.fromstring(byteStr, '<i')  
             # A ticket has been placed for the implementation of a '<3i' dtype in numpy (https://github.com/numpy/numpy/issues/664)
 
-            ##### this one... which is about ten time slower than
+            ##### this one... 
             #import struct
             #return array([struct.unpack('<i', samples[noByte:(noByte+3)] + ('\0' if samples[noByte+2] < '\x80' else '\xff'))[0] for noByte in range(0, len(samples), 3)])
             
-            ##### this one
+            ##### which is about ten time slower than this one
             samples = np.fromstring(samples, '<u1')
             
             N   = len(samples)
@@ -945,7 +943,8 @@ class EDFReader(EEGDBReaderBase) :
     """
     def readChannel(self, signalName, usePickled=False):
 
-        if not isinstance(signalName, str) :
+        if not (isinstance(signalName, str) or isinstance(signalName, unicode)) :
+            print "Wrong type:", type(signalName), signalName
             raise TypeError        
         
         
@@ -1134,7 +1133,7 @@ class EDFReader(EEGDBReaderBase) :
             elif channel == REFORMAT_CHANNEL:
                 signals[channel] = rawRecord[channel]
             else:
-                dig = self.byteStr2integers(rawRecord[channel])
+                dig = self.byteStr2integers(rawRecord[channel])                                
                 signals[channel] = self.digital2physical(dig, channel)
         
         return time, signals, events

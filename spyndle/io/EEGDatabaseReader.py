@@ -20,11 +20,13 @@ from scipy import array, arange, sqrt, mean, concatenate, zeros, fft
 from scipy.io import loadmat
 from scipy.fftpack import fftfreq
 
+import bisect
 import re
 import datetime
 import time
 import numpy as np
 
+from functools import total_ordering
 from lxml import etree  
 from abc import ABCMeta, abstractmethod
     
@@ -40,7 +42,8 @@ class EEGDBReaderBase(object) :
     # List of EEGPageInfo of the recording.
     def __init__(self, pageDuration = 30):
         self.setPageDuration(pageDuration)         
-        self.__infoPages   = []
+        self.__infoPages    = []
+        self._events        = EventList()
 
     def getInfoPages(self, noPage=None):
         if noPage is None:
@@ -74,22 +77,45 @@ class EEGDBReaderBase(object) :
     def getChannelLabels(self): raise ErrPureVirtualCall
         
 
+
+
+    ###########################################################################
+    # Events
+    ##########################################################################
+
+
+    @property
+    def events(self, startTime=None, endTime=None):
+        return self.getEvents(startTime, endTime)
+    
+    @events.setter
+    def id(self, events):
+        self._events = events        
+        
+    # This function should not be called from outside the class anymore. The
+    # event property should be used instead.
     def getEvents(self, startTime=None, endTime=None) :
         if startTime is None and endTime is None:
-            return self.events
+            return self._events
             
         if startTime is None :
             return filter(lambda e: e.startTime < endTime or 
-                                 e.startTime + e.timeLength < endTime , self.events)                  
+                                 e.startTime + e.timeLength < endTime , self._events)                  
             
         if endTime is None :            
             return filter(lambda e: e.startTime >= startTime or 
-                                    e.startTime + e.timeLength >= startTime, self.events)       
+                                    e.startTime + e.timeLength >= startTime, self._events)       
                 
         return filter(lambda e: (e.startTime >= startTime and e.startTime < endTime) or 
-                     (e.startTime + e.timeLength >= startTime and e.startTime + e.timeLength < endTime) , self.events)       
+                     (e.startTime + e.timeLength >= startTime and e.startTime + e.timeLength < endTime) , self._events)       
                             
         
+
+
+
+
+
+
         
     @abstractmethod        
     def getNbPages(self): raise ErrPureVirtualCall
@@ -218,20 +244,95 @@ class EEGDBReaderBase(object) :
 
         # Select the stage where the spindle begin as the sleep stage
         # of the spindle.
-        stages = filter(lambda e: e.groupeName == "Stage" and
-                                            e.timeStart() <=  event.startTime and 
-                                            e.timeEnd() >= event.startTime, self.events)                         
-        if len(stages) > 0 :
-            event.properties["stage"] = stages[0].name
-                
-        else:
+
+        indMin = self.events.getIndexMinStartTime(event.startTime-self.getPageDuration())
+        indMax = self.events.getIndexMaxStartTime(event.startTime)
+        if indMax <= indMin:
             event.properties["stage"] = "No stage"
+        else:
+            stages = filter(lambda e: e.groupeName == "Stage", self.events[indMin:(indMax+1)])                  
+            if len(stages) == 1 :
+                event.properties["stage"] = stages[0].name
+            elif len(stages) == 0 :    
+                event.properties["stage"] = "No stage"
+            else:
+                print "Waring: " + str(len(stages)) + " staged are including the event starting at time " + str(event.startTime) + "."
 
 
 
+"""
+  Class implementing a list of events. It must manage its internal list such
+  that it is always sorted to allow to find events as function of their timing
+  of occurence rapidely. 
+"""
+class EventList:
+    def __init__(self): 
+        self.__events = []
 
 
+    def add(self, event):
+        bisect.insort(self.__events, event)
 
+    def __getitem__(self, index):
+        return self.__events[index]
+        
+    def __len__(self):
+        return len(self.__events)
+
+    def remove(self, events):
+        if isinstance(events, list):
+            for event in events :
+                if event in self.__events:
+                    self.__events.remove(event)
+                    
+        elif isinstance(events, Event):
+            self.__events.remove(events)
+        else:
+            raise TypeError
+        
+  
+  
+
+    def getIndexMinStartTime(self, timeMin, inclusive=True):
+         
+        def find_ind_gt(a, x):
+            # Find the index of the leftmost value greater than x
+            return bisect.bisect_right(a, x)
+            
+        def find_ind_ge(a, x):
+            # Find the index of the leftmost item greater than or equal to x
+            return bisect.bisect_left(a, x)
+
+        dummyEvent = Event()
+        dummyEvent.startTime = timeMin
+        if inclusive:
+            return find_ind_ge(self.__events, dummyEvent)
+        else:
+            return find_ind_gt(self.__events, dummyEvent)            
+              
+  
+
+    def getIndexMaxStartTime(self, timeMax, inclusive=True):
+         
+
+        def find_ind_lt(a, x):
+            # Find the index of the rightmost value less than x
+            return bisect.bisect_left(a, x)-1
+
+
+        def find_ind_le(a, x):
+            # Find the index of the rightmost value less than or equal to x
+            return bisect.bisect_right(a, x) -1
+
+
+        dummyEvent = Event()
+        dummyEvent.startTime = timeMax
+        if inclusive:
+            return find_ind_le(self.__events, dummyEvent)
+        else:
+            return find_ind_lt(self.__events, dummyEvent)     
+            
+            
   
 # TODO: Manage discontinuous signals.
 class EEGPage:
@@ -368,6 +469,8 @@ class RecordedChannel:
         Sleep stage N2 	
         Sleep stage N3
 """    
+
+@total_ordering
 class Event:
     __metaclass__ = ABCMeta
     
@@ -383,6 +486,11 @@ class Event:
 
         self.properties  = properties
         
+        
+    def __eq__(self, other):
+        return self.startTime == other.startTime
+    def __lt__(self, other):
+        return self.startTime < other.startTime       
         
         
     def timeEnd(self):

@@ -21,6 +21,7 @@ import comtypes.client as cc
 import os
 import io  # For buffered writing
 import ctypes, numpy
+import numpy as np
 from scipy.io import savemat
 from scipy import array, ceil, zeros, append, arange, concatenate
 from math import floor
@@ -29,6 +30,13 @@ import time
 from sys import stdout
 
 from EEGDatabaseReader import EEGDBReaderBase, Event, RecordedChannel, EEGPage, EEGPageInfo
+
+
+# Internal record size of Harmonie. According to Gaetan Poirier, internally, 
+# Harmonie stores its data with records of 64 samples. The size of a data file
+# is always a multiple of this record size and the true time is stored at the
+# begining of every such record.
+RECORD_NB = 64
 
 OLE_TIME_ZERO = datetime(1899, 12, 30, 0, 0, 0)
 def ole2datetime(oledt):
@@ -110,7 +118,8 @@ class HarmonieEvent(Event):
                                                or self.name == u"ÉV.":   
                 self.name = u"Sleep stage W"
                 
-            elif  self.name.lower() == u"unstaged" or self.name.lower() == u"stdnd":                  
+            elif  self.name.lower() == u"unstaged" or self.name.lower() == u"stdnd" \
+                                                  or self.name.lower() ==  "stageu":                  
                 self.name = u"Sleep stage ?"                   
                 
             else:   
@@ -234,6 +243,36 @@ class HarmonieReader(EEGDBReaderBase):
         #	ATTENTION : Il n'y a toujours qu'un seul montage d'enregistrement, à l'index '0'
         self.IRecordingMontage = self.IPhysicalMontage.GetRecordingMontage(0)
 
+
+        ###########################################
+        ## Getting the recording start time
+        ISignalRecord = self.ISignalFile.CreateSignalRecord(RECORD_NB)
+        ISignalRecord.SetStartSample(int(0))
+        self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)  
+        self.recordingStartDateTime = ole2datetime(ISignalRecord.GetStartTime())        
+        self.startTimeInDays = ISignalRecord.GetStartTime()
+        self.startDay = floor(self.startTimeInDays)
+        self.recordingStartTime = dayToSecond(self.startTimeInDays, self.startDay)        
+        ###########################################     
+
+        
+        ###########################################
+        # Store events     
+        for i in range(self.ISignalInfo.GetEventItemCount()):    
+            IEventItem = self.ISignalInfo.GetEventItem(i)
+            IEventGroup = IEventItem.GetGroup()
+            self.events.add(HarmonieEvent(i, IEventGroup, IEventItem, self.recordingStartDateTime))
+            
+        # Patch used because data recorder with previous versions of Harmonie
+        # inconsistent time stamp due to discontinuous recording. These lines
+        # should not be necessary with another reader.
+        print "Resynchronization of the events..."
+        self.resyncEvents()                
+        ###########################################
+            
+            
+        self.pageDuration = np.median([e.timeLength for e in self.events if e.groupeName.lower() == "stage"])
+
         # We now avoid to use IRecordingMontage.GetBaseSampleFrequency() and always
         # use self.IRecordingMontage.GetBaseSampleFrequency() to avoid any confusion.
         self.trueBaseFreq      = self.IRecordingCalibration.GetTrueSampleFrequency()        
@@ -264,51 +303,38 @@ class HarmonieReader(EEGDBReaderBase):
             self.channelType[self.labels[i]] = self.IRecordingMontage.GetChannelType(i)            
             
   
-        
-        self.nbSamples = int(self.ISignalFile.GetRecordCount(1))   
+  
+  
+  
+        ##################################
+        ## A .sig file can be troncated such that Harmonie reports an invalid
+        # number of data record but does not detect the problem. Reading can be
+        # performed up to the specified number of sample but the behavior of 
+        # reading function are uncertain. These situations can be detected and 
+        # corrected by looking at the true file size.  
+        nbSampleRec = int(RECORD_NB*sum(array(self.channelFreqs.values())/self.trueBaseFreq))
+
+        # Each sample is recorded using 16 bytes and the time/date is recorded
+        # at the begining of each record using 8 bytes.
+        recSize = nbSampleRec*2 + 8 
+ 
+        self.nbSamples = os.path.getsize(self.fileName)/recSize*RECORD_NB
+        if self.nbSamples != int(self.ISignalFile.GetRecordCount(RECORD_NB))*RECORD_NB:
+            self.nbSamples = min(self.nbSamples, int(self.ISignalFile.GetRecordCount(RECORD_NB))*RECORD_NB)
+            print "Warning: The file has been truncated and Harmonie is not reporting "\
+                  "the correct number of samples anymore. The know problems associated"\
+                  " with this situation have been corrected but unknown problems may " \
+                  "arise. Consider restauring this possibly corrupted .sig file if you"\
+                  " have a backup."
+            print "record size:", recSize
+            print "Expected number of record:", int(self.ISignalFile.GetRecordCount(RECORD_NB))
+            print "Computed number of record:", os.path.getsize(self.fileName)/recSize
+            print sum(array(self.channelFreqs.values())/self.trueBaseFreq)
+            print array(self.channelFreqs.values())/self.trueBaseFreq
+        ####################################
         
 
-        ## Getting the recording start time
-        ISignalRecord = self.ISignalFile.CreateSignalRecord(int(500))
-        ISignalRecord.SetStartSample(int(0))
-        self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)  
-        
-        
-        self.recordingStartDateTime = ole2datetime(ISignalRecord.GetStartTime())
-        
-        self.startTimeInDays = ISignalRecord.GetStartTime()
-        self.startDay = floor(self.startTimeInDays)
-        self.recordingStartTime = dayToSecond(self.startTimeInDays, self.startDay)        
-        
-        
-        # Store events     
-        self.events = []
-        for i in range(self.ISignalInfo.GetEventItemCount()):    
-            IEventItem = self.ISignalInfo.GetEventItem(i)
-            IEventGroup = IEventItem.GetGroup()
-            self.events.append(HarmonieEvent(i, IEventGroup, IEventItem, self.recordingStartDateTime))
-            
-            
-            
-        self.events.sort(key = lambda x: x.startSample)
-
-        #for event in self.events :
-        #    print event.name, event.startSample, event.dateTime 
-        
-        stageEnvents = filter(lambda e: e.groupeName == "Stage", self.events)
-        for event, i in zip(stageEnvents, range(len(stageEnvents))):
-            event.stageEpoch = i+1
-   
         self.definePages()
-        
-        
-        ###################################################################
-        # Patch used because data recorder with previous versions of Harmonie
-        # inconsistent time stamp due to discontinuous recording. These lines
-        # should not be necessary with another reader.
-        print "Resynchronization of the events..."
-        self.resyncEvents()    
-        ###################################################################        
 
 
 
@@ -420,20 +446,15 @@ class HarmonieReader(EEGDBReaderBase):
     # has begun. 
 
     def getChannelFreq(self, channel): 
-        for i in range(len(self.labels)):
-            if self.labels[i] == channel:
-                return self.channelFreqs[i] 
+        if channel in self.labels:
+            return self.channelFreqs[channel] 
         return 0.0
     
 
     def getSamplingRate(self, channel) :
         warnings.warn("This function is depreacted.", DeprecationWarning, stacklevel=2)
+        self.getChannelFreq(channel)      
         
-        for i in range(len(self.labels)):
-            if self.labels[i] == channel:
-                return self.channelFreqs[i] 
-        return 0.0
-     
      
      
     def getSamplingRates(self):
@@ -448,7 +469,7 @@ class HarmonieReader(EEGDBReaderBase):
         if usePickled:
             return self.readPickledChannel(signalName)
         else:
-            raise NotImplementedError
+            return self.readComplete([signalName])[signalName]
 
     def readPickledChannel(self, signalName):
 
@@ -566,7 +587,7 @@ class HarmonieReader(EEGDBReaderBase):
         
         approxTime   = 0.0
         approxSample = 0
-        ISignalRecord = self.ISignalFile.CreateSignalRecord(10) 
+        ISignalRecord = self.ISignalFile.CreateSignalRecord(RECORD_NB) 
         
         i = 0
         while i < 30 and abs(time - approxTime) > 0.5/self.trueBaseFreq:
@@ -651,7 +672,7 @@ class HarmonieReader(EEGDBReaderBase):
     # Patch parce qu'il semble y avoir un problème avec le temps associé
     # aux fuseaux de Gaétan
     def resyncEvents(self):
-        ISignalRecord = self.ISignalFile.CreateSignalRecord(10)
+        ISignalRecord = self.ISignalFile.CreateSignalRecord(RECORD_NB)
         for event in self.events:
             ISignalRecord.SetStartSample(event.startSample)
             self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
@@ -742,33 +763,69 @@ class HarmonieReader(EEGDBReaderBase):
         if verbose:
             print "Encoding events..."
 
+        ISignalRecord = self.ISignalFile.CreateSignalRecord(RECORD_NB)   
         for page in self.getInfoPages():
-            ISignalRecord = self.ISignalFile.CreateSignalRecord(10)     
-            
-            ISignalRecord.SetStartSample(page.startSample)
+              
+            if self.getNbSample() - page.startSample >= RECORD_NB: 
+                start = page.startSample
+                ISignalRecord.SetStartSample(page.startSample)
+            else:
+                start = self.getNbSample() - RECORD_NB
+                ISignalRecord.SetStartSample(self.getNbSample() - RECORD_NB)
 
+            # This function call is the bottle neck of this section.
+            try:             
+                self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
+            except:
+                print "error: ", self.getNbSample(), start
+                raise
+
+            # Annotation channel            
+            page.startTime = (ole2datetime(ISignalRecord.GetStartTime()) - self.recordingStartDateTime).total_seconds()         
+
+            
             # This function call is the bottle neck of this section.
             self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
 
             # Annotation channel            
             page.startTime = (ole2datetime(ISignalRecord.GetStartTime()) - self.recordingStartDateTime).total_seconds()         
 
+            if self.getNbSample() - page.startSample < RECORD_NB: 
+               page.startTime += (page.startSample - (self.getNbSample() - RECORD_NB))/self.trueBaseFreq            
 
 
-        filteredEvents = filter(lambda e: e.startTime < self.getInfoPages()[1].startTime, self.events)     
+
+
+        startTime = self.getInfoPages()[1].startTime
+        indMax = max(0, min(len(self.events)-1, self.events.getIndexMaxStartTime(startTime, inclusive=False)))     
+        #filteredEvents = filter(lambda e: e.startTime < self.getInfoPages()[1].startTime, self.events)    
+        filteredEvents = self.events[:(indMax+1)]
         self.getInfoPages()[0].eventStr = prepareEventStr(self.getInfoPages()[0].startTime, filteredEvents)
-        nbEvents = len(filteredEvents)        
-        
-        for nopage in range(1, len(self.getInfoPages())-1):
-            filteredEvents = filter(lambda e: e.startTime <  self.getInfoPages()[nopage+1].startTime and 
-                                              e.startTime >= self.getInfoPages()[nopage].startTime, self.events)     
-            self.getInfoPages()[nopage].eventStr = prepareEventStr(self.getInfoPages()[nopage].startTime, filteredEvents)                                           
-            nbEvents += len(filteredEvents)  
+        nbEvents = len(filteredEvents)  
+        #print 0, indMax, len(filteredEvents), startTime,  [e.startTime for e in filteredEvents]  
             
-        filteredEvents = filter(lambda e: e.startTime >= self.getInfoPages()[len(self.getInfoPages())-1].startTime, self.events)     
+        for nopage in range(1, len(self.getInfoPages())-1):
+
+            indMax = min(len(self.events)-1, self.events.getIndexMaxStartTime(self.getInfoPages()[nopage+1].startTime, inclusive=False))   
+            indMin = max(0, self.events.getIndexMinStartTime(self.getInfoPages()[nopage].startTime))
+            
+            filteredEvents = self.events[indMin:(indMax+1)]          
+            #filteredEvents = filter(lambda e: e.startTime <  self.getInfoPages()[nopage+1].startTime and 
+            #                                  e.startTime >= self.getInfoPages()[nopage].startTime, self.events)   
+            startTime = self.getInfoPages()[nopage].startTime
+            self.getInfoPages()[nopage].eventStr = prepareEventStr(startTime, filteredEvents)                                           
+            nbEvents += len(filteredEvents)  
+            #print indMin, indMax, len(filteredEvents) , startTime,  [e.startTime for e in filteredEvents]  
+            
+        startTime = self.getInfoPages()[len(self.getInfoPages())-1].startTime
+        indMin = max(0, self.events.getIndexMinStartTime(startTime))
+        filteredEvents = self.events[indMin:]        
+        #filteredEvents = filter(lambda e: e.startTime >= self.getInfoPages()[len(self.getInfoPages())-1].startTime, self.events)     
         self.getInfoPages()[len(self.getInfoPages())-1].eventStr = prepareEventStr(self.getInfoPages()[len(self.getInfoPages())-1].startTime, filteredEvents)        
         nbEvents += len(filteredEvents)  
-    
+        #print indMin, len(self.events)-1, len(filteredEvents), startTime,  [e.startTime for e in filteredEvents]         
+        
+        #print "res:", nbEvents, len(self.events)
         assert(nbEvents == len(self.events))            
             
        
@@ -847,7 +904,7 @@ class HarmonieReader(EEGDBReaderBase):
             
             # 44 ascii : reserved
             if fileType == "EDF":
-                f.write(" "*44) 
+                f.write("EDF+C" + " "*39)
             elif fileType == "BDF":
                 f.write("24BIT" + " "*39)            
             
@@ -859,7 +916,6 @@ class HarmonieReader(EEGDBReaderBase):
             f.write("%08d" % nbPages)  
             
             # 8 ascii : duration of a data record, in seconds
-            print "duration", self.pageDuration, ("%8.6f" % self.pageDuration)[:8]
             f.write(("%8.6f" % self.pageDuration)[:8] )  
             
             # 4 ascii : number of signals (ns) in data record
@@ -876,7 +932,7 @@ class HarmonieReader(EEGDBReaderBase):
             for i in range(ns+1): f.write(" "*80)
 
             # ns * 8 ascii : ns * physical dimension (e.g. uV or degreeC)
-            for i in range(ns+1): f.write(" "*8)
+            for i in range(ns+1): f.write("      uV")
 
             #print self.IRecordingCalibration.GetBaseCalibration(SIGNALFILE_FLAGS_CALIBRATEASVOLTS)   
             #print self.IRecordingCalibration.GetBaseCalibration(SIGNALFILE_FLAGS_BASEINPUTCALIB)            
@@ -886,29 +942,41 @@ class HarmonieReader(EEGDBReaderBase):
             
             
             # ns * 8 ascii : ns * physical minimum (e.g. -500 or 34)
+            physicalMinMicro = {}
+            physicalMaxMicro = {}
             for i in range(ns): 
-                f.write(("%8.6f" %  self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)[0])[:8])
+                inputMin, outputMin, inputMax, outputMax = self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)
+                physicalMaxMicro[self.getChannelLabels()[i]]  = inputMax*(outputMax-outputMin)/(inputMax - inputMin)  
+                physicalMinMicro[self.getChannelLabels()[i]]  = inputMin*(outputMax-outputMin)/(inputMax - inputMin)
+                f.write(("%8.6f" %  physicalMinMicro[self.getChannelLabels()[i]] )[:8])
             f.write(("%8.6f" %  -1)[:8]) 
-
-
+  
             # ns * 8 ascii : ns * physical maximum (e.g. 500 or 40)
             for i in range(ns): 
-                f.write(("%8.6f" %  self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)[2])[:8])
+                f.write(("%8.6f" %  physicalMaxMicro[self.getChannelLabels()[i]])[:8])
             f.write(("%8.6f" %  1)[:8])  
 
 
             # ns * 8 ascii : ns * digital minimum (e.g. -2048)
+            digitalMin = {}
+            digitalMax = {}
             for i in range(ns): 
-                f.write("%08d" %  self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATE)[0])
+                if fileType == "EDF":
+                    digitalMin[self.getChannelLabels()[i]] = -32768
+                    digitalMax[self.getChannelLabels()[i]] =  32767
+                elif fileType == "BDF":
+                    digitalMin[self.getChannelLabels()[i]] = -8388608 
+                    digitalMax[self.getChannelLabels()[i]] =  8388607    
+                else:
+                    raise ValueError
+                f.write("%08d" %  digitalMin[self.getChannelLabels()[i]])
             f.write("%08d" %  -32768)        
 
 
             # ns * 8 ascii : ns * digital maximum (e.g. 2047)
             for i in range(ns): 
-                f.write("%08d" %  self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATE)[2])
+                f.write("%08d" %  digitalMax[self.getChannelLabels()[i]])
             f.write("%08d" %  32767)
-
-
 
 
             # ns * 80 ascii : ns * prefiltering (e.g. HP:0.1Hz LP:75Hz)
@@ -955,8 +1023,9 @@ class HarmonieReader(EEGDBReaderBase):
             if verbose:
                 print "Writing body..."
                         
-            for nopage, page in enumerate(self.getInfoPages()):
-                ISignalRecord = self.ISignalFile.CreateSignalRecord(page.getNbSamples())     
+            ISignalRecord = self.ISignalFile.CreateSignalRecord(page.getNbSamples()) 
+            for nopage, page in enumerate(self.getInfoPages()):    
+                self.ISignalFile.InitSignalRecord(page.getNbSamples(), ISignalRecord) 
                 
                 ISignalRecord.SetStartSample(page.startSample)
 
@@ -965,12 +1034,12 @@ class HarmonieReader(EEGDBReaderBase):
 
                 cBuffer = ISignalRecord.GetRecordBuffer()        
                 record = numpy.frombuffer(numpy.core.multiarray.int_asbuffer(ctypes.addressof(cBuffer[0].contents), 8*cBuffer[1]), float) 
+                #record = ISignalRecord.GetRecordData()
+                # record is in uV
 
                 indS = 0                
                 for i, channel in enumerate(self.labels):
-
                     
-                            
                     # If this page is discontinuous within the .sig file, only 
                     # the part up to the discontinuity is used: the rest of 
                     # this EDF signal is padded with zeros to make it the correct
@@ -989,23 +1058,31 @@ class HarmonieReader(EEGDBReaderBase):
                     
                     
                     # WRITE RECORDED SIGNAL....
-                    physical_min = self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)[0]
-                    physical_max = self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)[2]
-                    digital_min  = self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATE)[0]
-                    digital_max  = self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATE)[2]
+                    physical_min = physicalMinMicro[self.getChannelLabels()[i]] 
+                    physical_max = physicalMaxMicro[self.getChannelLabels()[i]] 
+                    digital_min  = digitalMin[self.getChannelLabels()[i]] 
+                    digital_max  = digitalMax[self.getChannelLabels()[i]] 
 
                     phys_range = physical_max - physical_min
                     dig_range = digital_max - digital_min
                     assert numpy.all(phys_range > 0)
                     assert numpy.all(dig_range > 0)
                     gain = dig_range/phys_range                          
-                    
-                    recordedSignal = (recordedSignal - physical_min)*gain + digital_min       
 
+                    #print physical_min, physical_max, digital_min, digital_max
+                    #inputMin, outputMin, inputMax, outputMax = self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)
+                    #chanGain = (inputMax - inputMin)/(outputMax - outputMin)                         
+                    #recordedSignal = (recordedSignal - outputMin)*chanGain + inputMin                      
 
+                    #print nopage, channel, physical_min, physical_max, digital_min, digital_max, min(recordedSignal), max(recordedSignal) 
+                    #print self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS), self.IRecordingCalibration.GetBaseCalibration(SIGNALFILE_FLAGS_CALIBRATEASVOLTS)
+                    #print self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATE), self.IRecordingCalibration.GetBaseCalibration(SIGNALFILE_FLAGS_CALIBRATE)
+
+                                        
+                    recordedSignal = (recordedSignal - physical_min)*gain + digital_min  
 
                     if nbByte == 2: # EDF
-                        f.write(recordedSignal.astype('<h').tostring())
+                        f.write(recordedSignal.astype('<i2').tostring())
                     elif nbByte == 3: #BDF
                         # Writing in a string of 32-bit integers and removing every fourth byte
                         # to obtain a string of 24-bit integers
