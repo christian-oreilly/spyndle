@@ -468,7 +468,7 @@ class SpindleDectectorRMS(SpindleDectector):
         SpindleDectector.detectSpindles(self, listChannels, reader, verbose)
 
         # Computing sleep cycles
-        cycles = computeDreamCycles([e for e in self.reader.events if e.groupeName == "Stage"], self.aeschbachCycleDef)
+        cycles = computeDreamCycles([e for e in self.reader.events if e.groupeName.lower() == "stage"], self.aeschbachCycleDef)
 
         #################################### READING ##########################
         if verbose:   print "Start reading datafile..."
