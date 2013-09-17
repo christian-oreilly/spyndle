@@ -33,6 +33,7 @@
 
 """
 
+import warnings
 import os
 from xml.dom import minidom
 
@@ -70,26 +71,35 @@ def generateSVGColoredMap_fromFile(fileIn, fileOut):
 
 
 
-def getElectrodeCoordinates(electrodeNames):
+def getElectrodeCoordinates(electrodeNames = None):
 
-    dom = minidom.parse(os.path.dirname(os.path.realpath(__file__))  + "\\eeg_electrodes_10-20_small.svg")
+    if not electrodeNames is None:
+        warnings.warn("The use of the electrodeNames parameters to call electrodeSVG.getElectrodeCoordinates() is now deprecated.", DeprecationWarning, stacklevel=2)
+
+    dom = minidom.parse(os.path.dirname(os.path.realpath(__file__))  + "\\eeg_electrodes_10-20.svg")
 
     SVGnode = dom.getElementsByTagName("svg")[0]   
 
     cx = {}
     cy = {}
     transform = {}
+
         
     for pathNode in SVGnode.getElementsByTagName("path"):
         if pathNode.getAttribute("id")[0:6] == "circle":
             
             nameElectrode = pathNode.getAttribute("id")[6:]
-            if nameElectrode in electrodeNames:
-                
-                cx[nameElectrode] = pathNode.getAttribute("sodipodi:cx")
-                cy[nameElectrode] = pathNode.getAttribute("sodipodi:cy")
-                transform[nameElectrode] = pathNode.getAttribute("transform")
+            #if nameElectrode in electrodeNames:
+            
+            cx[nameElectrode] = pathNode.getAttribute("sodipodi:cx")
+            cy[nameElectrode] = pathNode.getAttribute("sodipodi:cy")
+            transform[nameElectrode] = pathNode.getAttribute("transform")
 
+
+    for small, large in zip(["T3", "T5", "T4", "T6"], ["T7", "P7", "T8", "P8"]):
+        cx[small]        = cx[large]
+        cy[small]        = cy[large]
+        transform[small] = transform[large]
 
     return cx, cy, transform
 
@@ -117,11 +127,19 @@ def getHeadCircleProp():
 
 def getElectCircleProp(nameElect):
 
-    dom = minidom.parse(os.path.dirname(os.path.realpath(__file__))  + "\\eeg_electrodes_10-20_small.svg")
+    dom = minidom.parse(os.path.dirname(os.path.realpath(__file__))  + "\\eeg_electrodes_10-20.svg")
 
     SVGnode = dom.getElementsByTagName("svg")[0]   
 
-        
+    if nameElect == "T3":
+        nameElect = "T7"
+    elif nameElect == "T5":
+        nameElect = "P7"
+    elif nameElect == "T4":
+        nameElect = "T8"
+    elif nameElect == "T6":
+        nameElect = "P8"
+    
     for pathNode in SVGnode.getElementsByTagName("path"):
         if pathNode.getAttribute("id") == "circle" + nameElect:
             cx = pathNode.getAttribute("sodipodi:cx")
@@ -129,11 +147,10 @@ def getElectCircleProp(nameElect):
             rx = pathNode.getAttribute("sodipodi:ry")
             ry = pathNode.getAttribute("sodipodi:ry")
             transform = pathNode.getAttribute("transform")
+            return cx, cy, rx, ry, transform
 
-
-    return cx, cy, rx, ry, transform
-
-
+    print "Electrode " + nameElect + " not found in eeg_electrodes_10-20.svg."
+    raise KeyError
     
 
 def generateSVGColoredMap(fileName, electrodeColor, strokeColor, template=None):
