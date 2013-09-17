@@ -58,6 +58,7 @@ from math import floor, pi
 from scipy import fft, var, exp, ifft, where, transpose, roll
 
 from numpy.fft import fftfreq
+import numpy as np
 
 
 ###############################################################################
@@ -68,9 +69,11 @@ from numpy.fft import fftfreq
 def computeMST(sig, fs, m=None, k=None, fmin=None, fmax=None):
     
     N  = len(sig)               # get the length of the signal
-    N2 = int(floor(N/2.0)) 
-
-
+    if np.mod(N, 2):
+        N2 = int(floor(N/2.0)) +1
+    else:
+        N2 = int(floor(N/2.0))
+        
     f = fftfreq(N)     
     MST = []  
     
@@ -81,7 +84,7 @@ def computeMST(sig, fs, m=None, k=None, fmin=None, fmax=None):
     if k is None:
         k   = 4.0*var(sig) #4.0*var(sig) 
         
-    fOut = f[0:N2]*fs        
+    fOut = f[0:N2]*fs          
         
     if fmin is None:
         iMin=1
@@ -89,19 +92,19 @@ def computeMST(sig, fs, m=None, k=None, fmin=None, fmax=None):
         iMin = where(fOut >= fmin)[0][0]
 
     if fmax is None:        
-        iMax=N2
+        iMax=N2-1
     else:        
         iMax = where(fOut <= fmax)[0][-1]        
-        
+
     g   = m*f+k                             # parameter gamma
-    for i in range(iMin, iMax):
-        SIGs = roll(SIG, -(i-1))            # circshift the spectrum SIG
+    for i in range(iMin, iMax+1):
+        SIGs = roll(SIG, -i)            # circshift the spectrum SIG
         W = (g[i]/f[i])*2.0*pi*f            # Scale Gaussian
         G = exp((-W**2)/2.0)                # W in Fourier domain
     
         MST.append(ifft(SIGs*G))            # Compute the complex values of MST
     
-    return transpose(MST), fOut[iMin:iMax]  
+    return transpose(MST), fOut[iMin:(iMax+1)]  
 
 
 
