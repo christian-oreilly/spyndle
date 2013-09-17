@@ -250,13 +250,14 @@ class EEGDBReaderBase(object) :
         if indMax <= indMin:
             event.properties["stage"] = "No stage"
         else:
-            stages = filter(lambda e: e.groupeName == "Stage", self.events[indMin:(indMax+1)])                  
+            stages = filter(lambda e: e.groupeName.lower() == "stage", self.events[indMin:(indMax+1)])                  
             if len(stages) == 1 :
                 event.properties["stage"] = stages[0].name
             elif len(stages) == 0 :    
                 event.properties["stage"] = "No stage"
             else:
-                print "Waring: " + str(len(stages)) + " staged are including the event starting at time " + str(event.startTime) + "."
+                event.properties["stage"] = stages[0].name           
+                print "Waring: " + str(len(stages)) + " staged are including the event starting at time " + str(event.startTime) + ". Keeping only the first one."
 
 
 
