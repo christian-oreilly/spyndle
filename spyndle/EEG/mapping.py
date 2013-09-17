@@ -271,12 +271,15 @@ def saveColorMap(listeElectrodes, zVal, pVal, filename, minZZ=0.00, maxZZ=0.02):
 
 
 class HeadDrawing:
-    def __init__(self):
+    def __init__(self, electrodeList = None):
         from matplotlib import patches
         
-        self.__electrodeList = ['Fp1', 'Fp2', 'F3', 'F4', 'F7', 'F8', 'C3', 'C4', 'P3', 
-                                'P4', 'O1', 'O2', 'T3', 'T4', 'T5', 'T6', 'Fz', 'Cz', 'Pz']    
-  
+        if electrodeList is None:
+            cx, cy, transform = electrodesSVG.getElectrodeCoordinates()
+            self.__electrodeList = cx.keys()  
+        else:
+            self.__electrodeList = electrodeList  
+            
         self.cx = {}
         self.cy = {}
         self.rx = {} 
