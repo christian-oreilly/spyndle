@@ -12,6 +12,8 @@
 ###############################################################################
 
 from scipy import array
+import numpy as np
+
 from spyndle import Line, Point
 from spyndle.EEG.electrodesSVG import getElectrodeCoordinates
 from spyndle.EEG.mapping import getTransformedCoord
@@ -89,7 +91,7 @@ def getAdjacentsPairs_10_20(electrodes):
                     l2 = Line(Point(x[key3], y[key3]), Point(x[key4], y[key4])) 
                       
                     if l1.isIntersecting(l2):
-                        if l1.length() > l2.length():
+                        if l1.length() > 1.2*l2.length():
                             nbIntersect += 1
                     if nbIntersect > NbIntersectMax:
                         break
@@ -104,6 +106,92 @@ def getAdjacentsPairs_10_20(electrodes):
     return zip(electRef, electTest)
     
     
+    
+    
+
+
+def get_10_20_1electrodeDistant_electrodes(adjElect):
+
+    results = []
+    
+    refs  = np.array([ref  for (ref, test) in adjElect])
+    tests = np.array([test for (ref, test) in adjElect]) 
+    for ref in np.unique(refs) :
+        nextAdjs = []
+        for adj in tests[refs == ref] :
+            nextAdjs.extend(tests[refs == adj])
+
+        nextAdjs = np.unique(nextAdjs)
+        nextAdjs = nextAdjs[np.logical_not(np.in1d(nextAdjs, tests[refs == ref]))]
+        nextAdjs = [nextAdj for nextAdj in  nextAdjs if nextAdj != ref]
+        for test in nextAdjs:
+            results.append((ref, test))
+
+    return results
+
+
+
+def get_10_20_2electrodeDistant_electrodes(adjElect):
+
+    results = []
+    nextAdjElect = get_10_20_1electrodeDistant_electrodes(adjElect)
+        
+    refs  = np.array([ref  for (ref, test) in adjElect])
+    tests = np.array([test for (ref, test) in adjElect])
+    nextRefs  = np.array([ref  for (ref, test) in nextAdjElect])
+    nextTests = np.array([test for (ref, test) in nextAdjElect])
+    
+    for ref in np.unique(nextRefs) :
+
+        secNextAdj = []
+        for nextAdj in nextTests[nextRefs == ref]:
+            secNextAdj.extend(tests[refs == nextAdj])
+
+        secNextAdj = np.unique(secNextAdj)
+        secNextAdj = secNextAdj[np.logical_not(np.in1d(secNextAdj, nextTests[nextRefs == ref]))]
+        secNextAdj = secNextAdj[np.logical_not(np.in1d(secNextAdj, tests[refs == ref]))]
+        secNextAdj = [secNext for secNext in secNextAdj if secNext != ref]
+        
+        if len(secNextAdj) :
+            for secNext in secNextAdj :
+                results.append((ref, secNext))
+
+    return results
+
+
+
+def get_10_20_3electrodeDistant_electrodes(adjElect):
+
+    results = []
+    secNextAdjElect = get_10_20_2electrodeDistant_electrodes(adjElect)
+    nextAdjElect    = get_10_20_1electrodeDistant_electrodes(adjElect)
+        
+    refs         = np.array([ref  for (ref, test) in adjElect])
+    tests        = np.array([test for (ref, test) in adjElect])
+    nextRefs     = np.array([ref  for (ref, test) in nextAdjElect])
+    nextTests    = np.array([test for (ref, test) in nextAdjElect])
+    secNextRefs  = np.array([ref  for (ref, test) in secNextAdjElect])
+    secNextTests = np.array([test for (ref, test) in secNextAdjElect])    
+
+    for ref in np.unique(secNextRefs) :
+
+        thirdNextAdj = []
+        for secNextAdj in secNextTests[secNextRefs == ref] :
+            thirdNextAdj.extend(nextTests[nextRefs == secNextAdj])
+ 
+        thirdNextAdj = np.unique(thirdNextAdj)
+        
+        thirdNextAdj = thirdNextAdj[np.logical_not(np.in1d(thirdNextAdj, secNextTests[secNextRefs == ref]))]
+        thirdNextAdj = thirdNextAdj[np.logical_not(np.in1d(thirdNextAdj, nextTests[nextRefs == ref]))]
+        thirdNextAdj = thirdNextAdj[np.logical_not(np.in1d(thirdNextAdj, tests[refs == ref]))]
+        thirdNextAdj = [thirdNext for thirdNext in thirdNextAdj if thirdNext != ref]
+        
+        if len(thirdNextAdj):
+            for thirdNext in thirdNextAdj :            
+                results.append((ref, thirdNext))
+
+    return results
+   
     
     
 
