@@ -134,6 +134,7 @@ class TimeFreqPlot(QDialog):
         self.spectogramPlot.draw()
 
         if not figname is None:
+            print "Saving " + figname
             self.figSingle.savefig(figname, dpi=250, facecolor='w', edgecolor='w',
                     orientation='portrait', papertype=None, format=None,
                     transparent=False, bbox_inches=None, pad_inches=0.1)
@@ -141,7 +142,7 @@ class TimeFreqPlot(QDialog):
 
 
 
-def stPlot(t, signal, fmin=None, fmax=None, figname=None, cm=cm.get_cmap("jet")) :
+def stPlot(t, signal, fmin=None, fmax=None, figname=None, cm=cm.get_cmap("jet"), show=None) :
     app = QApplication([])
     win = TimeFreqPlot()
     win.show()  
@@ -149,5 +150,6 @@ def stPlot(t, signal, fmin=None, fmax=None, figname=None, cm=cm.get_cmap("jet"))
     fs = float(len(t)-1)/(t[-1]-t[0])
     win.plot(signal , fs, t, fmin=fmin, fmax=fmax, figname=figname, cm=cm)     
         
-    sys.exit(app.exec_())
+    if (show is None and figname is None) or show:
+        app.exec_()
 
