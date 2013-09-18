@@ -89,12 +89,12 @@ def computeMST(sig, fs, m=None, k=None, fmin=None, fmax=None):
     if fmin is None:
         iMin=1
     else:        
-        iMin = where(fOut >= fmin)[0][0]
+        iMin = max(1, where(fOut >= fmin)[0][0])
 
     if fmax is None:        
         iMax=N2-1
     else:        
-        iMax = where(fOut <= fmax)[0][-1]        
+        iMax = max(1, where(fOut <= fmax)[0][-1])        
 
     g   = m*f+k                             # parameter gamma
     for i in range(iMin, iMax+1):
