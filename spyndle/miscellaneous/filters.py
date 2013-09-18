@@ -86,7 +86,8 @@ class Filter:
         self.update()
             
 
-    # À appeller après la modification des propriétés de l'objet pour que le filtre y soit conforme.
+    # À appeller après la modification des propriétés de l'objet pour que le 
+    # filtre y soit conforme.
     def update(self):
         Nyq = self.samplingRate/2.0        
         
@@ -94,16 +95,18 @@ class Filter:
         ############################# FIR filters #############################
         if self.ftype == "FIR":
             if  self.btype=='lowpass':
-                pass_zero = True
                 self.low_crit_freq  = 0.0
+                self.b = firwin(self.order, self.high_crit_freq/Nyq, 
+                                window="hanning", pass_zero=True)                
             elif self.btype=='highpass':
-                pass_zero = False
                 self.high_crit_freq = Nyq
+                self.b = firwin(self.order, self.low_crit_freq/Nyq,
+                                window="hanning", pass_zero=False)
             elif self.btype=='bandpass':
-                pass_zero = False
-                
+                self.b = firwin(self.order, 
+                                [self.low_crit_freq/Nyq, self.high_crit_freq/Nyq], 
+                                window="hanning", pass_zero=False)
             
-            self.b = firwin(self.order, [self.low_crit_freq/Nyq, self.high_crit_freq/Nyq], window="hanning", pass_zero=pass_zero)
             self.a = [1.0]
                 
        ########################### other filters ##############################     
@@ -119,15 +122,15 @@ class Filter:
             
             
 
-    def applyFilter(self, sig2filt):
+    def applyFilter(self, sig2filt, padtype="even"):
     
         if self.ftype == "FIR":
             
             try:
                 if self.useFiltFilt:
-                    sig2filt = filtfilt_FFTWEAVE(self.b, sig2filt, padtype='even')
+                    sig2filt = filtfilt_FFTWEAVE(self.b, sig2filt, padtype=padtype)
                 else:
-                    sig2filt = filt_FFTWEAVE(self.b, sig2filt, padtype='even')       
+                    sig2filt = filt_FFTWEAVE(self.b, sig2filt, padtype=padtype)       
             except ValueError:
                 print "order:", self.order
                 raise
@@ -137,18 +140,18 @@ class Filter:
             
             if self.useFiltFilt:
                 if self.btype=='bandpass': 
-                    sig2filt = signal.filtfilt(self.bl, self.al, signal.filtfilt(self.bh, self.ah, sig2filt, padtype="even", padlen=Nd), padtype="even", padlen=Nd)
+                    sig2filt = signal.filtfilt(self.bl, self.al, signal.filtfilt(self.bh, self.ah, sig2filt, padtype=padtype, padlen=Nd), padtype=padtype, padlen=Nd)
                 elif self.btype=='lowpass' :
-                    sig2filt = signal.filtfilt(self.bl, self.al, sig2filt, padtype="even", padlen=Nd)
+                    sig2filt = signal.filtfilt(self.bl, self.al, sig2filt, padtype=padtype, padlen=Nd)
                 elif self.btype=='highpass' : 
-                    sig2filt = signal.filtfilt(self.bh, self.ah, sig2filt, padtype="even", padlen=Nd)
+                    sig2filt = signal.filtfilt(self.bh, self.ah, sig2filt, padtype=padtype, padlen=Nd)
             else:
                 if self.btype=='bandpass': 
-                    sig2filt = signal.lfilter(self.bl, self.al, signal.lfilter(self.bh, self.ah, sig2filt, padtype="even", padlen=Nd), padtype="even", padlen=Nd)
+                    sig2filt = signal.lfilter(self.bl, self.al, signal.lfilter(self.bh, self.ah, sig2filt, padtype=padtype, padlen=Nd), padtype=padtype, padlen=Nd)
                 elif self.btype=='lowpass' :
-                    sig2filt = signal.lfilter(self.bl, self.al, sig2filt, padtype="even", padlen=Nd)
+                    sig2filt = signal.lfilter(self.bl, self.al, sig2filt, padtype=padtype, padlen=Nd)
                 elif self.btype=='highpass' : 
-                    sig2filt = signal.lfilter(self.bh, self.ah, sig2filt, padtype="even", padlen=Nd)            
+                    sig2filt = signal.lfilter(self.bh, self.ah, sig2filt, padtype=padtype, padlen=Nd)            
             
         return sig2filt
     
