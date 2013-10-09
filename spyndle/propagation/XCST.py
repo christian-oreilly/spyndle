@@ -54,10 +54,10 @@ from scipy.integrate import trapz
 from scipy import fft, ifft
 from scipy.signal import correlate2d
 import numpy as np
+import pandas as pd
 
 
 from spyndle import diff2
-#from ..filters import Filter
 from spyndle import computeMST
 
 
@@ -124,13 +124,23 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
     
     
     for refChannel in channelLst:        
-        with open(resPath + resFilesPrefix + "_" + night + "_" + refChannel + ".txt", "w") as f:   
+        
+        print "Processing propagation:", night, refChannel   
+        
+        events = filter(lambda e: e.name == eventName and e.channel == refChannel, reader.events)
+        
+        if len(events) :
+            keys = events[0].properties.keys()  
+            resultDict = {"no":[], "startTime":[], "duration":[]}
+
+            for testChannel in channelLst:                    
+                resultDict["similarity_" + testChannel] = []
+                resultDict["delay_" + testChannel]      = []
+
+            for eventProperty in keys:
+                resultDict[eventProperty]               = []        
+        
             
-            print "Processing propagation:", night, refChannel   
-            
-            events = filter(lambda e: e.name == eventName and e.channel == refChannel, reader.events)
-            
-            printHeader = True
             artifactPadSample = int(artifactPad*reader.getChannelFreq(refChannel))  
             for i, event in zip(range(len(events)), events):
          
@@ -147,7 +157,7 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                 duration  = event.timeLength + beforePad + afterPad + 2*artifactPad
                 
                 
-
+    
                 """
                  The signal at startTime - delta might not be available and the 
                  reader will start reading at the next available sample following 
@@ -171,8 +181,8 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                     
                     deltaSampleStart -= deltaStartRef
                     deltaStart        = deltaSampleStart/reader.getChannelFreq(refChannel)                  
-
-
+    
+    
                 signalsDataRef = reader.read([refChannel], startTime - deltaStart         , duration + deltaStart + deltaEnd)                  
                 
                 
@@ -184,7 +194,7 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                 """
                 cmpStartTime = reader.getNextSampleStartTime(refChannel, startTime - deltaStart + offset)
                 deltaStartCmp = int((cmpStartTime - (startTime - deltaStart + offset))*reader.getChannelFreq(refChannel))
-
+    
                 if deltaStartCmp > 0 : 
                     signalsDataCmp = reader.read(channelLst, cmpStartTime                    , duration + deltaStart + deltaEnd)  
                 else:
@@ -192,9 +202,9 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                     
                 
                 ##############
-
+    
                 #print signalsDataCmp[refChannel].signal.shape, signalsDataRef[refChannel].signal.shape
-
+    
                 #################################################################
                 # Because of numerical approximation, the signal length between the
                 # synchronous and the asychronous comparisons can be different 
@@ -207,8 +217,8 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                     elif len(signalsDataCmp[refChannel].signal) < len(signalsDataRef[refChannel].signal):
                         signalsDataRef[refChannel].signal = signalsDataRef[refChannel].signal[:-1]
                 ##############
-
-
+    
+    
                 fs = signalsDataCmp[refChannel].samplingRate                   
     
                 # Spectra computation
@@ -237,7 +247,7 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                 refSelfCor  = intFct(intFct(X["Ref"]*X["Ref"])) 
                 indOffsets = arange(deltaSampleStart + deltaSampleEnd)
                 
-
+    
                 for testChannel in channelLst :
                     if testChannel == refChannel:
                         maxDeltay[testChannel]   = 0       
@@ -256,12 +266,12 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                         cums = np.cumsum(XCmpSquare_colTrapz)
                         CmpSelfCor = np.concatenate(( [cums[refShape[1]-1]], 
                                                     cums[indOffsets[1:] + refShape[1]-1] - cums[indOffsets[:-1]]))
-
+    
     
                                           
                         # This...                        
                         #unnormCrossCorr = correlate2d(X[testChannel], X["Ref"], mode="valid")[0][indOffsets]   
-
+    
                         # and this...
                         #K = X[testChannel].shape[1] 
                         #H = X["Ref"].shape[0]
@@ -271,14 +281,14 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                         #x = np.concatenate((zeros((H, N-1)), X[testChannel]), axis=1)                        
                         #unnormCrossCorr = np.real(np.fft.ifft(np.fft.fft(x, axis=1)*FFTy, axis=1)[:, (N-1):(N-1 + deltaSampleStart + deltaSampleEnd)]) 
                         #unnormCrossCorr = np.sum(unnormCrossCorr, axis=0)                        
-
-
+    
+    
                         # are slower than that:
                         for indOffset in indOffsets:
                             XCmp                        = X[testChannel][:, indOffset:(indOffset+refShape[1])]
                             unnormCrossCorr[indOffset]  = intFct(intFct(XCmp*X["Ref"]))            
-
-
+    
+    
                         if similIndexType == "inf":
                             den = np.maximum(CmpSelfCor, refSelfCor)
                         elif similIndexType == "euclidean":
@@ -316,63 +326,25 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
                           
                             maxDeltay[testChannel]   = time[indFloor]      + indFrac*(time[indCeil]-time[indFloor])       
                             maxCrosscor[testChannel] = crosscor[indFloor]  + indFrac*(crosscor[indCeil]-crosscor[indFloor])       
-                        
-                        
-                        """
-                        import pylab
-                        import numpy
-                        pylab.figure()
-                        
-                        vmin= min(numpy.min(X["Ref"]), numpy.min(X[testChannel])) 
-                        vmax= max(numpy.max(X["Ref"]), numpy.max(X[testChannel]))   
-                            
-                        pylab.subplot(311)
-                        T, F = numpy.meshgrid(numpy.arange(X["Ref"].shape[1])/fs+maxDeltay[testChannel], fXRef)
-                        pylab.pcolor(T, F, X["Ref"], vmin=vmin, vmax=vmax)
-                        pylab.xlim([-0.5,X[testChannel].shape[1]/fs-0.5])
-                                 
-                        pylab.subplot(312)
-                        T, F = numpy.meshgrid(numpy.arange(X[testChannel].shape[1])/fs-0.5, fXRef)
-                        pylab.pcolor(T, F, X[testChannel], vmin=vmin, vmax=vmax)
-                        pylab.xlim([-0.5,X[testChannel].shape[1]/fs-0.5])
-                        
-                        pylab.subplot(313)
-                        pylab.plot(time, crosscor)
-                        pylab.plot(maxDeltay[testChannel], maxCrosscor[testChannel], 'o')
-                        pylab.xlim([-0.5,X[testChannel].shape[1]/fs-0.5])
-                        
-                        pylab.show()
-                        """
-                        
+                                            
                         assert(abs(maxDeltay[testChannel]) <= delta)
-                        
-    
-                # Print the header. A header is necessary as the column of these
-                # files may changes depending on avaiablement event properties.
-                if printHeader:        
-                    printHeader = False
-                    keys = event.properties.keys()
-                    
-                    header = "no;startTime;duration;"
-    
-                    for testChannel in channelLst:                    
-                        header += "similarity_" + testChannel + ";delay_" + testChannel + ";"
-    
-                    header += ";".join(keys) + '\n'
-                    
-                    f.write(header) # Write a string to a file            
-    
-                result = str(i) + ";" + str(event.startTime) + ";" + str(event.timeLength) + ";" 
+             
+                resultDict["no"].append(i)
+                resultDict["startTime"].append(event.startTime)
+                resultDict["duration"].append(event.timeLength)
+                
                 for testChannel in channelLst:
-                    result += str(maxCrosscor[testChannel]) + ";"  +  str(maxDeltay[testChannel]) + ";"  
+                    resultDict["similarity_" + testChannel].append(maxCrosscor[testChannel])
+                    resultDict["delay_" + testChannel].append(maxDeltay[testChannel])
                     
                 # Depending on the available properties 
                 for eventProperty in keys:
                     if eventProperty in event.properties:
-                        result += str(event.properties[eventProperty])
-                    result += ";" 
-    
-                f.write(result[:-1] + '\n') # Write a string to a file
-            
-        f.close()
-            
+                        resultDict[eventProperty].append(event.properties[eventProperty])
+                    else:
+                        resultDict[eventProperty].append(np.nan)
+
+
+            resultDF = pd.DataFrame(resultDict, index = range(len(resultDict["no"])))
+            resultDF.to_csv(resPath + resFilesPrefix + "_" + night + "_" + refChannel + ".txt", index=False, sep=";")               
+                
