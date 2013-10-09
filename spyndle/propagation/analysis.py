@@ -14,6 +14,7 @@ from scipy import unique, where, percentile, concatenate, array, arange
 from scipy import isnan, sqrt, nan, logical_not, reshape, median, std
 from sklearn.covariance import MinCovDet
 from numpy import in1d
+import pandas as pd
 
 from spyndle.EEG import getActiveElectrode
 
@@ -191,7 +192,10 @@ def readingSyncData(path, night, fileNameSyncList, channelList, electrodeList):
     # For eletrodes of this recording night (these are the reference electrodes)
     for refElectrode, refChannel, fileNameSync in zip(electrodeList, channelList, fileNameSyncList):
         
-        sync  = read_csv(path + fileNameSync, sep=';')
+        try:
+            sync  = read_csv(path + fileNameSync, sep=';')
+        except(pd._parser.CParserError) as detail:
+             print path + fileNameSync, detail      
 
         for testElectrode, testChannel in zip(unique(electrodeList), unique(channelList)) :
                      
@@ -526,7 +530,7 @@ def computeSPF(path, night, fileNameSyncList, fileNameAsyncList, channelList, el
 """            
 def computeAveragePropagation(path, aggeragationlevels,
                               observationVariables, pattern="correctedData_*.csv", 
-                              verbose=True, minNbValid=40):
+                              verbose=True, minNbValid=40, outputFile = "meanData.csv"):
 
     def computeCellAverages(data, observationVariables, 
                             aggeragationlevels, levelInstanciation):
@@ -593,7 +597,7 @@ def computeAveragePropagation(path, aggeragationlevels,
         dat          = read_csv(f, sep=";").groupby(aggeragationlevels).apply(lambda x: computeCellAverages(x, observationVariables, aggeragationlevels, levelInstanciation))
         meanData     = meanData.append(dat, ignore_index=True)           
          
-    meanData.to_csv(path + "meanData.csv", sep=";")
+    meanData.to_csv(path + outputFile, sep=";")
     
 def applyRejectionC3(data, deltaWindow = 0.5, alphaSD = 0.2):
     # Applying rejection criterion c3 and saving the result
