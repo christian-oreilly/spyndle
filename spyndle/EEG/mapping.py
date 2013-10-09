@@ -604,13 +604,13 @@ def plotArrowDiagram(listVal, pairs, minDelay=None, maxDelay=None,
 
 
 
-def plotColorMap(electrodes, var, filename=None, addColorbar=True):
+def plotColorMap(electrodes, var, filename=None, addColorbar=True, minVal=None, maxVal=None):
     if not filename is None:
         matplotlib.use('Agg')
         
-    drawing = HeadDrawing()
+    drawing = HeadDrawing(electrodeList = np.unique(electrodes))
     
-    drawing.addColorMap(electrodes, var)
+    drawing.addColorMap(electrodes, var, minZZ=minVal, maxZZ=maxVal)
 
     if filename is None:
         drawing.plot(False, showColorBar=addColorbar)
