@@ -28,6 +28,8 @@ from math import floor
 from datetime import datetime, timedelta
 import time
 from sys import stdout
+from copy import deepcopy
+from spyndle.io.edf import EDFHeader
 
 from EEGDatabaseReader import EEGDBReaderBase, Event, RecordedChannel, EEGPage, EEGPageInfo
 
@@ -452,7 +454,7 @@ class HarmonieReader(EEGDBReaderBase):
 
     def getSamplingRate(self, channel) :
         warnings.warn("This function is depreacted.", DeprecationWarning, stacklevel=2)
-        self.getChannelFreq(channel)      
+        return self.getChannelFreq(channel)      
         
      
      
@@ -659,7 +661,7 @@ class HarmonieReader(EEGDBReaderBase):
         sampleTransitions = concatenate((discontinuitySample, [self.getNbSample(channel)]))
 
         time = []
-        samplingRate = self.getSamplingRate(channel)
+        samplingRate = self.getChannelFreq(channel)
         for i in range(len(sampleTransitions)-1):
             nbSamples = sampleTransitions[i+1] - sampleTransitions[i]
             time = concatenate((time, discontinuityEvent[i].startTime + arange(nbSamples)/samplingRate))       
@@ -710,10 +712,39 @@ class HarmonieReader(EEGDBReaderBase):
 
 
     """
-     Convert and save the .sig/.sts files in .edf/.ann files with the .ann file
-     being a custom format file used to save complex annotations.
+     Convert and save the .sig/.sts files in EDF/BDF format. 
+     
+     When working with large datafiles such as whole night polysomnographic 
+     recording, recording the annotations in the same file as the recording
+     data can be inneficient since adding new annotations might requires 
+     reformatting the whole data file. In these case, it can be more interesting
+     to split the original data and the annotations in two separate files. 
+     
+     We suggest to always use the same name for both files, except for a 
+     supplementary "a" (for annotation) at the end of the extension of the 
+     annotation file (e.g. aFile.bdf/aFile.bdfa or someFile.edf/someFile.edfa).
+     Nevertheless, this class provide the option of using an arbitrary name 
+     for the annotation file.
+
+     The parameter isSplitted (boolean) can be used to specify wheter the 
+     data file specified by fname is a splitted data/annotation set of files or
+     a single file. If isSplitted == True, the annotation_fname
+     parameter will specify the name of the annotation file.
+     If not specified, fname + "a" will be used.
+     If isSplitted == False, no supplementary annotation file is considered
+     regardless of the value of annotation_fname.
     """
-    def saveAsEDF(self, filename, fileType = "EDF", verbose=True):
+    def saveAsEDF(self, filename, fileType = "EDF", isSplitted=True, 
+                                          annotation_fname=None, verbose=True):
+        
+        
+        if isSplitted:        
+            if annotation_fname is None:
+                annotation_fname = filename + "a"        
+        
+        #######################################################################
+        # Internal methods
+        #######################################################################        
         
         def subjectFields(field):
             return field if field else "X"
@@ -725,22 +756,6 @@ class HarmonieReader(EEGDBReaderBase):
                      7:"JUL", 8:"AUG", 9:"SEP", 10:"OCT", 11:"NOV", 12:"DEC"}
             return "%02d-%s-%04d" % (OLEdate.day, month[OLEdate.month], OLEdate.year)
         
-        """
-        # Function used to encode Harmony events in a format compatible with EDF.
-        def edfEventEncode(event):
-            
-            # Using standard EDF staging events 
-            #(see http://www.edfplus.info/specs/edftexts.html#annotation)
-
-            if event.groupeName.lower() == "stage":
-                eventStr = event.name
-            else:
-                eventStr = event.getXml()
-            
-            timeDiff = (event.dateTime - self.recordingStartDateTime).total_seconds()  
-            
-            return "+" + str(timeDiff) + "\x15" + str(event.timeLength) + "\x14" + eventStr + "\x14\0"    
-        """
 
         def prepareEventStr(timeDiff, events):
             # Annotation channel            
@@ -752,7 +767,9 @@ class HarmonieReader(EEGDBReaderBase):
             return timeKeepingStr
  
  
- 
+        #######################################################################
+        # Encoding events
+        #######################################################################
  
         # Encoding events such that events are writen in their respective page.
         # This has the disaventage to use a lot of space (each pages have
@@ -826,200 +843,159 @@ class HarmonieReader(EEGDBReaderBase):
         #print "res:", nbEvents, len(self.events)
         assert(nbEvents == len(self.events))            
             
+
+
+
+
+
+        #######################################################################
+        # Building the EDF Header object
+        #######################################################################
+
+        dataHeader = EDFHeader()       
+
+        dataHeader.fileType = fileType
+        dataHeader.contiguous = False
+
+        id      = subjectFields(self.patientInfo["Id1"])
+        gender  = "M" if self.patientInfo["gender"] == 1 else "F"
+        date    = dateStr(ole2datetime(self.patientInfo["birthDate"])) if self.patientInfo["birthDate"] else "X"     
+        fname   =  subjectFields(self.patientInfo["firstName"]).encode("ascii", "ignore")
+        lname   = subjectFields(self.patientInfo["lastName"]).encode("ascii", "ignore")            
+        dataHeader.subjectID = id + " " + gender + " " +  date + " " + fname + "_" + lname   
+        
+        startdate    = dateStr(self.recordingStartDateTime) if self.recordingStartDateTime else "X"                     
+        dataHeader.recordingIR = "Startdate " + startdate + " " + "X" + " " + "X" + " " + "X"  
+
+        dataHeader.startDateTime = self.recordingStartDateTime
+            
+        ns = len(self.getChannelLabels())
+        dataHeader.headerNbBytes      = 8 + 80 + 80 + 8 + 8 + 8 + 44 + 8 + 8 + 4 + (ns+1)* (16 + 80+ 8 + 8 + 8 + 8 + 8 + 80 + 8 + 32) 
+        dataHeader.nbRecords          = self.getNbPages()
+        dataHeader.recordDuration     = self.pageDuration
+        dataHeader.nbChannels         = ns +1
+        dataHeader.channelLabels      = self.getChannelLabels() + ["EDF Annotations"]        
+        
+
+        dataHeader.transducerType     = {}
+        dataHeader.prefiltering       = {} 
+        dataHeader.units              = {}
+        dataHeader.physicalMin        = {}
+        dataHeader.physicalMax        = {}          
+        dataHeader.digitalMin         = {}
+        dataHeader.digitalMax         = {}         
+        dataHeader.nbSamplesPerRecord = {} 
+
+
+        physicalMinMicro = {}
+        physicalMaxMicro = {}
+        digitalMin = {}
+        digitalMax = {}
+        
+        if fileType == "EDF":
+            nbByte = 2
+        elif fileType == "BDF":
+            nbByte = 3
+
+        annotationFieldLength = int(max(400, max(array([len(page.eventStr) for page in self.getInfoPages()]))/nbByte*1.2))             
+        
+        for i, channel in enumerate(dataHeader.channelLabels) :   
+            
+            if fileType == "EDF":
+                digitalMin[channel] = -32768
+                digitalMax[channel] =  32767
+            elif fileType == "BDF":
+                digitalMin[channel] = -8388608 
+                digitalMax[channel] =  8388607    
+            else:
+                raise ValueError
+
+            dataHeader.transducerType[channel]  = ""
+            dataHeader.prefiltering[channel]    = "" 
+
+
+            if i == ns:
+                dataHeader.units[channel]       = ""                 
+                dataHeader.physicalMin[channel] = -1
+                dataHeader.physicalMax[channel] = 1
+                dataHeader.digitalMin[channel]  = -32768    
+                dataHeader.digitalMax[channel]  = 32767  
+                if isSplitted:
+                    dataHeader.nbSamplesPerRecord[channel] = 10
+                else:
+                    dataHeader.nbSamplesPerRecord[channel] = annotationFieldLength
+            else:
+                inputMin, outputMin, inputMax, outputMax = self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)
+                physicalMaxMicro[channel]  = inputMax*(outputMax-outputMin)/(inputMax - inputMin)  
+                physicalMinMicro[channel]  = inputMin*(outputMax-outputMin)/(inputMax - inputMin)                
+                    
+                dataHeader.units[channel]               = "uV"                 
+                dataHeader.physicalMin[channel]         = physicalMinMicro[channel]
+                dataHeader.physicalMax[channel]         = physicalMaxMicro[channel]
+                dataHeader.digitalMin[channel]          = digitalMin[channel]
+                dataHeader.digitalMax[channel]          = digitalMax[channel]
+                dataHeader.nbSamplesPerRecord[channel]  = self.pageNbSamples[channel]
+
+
+
+
+        #######################################################################
+        # Writing the annotation file if the EEG data are to be saved in a 
+        # splitted set of data and annotation files.
+        #######################################################################
+       
+        if isSplitted: 
+            annotationHeader = deepcopy(dataHeader)
+            
+            annotationHeader.headerNbBytes  = 8 + 80 + 80 + 8 + 8 + 8 + 44 + 8 + 8 + 4 + (16 + 80+ 8 + 8 + 8 + 8 + 8 + 80 + 8 + 32) 
+            annotationHeader.nbChannels     = 1
+            annotationHeader.channelLabels  = ["EDF Annotations"] 
+
+            annotationHeader.transducerType     = {"EDF Annotations":""}
+            annotationHeader.prefiltering       = {"EDF Annotations":""} 
+            annotationHeader.units              = {"EDF Annotations":""}
+            annotationHeader.physicalMin        = {"EDF Annotations":-1}
+            annotationHeader.physicalMax        = {"EDF Annotations":1}          
+            annotationHeader.digitalMin         = {"EDF Annotations":-32768}
+            annotationHeader.digitalMax         = {"EDF Annotations":32767}         
+            annotationHeader.nbSamplesPerRecord = {"EDF Annotations":annotationFieldLength} 
+            
+            with io.open(annotation_fname, 'wb') as f:    
+                
+                if verbose:
+                    print "Writing annotation file header..."
+                
+                annotationHeader.write(f)
+
+                if verbose:
+                    print "Writing annotation file body..."
+        
+                for nopage, page in enumerate(self.getInfoPages()):            
+                    encodedPageStr = page.eventStr.encode("utf8")
+                    f.write(encodedPageStr +  "\0"*(annotationFieldLength*nbByte-len(encodedPageStr)))         
+
+               
+       
+       
+       
+       
+       
+        #######################################################################
+        # Writing the data file...
+        #######################################################################       
        
         # Using buffered writer
         with io.open(filename, 'wb') as f:
 
+
             if verbose:
-                print "Writing header..."
+                print "Writing data file header..."
+            dataHeader.write(f)
 
-            
-            #8 ascii : version of this data format (0) 
-            if fileType == "EDF":
-                f.write("0       ")
-            elif fileType == "BDF":
-                f.write("\xFFBIOSEMI")
-            
-            #80 ascii : local patient identification 
-            #The 'local patient identification' field must start with the subfields 
-            #(subfields do not contain, but are separated by, spaces):
-            #  - the code by which the patient is known in the hospital administration.
-            #  - sex (English, so F or M).
-            #  - birthdate in dd-MMM-yyyy format using the English 3-character abbreviations 
-            #    of the month in capitals. 02-AUG-1951 is OK, while 2-AUG-1951 is not.
-            #  - the patients name.
-            #Any space inside the hospital code or the name of the patient must be replaced by
-            #a different character, for instance an underscore. For instance, the 'local patient 
-            #identification' field could start with: MCH-0234567 F 02-MAY-1951 Haagse_Harry. 
-            #Subfields whose contents are unknown, not applicable or must be made anonymous 
-            #are replaced by a single character 'X'. Additional subfields may follow the ones described here.             
-            id      = subjectFields(self.patientInfo["Id1"])
-            gender  = "M" if self.patientInfo["gender"] == 1 else "F"
-            date    = dateStr(ole2datetime(self.patientInfo["birthDate"])) if self.patientInfo["birthDate"] else "X"     
-            fname   =  subjectFields(self.patientInfo["firstName"]).encode("ascii", "ignore")
-            lname   = subjectFields(self.patientInfo["lastName"]).encode("ascii", "ignore")     
-            writeStr = id + " " + gender + " " +  date + " " + fname + "_" + lname     
-            f.write(writeStr + (80-len(writeStr))*" ")
-              
-            # TODO: EDF need 7-bit ASCII character which cannot for example accept
-            # Benoît as a valid string. We use encode("ascii", "ignore") which only
-            # drops the accentuated characters but it would be better to have some
-            # translation that convert Benoît to Benoit.
-              
-              
-            # 80 ascii : local recording identification 
-            # The 'local recording identification' field must start with the 
-            # subfields (subfields do not contain, but are separated by, spaces):
-            #    - The text 'Startdate'.
-            #    - The startdate itself in dd-MMM-yyyy format using the English 
-            #      3-character abbreviations of the month in capitals.
-            #    - The hospital administration code of the investigation, 
-            #      i.e. EEG number or PSG number.
-            #    - A code specifying the responsible investigator or technician.
-            #    - A code specifying the used equipment.
-            # Any space inside any of these codes must be replaced by a different 
-            # character, for instance an underscore. The 'local recording identification' 
-            # field could contain: Startdate 02-MAR-2002 PSG-1234/2002 NN Telemetry03. 
-            # Subfields whose contents are unknown, not applicable or must be made anonymous
-            #  are replaced by a single character 'X'. So, if everything is unknown then the 
-            # 'local recording identification' field would start with: Startdate X X X X. 
-            # Additional subfields may follow the ones described here.      
-            startdate    = dateStr(self.recordingStartDateTime) if self.recordingStartDateTime else "X"             
-            writeStr = "Startdate " + startdate + " " + "X" + " " + "X" + " " + "X"  
-            f.write(writeStr + (80-len(writeStr))*" ")              
-              
-            #8 ascii : startdate of recording (dd.mm.yy)
-            f.write(self.recordingStartDateTime.strftime("%d.%m.%y"))
-            
-            
-            #8 ascii : starttime of recording (hh.mm.ss) 
-            f.write(self.recordingStartDateTime.strftime("%H.%M.%S"))
-
-            # 8 ascii : number of bytes in header record
-            ns = len(self.getChannelLabels())
-            headerSize = 8 + 80 + 80 + 8 + 8 + 8 + 44 + 8 + 8 + 4 + (ns+1)* (16 + 80+ 8 + 8 + 8 + 8 + 8 + 80 + 8 + 32)
-            f.write("%08d" % headerSize)   
-            
-            # 44 ascii : reserved
-            if fileType == "EDF":
-                f.write("EDF+C" + " "*39)
-            elif fileType == "BDF":
-                f.write("24BIT" + " "*39)            
-            
-            
-            # 8 ascii : number of data records (-1 if unknown)
-            #  The 'number of data records' can only be -1 during recording. 
-            # As soon as the file is closed, the correct number is known and must be entered. 
-            nbPages = self.getNbPages()
-            f.write("%08d" % nbPages)  
-            
-            # 8 ascii : duration of a data record, in seconds
-            f.write(("%8.6f" % self.pageDuration)[:8] )  
-            
-            # 4 ascii : number of signals (ns) in data record
-            f.write("%04d" % (ns +1))
-            
-                
-            # ns * 16 ascii : ns * label (e.g. EEG Fpz-Cz or Body temp)
-            for i in range(ns): 
-                f.write("%16s" % self.getChannelLabels()[i])
-            f.write("%16s" % "EDF Annotations")
-
-  
-            # ns * 80 ascii : ns * transducer type (e.g. AgAgCl electrode)
-            for i in range(ns+1): f.write(" "*80)
-
-            # ns * 8 ascii : ns * physical dimension (e.g. uV or degreeC)
-            for i in range(ns+1): f.write("      uV")
-
-            #print self.IRecordingCalibration.GetBaseCalibration(SIGNALFILE_FLAGS_CALIBRATEASVOLTS)   
-            #print self.IRecordingCalibration.GetBaseCalibration(SIGNALFILE_FLAGS_BASEINPUTCALIB)            
-            #for i in range(ns+1): 
-            #     print "channel ", i, ":", self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)
-            #     print "channel ", i, ":", self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATE)
-            
-            
-            # ns * 8 ascii : ns * physical minimum (e.g. -500 or 34)
-            physicalMinMicro = {}
-            physicalMaxMicro = {}
-            for i in range(ns): 
-                inputMin, outputMin, inputMax, outputMax = self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)
-                physicalMaxMicro[self.getChannelLabels()[i]]  = inputMax*(outputMax-outputMin)/(inputMax - inputMin)  
-                physicalMinMicro[self.getChannelLabels()[i]]  = inputMin*(outputMax-outputMin)/(inputMax - inputMin)
-                f.write(("%8.6f" %  physicalMinMicro[self.getChannelLabels()[i]] )[:8])
-            f.write(("%8.6f" %  -1)[:8]) 
-  
-            # ns * 8 ascii : ns * physical maximum (e.g. 500 or 40)
-            for i in range(ns): 
-                f.write(("%8.6f" %  physicalMaxMicro[self.getChannelLabels()[i]])[:8])
-            f.write(("%8.6f" %  1)[:8])  
-
-
-            # ns * 8 ascii : ns * digital minimum (e.g. -2048)
-            digitalMin = {}
-            digitalMax = {}
-            for i in range(ns): 
-                if fileType == "EDF":
-                    digitalMin[self.getChannelLabels()[i]] = -32768
-                    digitalMax[self.getChannelLabels()[i]] =  32767
-                elif fileType == "BDF":
-                    digitalMin[self.getChannelLabels()[i]] = -8388608 
-                    digitalMax[self.getChannelLabels()[i]] =  8388607    
-                else:
-                    raise ValueError
-                f.write("%08d" %  digitalMin[self.getChannelLabels()[i]])
-            f.write("%08d" %  -32768)        
-
-
-            # ns * 8 ascii : ns * digital maximum (e.g. 2047)
-            for i in range(ns): 
-                f.write("%08d" %  digitalMax[self.getChannelLabels()[i]])
-            f.write("%08d" %  32767)
-
-
-            # ns * 80 ascii : ns * prefiltering (e.g. HP:0.1Hz LP:75Hz)
-            for i in range(ns+1): f.write(" "*80)
-
-
-            if fileType == "EDF":
-                nbByte = 2
-            elif fileType == "BDF":
-                nbByte = 3
-
-
-            # ns * 8 ascii : ns * nr of samples in each data record
-            for channel in self.labels: 
-                f.write("%08d" % self.pageNbSamples[channel])
-            annotationFieldLength = int(max(400, max(array([len(page.eventStr) for page in self.getInfoPages()]))/nbByte*1.2))            
-            f.write("%08d" % annotationFieldLength)
-            
-            
-            # ns * 32 ascii : ns * reserved
-            for i in range(ns+1): f.write(" "*32)
-
-            """
-             DATA RECORD
-             nr of samples[1] * integer : first signal in the data record
-             nr of samples[2] * integer : second signal
-             ..
-             ..
-             nr of samples[ns] * integer : last signal
-            
-             N.B. Harmony files can be discontinuous at any arbitrary time
-             as opposted to EDF files wich can only be discontinuous at the end
-             of a record. We therfore have to put incomplete records at every 
-             discontinuity to complete the EDF records. The incomplete records
-             are filled with "\0" values.
-            """
-            
-            
-            #nbEvents = len(self.events)
-            #noEvent  = 0
-            #eventStr = edfEventEncode(self.events[noEvent])    
 
 
             if verbose:
-                print "Writing body..."
+                print "Writing date file body..."
                         
             ISignalRecord = self.ISignalFile.CreateSignalRecord(RECORD_NB) 
             for nopage, page in enumerate(self.getInfoPages()):    
@@ -1069,15 +1045,6 @@ class HarmonieReader(EEGDBReaderBase):
                     assert numpy.all(dig_range > 0)
                     gain = dig_range/phys_range                          
 
-                    #print physical_min, physical_max, digital_min, digital_max
-                    #inputMin, outputMin, inputMax, outputMax = self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS)
-                    #chanGain = (inputMax - inputMin)/(outputMax - outputMin)                         
-                    #recordedSignal = (recordedSignal - outputMin)*chanGain + inputMin                      
-
-                    #print nopage, channel, physical_min, physical_max, digital_min, digital_max, min(recordedSignal), max(recordedSignal) 
-                    #print self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATEASVOLTS), self.IRecordingCalibration.GetBaseCalibration(SIGNALFILE_FLAGS_CALIBRATEASVOLTS)
-                    #print self.IRecordingCalibration.GetChannelCalibration(i, SIGNALFILE_FLAGS_CALIBRATE), self.IRecordingCalibration.GetBaseCalibration(SIGNALFILE_FLAGS_CALIBRATE)
-
                     recordedSignal = (recordedSignal - physical_min)*gain + digital_min  
 
                     if nbByte == 2: # EDF
@@ -1092,14 +1059,18 @@ class HarmonieReader(EEGDBReaderBase):
                
                 
                 # Annotation channel            
-                encodedPageStr = page.eventStr.encode("utf8")
-                f.write(encodedPageStr +  "\0"*(annotationFieldLength*nbByte-len(encodedPageStr)))         
+                if isSplitted:
+                     eventStr = page.eventStr.split("\x14\x14\0")[0] + "\x14\x14\0"
+                else:
+                     eventStr = page.eventStr
+                     
+                encodedPageStr = eventStr.encode("utf8")
+                f.write(encodedPageStr +  "\0"*(dataHeader.nbSamplesPerRecord["EDF Annotations"]*nbByte-len(encodedPageStr)))         
 
                 if verbose:
                     done=float(nopage)/len(self.getInfoPages())*100.0
                     stdout.write(" Body writing percentage: %s%%      %s"%(done,"\r"))
                     stdout.flush()
         
-        f.closed
 
 

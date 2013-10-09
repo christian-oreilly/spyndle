@@ -35,7 +35,7 @@ from lxml import etree
 from tempfile import gettempdir 
 from time import sleep
 from warnings import warn
-
+from shutil import copyfile
 
 from spyndle.io import Event, RecordedChannel, EventList
 
@@ -125,9 +125,14 @@ class EDFEvent(Event):
                self.groupeName = u"Stage"
 
 
-# Channel labes must be enclosed bu []. Accepted operators so far are
-# +, -, /, *. Pathenthesis can be used.
-# E.g. "(2*[C3-A1]-[A2-A1])/2" can be used to obtain a reformatted ear-linked reference.
+
+"""
+ Class used to reformat the EEG montage.
+
+ Channel labes must be enclosed by []. Accepted operators so far are
+ +, -, /, *. Pathenthesis can be used.
+ E.g. "(2*[C3-A1]-[A2-A1])/2" can be used to obtain a reformatted ear-linked reference.
+"""
 class ReformatExpressionMng:
     def __init__(self, channelExpr, originalHeader):
         self.channelExpr    = channelExpr
@@ -237,8 +242,12 @@ class ReformatExpressionMng:
 class EDFHeader :
     # BDF is a 24-bit version of the 16-bit EDF format, so we read it with the
     # the same reader
-    def __init__(self, f, fileName):
+    def __init__(self, f=None, fileName=None):
+        if not f is None and not fileName is None:
+            self.read(f, fileName)
 
+
+    def read(self, f, fileName):
         assert f.tell() == 0  # check file position
 
         tampon = f.read(8)
@@ -555,15 +564,18 @@ class EDFHeader :
 
 
 
- 
+
+
    
-class EDFReader(EEGDBReaderBase) :
-    def __init__(self, fname):        
+class EDFBaseReader(EEGDBReaderBase) :
+
+    def __init__(self, fname, isSplitted=None, annotation_fname=None):        
         self.fileName = fname
+        
         with io.open(fname, 'rb') as fileObj:
             self.header = EDFHeader(fileObj, self.fileName)  
         
-            super(EDFReader, self).__init__(self.getPageDuration()) 
+            super(EDFBaseReader, self).__init__(self.getPageDuration()) 
             
             if self.header.fileType == "EDF+" or self.header.fileType == "BDF" :
                 self.readEvents(fileObj)        
@@ -1143,4 +1155,222 @@ class EDFReader(EEGDBReaderBase) :
     def changeRecordDuration(self, newDuration):
         #TODO: Implement.
         raise NotImplemented
+
+
+
+
+
+
+   
+   
+   
+   
+   
+class EDFReader(EEGDBReaderBase) :
+    
+    """
+     When working with large datafiles such as whole night polysomnographic 
+     recording, recording the annotations in the same file as the recording
+     data can be inneficient since adding new annotations might requires 
+     reformatting the whole data file. In these case, it can be more interesting
+     to split the original data and the annotations in two separate files. 
+     
+     We suggest to always use the same name for both files, except for a 
+     supplementary "a" (for annotation) at the end of the extension of the 
+     annotation file (e.g. aFile.bdf/aFile.bdfa or someFile.edf/someFile.edfa).
+     Nevertheless, this class provide the option of using an arbitrary name 
+     for the annotation file.
+
+     The parameter isSplitted (boolean) can be used to specify wheter the 
+     data file specified by fname is a splitted data/annotation set of files or
+     a single file. If isSplitted == True, the annotation_fname
+     parameter will specify the name of the annotation file.
+     If not specified, fname + "a" will be used.
+     If isSplitted == False, no supplementary annotation file is considered
+     regardless of the value of annotation_fname. If isSplitted == None, then
+     if an annotation_fname is specified, this annotation file will be used; if
+     no annotation_fname is specified but there exist a  fname + "a" file, this
+     annotation file will be used; if no annotation_fname is specified and
+     there is no file fname + "a", no anotation file will be used.
+     
+     Note that if an annotation file is used, only the annotations in the 
+     annotation file be available. These of the data file (if any) will be 
+     masked.
+    """
+    def __init__(self, fname, isSplitted=None, annotation_fname=None):        
+        
+        if isSplitted is False:
+            self.isSplitted = False
+            
+        elif isSplitted is True:
+            self.isSplitted = True            
+            if not annotation_fname is None:
+                self.annotationFileName = annotation_fname
+            elif os.path.isfile(fname + "a") :
+                self.annotationFileName = fname + "a"
+            else:
+                raise "In EDFReader(...), the parameter isSplitted is set to True but"\
+                      " no annotation file name is specified using the annotation_fname"\
+                      " parameter and no file " + fname + "a is existing."
+                      
+        elif isSplitted is None:
+            if not annotation_fname is None:
+                self.annotationFileName = annotation_fname
+                self.isSplitted         = True 
+            elif os.path.isfile(fname + "a") :
+                self.annotationFileName = fname + "a"
+                self.isSplitted         = True 
+            else:
+                self.isSplitted         = False           
+    
+        else:
+            raise "In EDFReader(...), the parameter isSplitted can only take the "\
+                  "values True, False or None. Value " + str(isSplitted) + " used."                   
+        
+        
+                
+        self.dataReader        = EDFBaseReader(fname)
+        if self.isSplitted :
+            self.annotationsReader  = EDFBaseReader(self.annotationFileName)
+            self.events             = self.annotationsReader.events
+        else:
+            self.annotationsReader = None
+            self.events             = self.dataReader.events
+        
+        super(EDFReader, self).__init__(self.getPageDuration()) 
+
+
+    @property
+    def header(self):
+        return self.dataReader.header
+
+    @header.setter
+    def header(self, value):
+        self.dataReader.header = value
+
+
+    @property
+    def fileName(self):
+        return self.dataReader.fileName
+
+    @fileName.setter
+    def fileName(self, value):
+        self.dataReader.fileName = value
+
+
+
+    def getFileName(self): 
+        #warn("EDFReader.getFileName(...) is deprecated. Please use EDFReader.fileName()", DeprecationWarning)
+        return self.fileName       
+        
+    def getRecordingStartTime(self): 
+        return self.header.startDateTime        
+        
+    def getNbPages(self):    
+        return self.header.nbRecords          
+                
+    def getChannelLabels(self):
+        return self.dataReader.getChannelLabels()
+
+    def addEvent(self, event):
+        self.events.add(event)   
+
+
+    def reformatMontage(self, channelExpressions, saveFileName = "", anotationSaveFileName=""):
+
+        if saveFileName == "":
+            saveFileName = self.fileName[:-4] + "_reformatted" + self.fileName[-4:]
+
+        self.dataReader.reformatMontage(channelExpressions, saveFileName)        
+        
+        if anotationSaveFileName == "":
+            anotationSaveFileName = saveFileName + "a"
+        copyfile(self.annotationFileName, anotationSaveFileName)
+
+            
+
+
+    """
+     Save the header information and the events to the file. The data themself
+     are unchanged for two reasons:
+         1 - We should always keep the original data as is an apply modifications
+             (e.g., filtering) "on-line" to avoid loosing important information
+             in the recorded phenomena.
+         2 - The data are not loaded in kept within the object, as opposed to 
+             the header and the event informations.
+    """
+    def save(self, tempPath=None):
+
+        """
+         If the EEG recording is a splitted data file set, we just need to 
+         save the annotation file. Else, we need to save the complete data file.
+        """
+        if self.isSplitted:
+            self.annotationsReader.save(tempPath)
+        else:
+            self.dataReader.save(tempPath)
+
+
+
+
+    def saveAs(self, saveFileName, saveAnnotationFileName=""):
+
+        if saveAnnotationFileName == "":
+            saveAnnotationFileName = saveFileName + "a"
+
+        if self.isSplitted:
+            copyfile(self.fileName, saveFileName)
+            self.annotationsReader.saveAs(saveAnnotationFileName)
+        else:
+            self.dataReader.saveAs(saveFileName)
+            
+            
+
+
+    def getChannelFreq(self, channel): 
+        return self.dataReader.getChannelFreq(channel)
+
+
+    def getChannelTime(self, channel) :
+        return self.dataReader.getChannelTime(channel)   
+ 
+
+
+    """
+     Read the complete signal recorded by a given channel.
+    """
+    def readChannel(self, signalName, usePickled=False):
+        return self.dataReader.readChannel(signalName, usePickled)           
+
+
+
+    """
+     Return the time associated with the next sample following startTime. Return
+     None if there is no sample next to startTime.
+    """
+    def getNextSampleStartTime(self, signalName, startTime):
+        return self.dataReader.getNextSampleStartTime(signalName, startTime)                 
+             
+
+    def read(self, signalNames, startTime, timeDuration, debug=False):
+        return self.dataReader.read(signalNames, startTime, timeDuration, debug)                   
+          
+        
+    def setPageDuration(self, duration):
+        self.dataReader.setPageDuration(duration)        
+
+        
+    def getPageDuration(self):
+        return self.dataReader.getPageDuration()
+                
+        
+    def readPage(self, channelList, pageId):
+        return self.dataReader.readPage(channelList, pageId)        
+        
+        
+    def getNbSample(self, channel=None):
+        return self.dataReader.getNbSample(channel)     
+
+
+
 
