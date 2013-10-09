@@ -13,6 +13,7 @@
 
 from scipy import array
 import numpy as np
+import re
 
 from spyndle import Line, Point
 from spyndle.EEG.electrodesSVG import getElectrodeCoordinates
@@ -247,3 +248,98 @@ def getEEGChannels(channelLabels, electrodeNames=electrodes, excludePatterns=[])
             
     return [channel for ind, channel in enumerate(channelLabels) if OK[ind]]
     
+
+
+
+
+
+"""
+ Return the subset of channels which are EEG channels of the 10-20 system.
+"""
+def getPropagationDirection(pairs):
+    
+    def renameElectrode(electrode):    
+        if electrode == "Fp1":
+            electrode = "Fp3"
+        elif electrode == "FT7":
+            electrode = "FC7"
+        elif electrode == "FT9":
+            electrode = "FC9"
+        elif electrode == "T7":
+            electrode = "C7"
+        elif electrode == "T9":
+            electrode = "C9"
+        elif electrode == "A1":
+            electrode = "C11"
+        elif electrode == "TP7":
+            electrode = "CP7"
+        elif electrode == "TP9":
+            electrode = "CP9"
+        elif electrode == "O1":
+            electrode = "O3"
+        elif electrode == "T3":
+            electrode = "C7"
+        elif electrode == "T5":
+            electrode = "P7"
+                
+        elif electrode == "Fp2":
+            electrode = "Fp4"
+        elif electrode == "FT8":
+            electrode = "FC8"
+        elif electrode == "FT10":
+            electrode = "FC10"
+        elif electrode == "T8":
+            electrode = "C8"
+        elif electrode == "T10":
+            electrode = "C10"
+        elif electrode == "A2":
+            electrode = "C12"
+        elif electrode == "TP8":
+            electrode = "CP8"
+        elif electrode == "TP10":
+            electrode = "CP10"
+        elif electrode == "O2":
+            electrode = "O4"
+        elif electrode == "T4":
+            electrode = "C8"
+        elif electrode == "T6":
+            electrode = "P8"
+
+        return electrode
+
+
+    def splitElectrodeName(electrode):    
+            
+            if electrode[-1] == "z" :
+                return electrode[:-1], 0
+            else :
+                reMatch = re.match(r'(?P<first>[A-z]*)(?P<second>[0-9]*)' , electrode)
+                return reMatch.group("first"), int(reMatch.group("second"))
+
+
+
+    def getDirections(pair):
+        ref1, ref2   = splitElectrodeName(renameElectrode(pair[0]))
+        test1, test2 = splitElectrodeName(renameElectrode(pair[1]))
+        
+        rowOrder    = ["I", "O", "PO", "P", "CP", "C", "FC", "F", "AF", "Fp", "N"]
+        colOrder    = range(11, 0, -2) + range(0, 13, 2)
+        towardFront = rowOrder.index(test1) - rowOrder.index(ref1)
+        towardRight = colOrder.index(test2) - colOrder.index(ref2)
+            
+        transEmisphere = False
+        towardMedial   = np.nan                      
+        if ref2 == 0:
+            towardMedial   = -abs(towardRight)       
+        elif test2 == 0:           
+            towardMedial   = abs(towardRight)  
+        elif np.mod(ref2, 2) == np.mod(test2, 2):
+            transEmisphere = True            
+        elif np.mod(ref2, 2) :
+            towardMedial   = towardRight
+        else:
+            towardMedial   = -towardRight                    
+                
+        return towardFront, towardRight, towardMedial, transEmisphere
+
+    return [pair + getDirections(pair) for pair in pairs]
