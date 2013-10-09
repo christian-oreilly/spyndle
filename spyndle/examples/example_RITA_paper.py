@@ -48,7 +48,7 @@ from scipy import unique, array
 import pandas 
 from datetime import datetime                                                  
 A = datetime.now()                                                             
-"""
+
 fileName        = "RITA_example.BDF"
 detectionStages = ["Sleep stage 2"]
 eventName       = "SpindleRMS"
@@ -109,7 +109,7 @@ computeAveragePropagation("", aggeragationlevels = ["ref", "test"],
                   pattern="correctedData_*.csv",  verbose=False)
 G = datetime.now()                                                             
 print G-F                                                                      
-"""
+
 propData = pandas.read_csv("meanData.csv", sep=";")
 
 print "Plotting the results in result_example_a.png..."
