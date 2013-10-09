@@ -89,7 +89,7 @@ class EEGDBReaderBase(object) :
         return self.getEvents(startTime, endTime)
     
     @events.setter
-    def id(self, events):
+    def events(self, events):
         self._events = events        
         
     # This function should not be called from outside the class anymore. The
