@@ -26,9 +26,9 @@ from spyndle.io import Event, EEGDBReaderBase, RecordedChannel
 
 
 class DevuystEvent(Event):
-    def __init__(self, groupeName, name, channel, startTime, timeDuration, samplingRate):
+    def __init__(self, groupName, name, channel, startTime, timeDuration, samplingRate):
         self.no          = None
-        self.groupeName  = groupeName
+        self.groupName   = groupName
         self.channel     = channel
         self.name        = name
         self.startTime   = startTime #en secondes #dayToTime(item.GetStartTime())
@@ -78,7 +78,7 @@ class DevuystReader(): #(EEGDBReaderBase):
  
 
 
-    def importEvents(self, fname, eventName, groupeName="Fuseau"):
+    def importEvents(self, fname, eventName, groupName="Fuseau"):
 
         try:
             
@@ -94,7 +94,7 @@ class DevuystReader(): #(EEGDBReaderBase):
         
         for line in content :
             startTime, timeDuration = array(line.split(), float)
-            self.events.append(DevuystEvent(groupeName, eventName, self.labels[0], 
+            self.events.append(DevuystEvent(groupName, eventName, self.labels[0], 
                                             startTime, timeDuration, self.samplingRates[0]))
 
 

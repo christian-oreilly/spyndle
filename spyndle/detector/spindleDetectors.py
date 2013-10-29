@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 
 """
     Implementation of spindle detectors. 
@@ -141,7 +140,7 @@ class DetectedSpindle:
 
         # Select the stage where the spindle begin as the sleep stage
         # of the spindle.
-        stageEvent23 = filter(lambda e: e.groupeName == "Stage" and
+        stageEvent23 = filter(lambda e: e.groupName == "Stage" and
                                             e.timeStart() <=  self.startTime and 
                                             e.timeEnd() >= self.startTime, reader.events)                                 
         if len(stageEvent23) > 0 :
@@ -283,7 +282,7 @@ class SpindleDectector:
 
     def computeStageIndicator(self, reader, channel=None):
 
-        stages = filter(lambda e: e.groupeName == "Stage" , reader.events)   
+        stages = filter(lambda e: e.groupName == "Stage" , reader.events)   
         lstStage = concatenate((unique([stage.name.lower() for stage in stages]), ["No stage"]))    
         stageIndicator = ones(reader.getNbSample(channel))*(len(lstStage)-1)
             
@@ -352,15 +351,18 @@ class SpindleDectector:
     def saveSpindle(self, reader, eventName, 
                     eventGroupName="Spindle", fileName = None):
         for spindle in self.detectedSpindles:    
-            event = Event( name = eventName, groupeName = eventGroupName, 
-                          channel = spindle.channel, startTime = spindle.startTime(),
-                          timeLength = spindle.timeDuration , 
-                          dateTime = reader.getRecordingStartTime() + timedelta(seconds=spindle.startTime()),
+            event = Event(name          = eventName, 
+                          groupName     = eventGroupName, 
+                          channel       = spindle.channel, 
+                          startTime     = spindle.startTime(),
+                          timeLength    = spindle.timeDuration , 
+                          dateTime      = reader.getRecordingStartTime() + timedelta(seconds=spindle.startTime()),
                           properties = {"RMSamp"            :spindle.RMSamp,
                                         "filteredRMSamp"    :spindle.filteredRMSamp,
                                         "meanFreq"          :spindle.meanFreq,
                                         "slopeOrigin"       :spindle.slopeOrigin,
-                                        "slope"             :spindle.slope})            
+                                        "slope"             :spindle.slope,
+                                        "stage"             :spindle.sleepStage})            
                           
             #print event.toEDFStr()
             reader.addEvent(event)
@@ -454,8 +456,8 @@ class SpindleDectectorThreshold(SpindleDectector):
 
         # Is the threshold computed separetely for every self.perCycle and or
         # self.perStage.
-        self.perCycle = False
-        self.perStage = False
+        self.perCycle = True
+        self.perStage = True
 
         ###############################################################################
 
@@ -510,7 +512,7 @@ class SpindleDectectorThreshold(SpindleDectector):
 
         # Computing sleep cycles
         if self.perCycle :
-            cycles = computeDreamCycles([e for e in self.reader.events if e.groupeName.lower() == "stage"], self.aeschbachCycleDef)
+            cycles = computeDreamCycles([e for e in self.reader.events if e.groupName.lower() == "stage"], self.aeschbachCycleDef)
 
         #################################### READING ##########################
         if verbose:   print "Start reading datafile..."
@@ -545,24 +547,27 @@ class SpindleDectectorThreshold(SpindleDectector):
             if self.perCycle :
                 for cycle in cycles :
                     stageEvents = self.reader.getEventsByTime(cycle.timeStart(), cycle.timeEnd())               
-                    stageEvents = filter(lambda e: e.groupeName.lower() == "stage", stageEvents)     
+                    stageEvents = filter(lambda e: e.groupName.lower() == "stage", stageEvents)     
                     
                     if self.perStage :
                         for stage in self.detectionStages :
                             currentStageEvents = filter(lambda e: e.name.lower() == stage.lower(), stageEvents)
-                            self.__detectMain__(currentStageEvents, channelTime, data.samplingRate, channel, indexSignal, EEGsignal)
+                            self.__detectMain__(currentStageEvents, channelTime, data.samplingRate, 
+                                                channel, indexSignal, EEGsignal, stage=stage)
                     else:
                         stageEvents = filter(lambda e: np.in1d(e.name.lower(),  [s.lower() for s in self.detectionStages]), stageEvents)
                         self.__detectMain__(stageEvents, channelTime, data.samplingRate, channel, indexSignal, EEGsignal)      
                         
                         
             else:         
-                stageEvents = filter(lambda e: e.groupeName.lower() == "stage", self.reader.events)                     
+                stageEvents = filter(lambda e: e.groupName.lower() == "stage", self.reader.events)                     
                 if self.perStage :
                     for stage in self.detectionStages :
                         currentStageEvents = filter(lambda e: e.name.lower() == stage.lower(), stageEvents)
-                        self.__detectMain__(currentStageEvents, channelTime, data.samplingRate, channel, indexSignal, EEGsignal)
+                        self.__detectMain__(currentStageEvents, channelTime, data.samplingRate, 
+                                            channel, indexSignal, EEGsignal, stage=stage)
                 else:
+                    stageEvents = filter(lambda e: np.in1d(e.name.lower(),  [s.lower() for s in self.detectionStages]), stageEvents)
                     self.__detectMain__(stageEvents, channelTime, data.samplingRate, channel, indexSignal, EEGsignal)                       
                 
                 
@@ -572,7 +577,7 @@ class SpindleDectectorThreshold(SpindleDectector):
 
 
     # Performs the main processing steps involved in spindle detection.
-    def __detectMain__(self, stageEvents, channelTime, fs, channel, indexSignal, EEGsignal):
+    def __detectMain__(self, stageEvents, channelTime, fs, channel, indexSignal, EEGsignal, stage=None):
 
         if len(stageEvents) == 0:  return 
         
@@ -698,6 +703,10 @@ class SpindleDectectorThreshold(SpindleDectector):
                                               stopSpinInd, newSpindles, channelTime)
 
         #######################################################################
+
+        if not stage is None:
+            for spindle in newSpindles:
+                spindle.sleepStage = stage
 
         self.detectedSpindles.extend(newSpindles)        
 
@@ -854,13 +863,13 @@ class SpindleDectectorSigma(SpindleDectectorThreshold):
             self.sigmaIndex = loadmat(fileName)["sigma"]
             self.sigmaIndex = self.sigmaIndex.reshape(self.sigmaIndex.size)
         else:     
-            self.sigmaIndex = zeros(self.reader.getNbSample(data.channel  )) 
+            self.sigmaIndex = zeros(self.reader.getNbSample(data.channel)) 
                     
             
             nbPad = int(self.windowOverlapping/2.0*data.samplingRate)
             nbWin = int(self.computationWindow*data.samplingRate) - 2*nbPad
     
-            nbIter = int(self.reader.getNbSample(data.channel  )/nbWin)
+            nbIter = int(self.reader.getNbSample(data.channel)/nbWin)
             for i in range(nbIter):
                 if mod(i, 1000) == 0: print i, nbIter
                 

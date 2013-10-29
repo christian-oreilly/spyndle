@@ -30,7 +30,7 @@ import numpy as np
 import scipy.weave as weave
 
 from scipy import array, arange, concatenate, where
-from copy import deepcopy
+from copy import deepcopy, copy
 from lxml import etree
 from tempfile import gettempdir 
 from time import sleep
@@ -105,8 +105,8 @@ class EDFEvent(Event):
                     
                     if name == u"name":
                         self.name = value
-                    elif name == u"groupeName":
-                        self.groupeName = value
+                    elif name == u"groupName":
+                        self.groupName = value
                     elif name == u"channel":
                         self.channel = value
                     else :
@@ -122,7 +122,7 @@ class EDFEvent(Event):
                  self.name == u"Sleep stage ?" ) :
                
                
-               self.groupeName = u"Stage"
+               self.groupName = u"Stage"
 
 
 
@@ -1042,7 +1042,13 @@ class EDFBaseReader(EEGDBReaderBase) :
             time = info.getStartTime() + arange(len(info.recordedSignals[channel]))/info.samplingRates[channel]
             ind  = where((time >= startTime)*(time <= startTime + timeDuration))[0]
             
-            assert(len(ind)>0)
+            try:
+                assert(len(ind)>0)
+            except :
+                print "time: ", time
+                print info.getStartTime(), len(info.recordedSignals[channel]), info.samplingRates[channel]
+                print startTime, timeDuration
+                raise
 
 
             returnData[channel]                = RecordedChannel()               
@@ -1055,12 +1061,23 @@ class EDFBaseReader(EEGDBReaderBase) :
 
         
     def setPageDuration(self, duration):
-        dtMax = 1.0/max(array(self.header.nbSamplesPerRecord.values())/self.header.recordDuration)
-        # We change the duration only if its greater than half the size of the 
-        # smaller sampling period. Else, because of the digitization resolution,
-        # the change has no effet.
-        if abs(duration - self.getPageDuration()) > dtMax:
-            self.changeRecordDuration(duration)
+        nbSamples = copy(self.header.nbSamplesPerRecord)
+        del nbSamples[EVENT_CHANNEL]
+        
+        # len(nbSamples) == 0 for edfa files.
+        if len(nbSamples):
+            dtMax = self.header.recordDuration/max(array(nbSamples.values()))
+            # We change the duration only if its greater than half the size of the 
+            # smaller sampling period. Else, because of the digitization resolution,
+            # the change has no effet. We remove the EVENT_CHANNEL from the computation
+            # of the sampling period because the sampling period of this channel has
+            # no meaning.
+            if abs(duration - self.getPageDuration()) > dtMax:
+                #print dtMax, max(array(self.header.nbSamplesPerRecord.values())), self.header.recordDuration
+                #print nbSamples.values()
+                #print nbSamples        
+                #print abs(duration - self.getPageDuration()), duration, self.getPageDuration()
+                self.changeRecordDuration(duration)
         
     def getPageDuration(self):
         return self.header.recordDuration
@@ -1201,6 +1218,7 @@ class EDFReader(EEGDBReaderBase) :
         
         if isSplitted is False:
             self.isSplitted = False
+            self.annotationFileName = None
             
         elif isSplitted is True:
             self.isSplitted = True            
@@ -1221,15 +1239,17 @@ class EDFReader(EEGDBReaderBase) :
                 self.annotationFileName = fname + "a"
                 self.isSplitted         = True 
             else:
-                self.isSplitted         = False           
+                self.isSplitted         = False  
+                self.annotationFileName = None
     
         else:
             raise "In EDFReader(...), the parameter isSplitted can only take the "\
                   "values True, False or None. Value " + str(isSplitted) + " used."                   
-        
-        
-                
+
+
         self.dataReader        = EDFBaseReader(fname)
+        super(EDFReader, self).__init__(self.getPageDuration()) 
+
         if self.isSplitted :
             self.annotationsReader  = EDFBaseReader(self.annotationFileName)
             self.events             = self.annotationsReader.events
@@ -1237,8 +1257,6 @@ class EDFReader(EEGDBReaderBase) :
             self.annotationsReader = None
             self.events             = self.dataReader.events
         
-        super(EDFReader, self).__init__(self.getPageDuration()) 
-
 
     @property
     def header(self):
@@ -1281,23 +1299,84 @@ class EDFReader(EEGDBReaderBase) :
         if saveFileName == "":
             saveFileName = self.fileName[:-4] + "_reformatted" + self.fileName[-4:]
 
-        self.dataReader.reformatMontage(channelExpressions, saveFileName)        
-        
-        if anotationSaveFileName == "":
-            anotationSaveFileName = saveFileName + "a"
-        copyfile(self.annotationFileName, anotationSaveFileName)
 
+        # If the original recording was not a splited file and no file name
+        # has been given for the annotation file, do not split the file.
+        if anotationSaveFileName == "" and self.annotationFileName is None:
+            pass
+
+        # If the original recording was a splited file but no file name
+        # has been given for the annotation file, use the standard naming 
+        # for annotation file (exact same name as the data file but with
+        # a "a" suffix to the file extension).        
+        elif anotationSaveFileName == "" and not self.annotationFileName is None:
+            anotationSaveFileName = saveFileName + "a"
+            copyfile(self.annotationFileName, anotationSaveFileName)
+
+
+        # If the original recording was not a splited file but a file name
+        # has been given for the annotation file, split the reformated record.   
+        elif anotationSaveFileName != "" and self.annotationFileName is None:
+            self.splitRecord(anotationSaveFileName)
+            self.save()
+
+        # If the original recording was  a splited file and a file name
+        # has been given for the annotation file, save the annotation file using
+        # the requested name.           
+        else: # anotationSaveFileName != "" and not self.annotationFileName is None
+            copyfile(self.annotationFileName, anotationSaveFileName)
+        
+          
+
+        self.dataReader.reformatMontage(channelExpressions, saveFileName)        
+                 
+         
+         
+    def splitRecord(self, annotationFileName):
+
+        self.isSplitted = True
+        self.annotationFileName = annotationFileName          
+
+        self.annotationsReader  = deepcopy(self.dataReader)
+        self.events             = self.annotationsReader.events
+
+        # TODO: Events in the self.dataReader could be removed (except for the time
+        # stamps of the records which are mendatory for EDF+).
+        #self.dataReader ...
+
+        self.annotationsReader.header.headerNbBytes  = 8 + 80 + 80 + 8 + 8 + 8 + 44 + 8 + 8 + 4 + (16 + 80+ 8 + 8 + 8 + 8 + 8 + 80 + 8 + 32) 
+        self.annotationsReader.header.nbChannels     = 1
+        self.annotationsReader.header.channelLabels  = ["EDF Annotations"] 
+
+        self.annotationsReader.header.transducerType     = {"EDF Annotations":""}
+        self.annotationsReader.header.prefiltering       = {"EDF Annotations":""} 
+        self.annotationsReader.header.units              = {"EDF Annotations":""}
+        self.annotationsReader.header.physicalMin        = {"EDF Annotations":-1}
+        self.annotationsReader.header.physicalMax        = {"EDF Annotations":1}          
+        self.annotationsReader.header.digitalMin         = {"EDF Annotations":-32768}
+        self.annotationsReader.header.digitalMax         = {"EDF Annotations":32767}     
+        
+        # TODO: The nbSamplesPerRecord could be adjusted.
+        #self.annotationsReader.header.nbSamplesPerRecord = {"EDF Annotations":annotationFieldLength} 
+            
+  
+  
+  
+  
             
 
 
     """
      Save the header information and the events to the file. The data themself
      are unchanged for two reasons:
-         1 - We should always keep the original data as is an apply modifications
+         1 - We should always keep the original data as is and apply modifications
              (e.g., filtering) "on-line" to avoid loosing important information
              in the recorded phenomena.
-         2 - The data are not loaded in kept within the object, as opposed to 
+         2 - The data are not loaded and kept within the object, as opposed to 
              the header and the event informations.
+     However, if the record is not split edf/edfa files, changes in events may
+     require increasing the space of the event records, forcing to offset 
+     appropriately each data record.
     """
     def save(self, tempPath=None):
 

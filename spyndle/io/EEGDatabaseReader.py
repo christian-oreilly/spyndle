@@ -143,7 +143,7 @@ class EEGDBReaderBase(object) :
         
         
     def getPages(self):
-        stageEvents = filter(lambda e: e.groupeName == "Stage", self.events)    
+        stageEvents = filter(lambda e: e.groupName.lower() == "stage", self.events)    
         return map(lambda e: e.startTime  , stageEvents), \
                map(lambda e: e.dateTime   , stageEvents)
         
@@ -250,7 +250,7 @@ class EEGDBReaderBase(object) :
         if indMax <= indMin:
             event.properties["stage"] = "No stage"
         else:
-            stages = filter(lambda e: e.groupeName.lower() == "stage", self.events[indMin:(indMax+1)])                  
+            stages = filter(lambda e: e.groupName.lower() == "stage", self.events[indMin:(indMax+1)])                  
             if len(stages) == 1 :
                 event.properties["stage"] = stages[0].name
             elif len(stages) == 0 :    
@@ -280,6 +280,14 @@ class EventList:
     def __len__(self):
         return len(self.__events)
 
+    def __str__(self):
+        eventNames = [e.name for e in self.__events]
+        
+        retStr = "The EventList object contains " + str(len(eventNames)) + " events:\n"
+        for eventName in np.unique(eventNames):
+            retStr += eventName + ":" + str(np.sum(np.in1d(eventNames, [eventName]))) + "\n"
+        return retStr
+
     def remove(self, events):
         if isinstance(events, list):
             for event in events :
@@ -290,8 +298,6 @@ class EventList:
             self.__events.remove(events)
         else:
             raise TypeError
-        
-  
   
 
     def getIndexMinStartTime(self, timeMin, inclusive=True):
@@ -449,12 +455,12 @@ class RecordedChannel:
         
 """        
     In order to facilitate the cross-operation of readers for multiple data
-    format, some event names and groupe names are standerdized. It is to the
+    format, some event names and group names are standerdized. It is to the
     specific reader to ensure that data format using differents names transale
     them in correct standerdized designation if these events are to be 
     recognize correctly by other classes, such as detectors. 
     
-    Standard groupe names : 
+    Standard group names : 
         Stage : For all events used in sleep stage scoring.
 
     Standard names: (these are compatible with http://www.edfplus.info/specs/edftexts.html#annotations)
@@ -471,14 +477,24 @@ class RecordedChannel:
         Sleep stage N3
 """    
 
+
+class EventGroup:
+    
+    def __init__():
+                     
+        self.groupName   = groupName
+        self.color       = "black"
+
+
+
 @total_ordering
 class Event:
     __metaclass__ = ABCMeta
     
-    def __init__(self, name = "", groupeName = "", channel = "", startTime = -1.0,
+    def __init__(self, name = "", groupName = "", channel = "", startTime = -1.0,
                  timeLength = -1.0, dateTime = None, properties = {}):
                      
-        self.groupeName  = groupeName
+        self.groupName   = groupName
         self.channel     = channel
         self.name        = name
         self.startTime   = startTime   # In seconds, since the begining of the recording of the EEG file.
@@ -503,7 +519,7 @@ class Event:
 
             
     def __str__(self):
-        return(str(self.groupeName) + " " + str(self.channel)
+        return(str(self.groupName) + " " + str(self.channel)
                 + " " + str(self.name) + " " + str(self.startTime) + " " + str(self.timeLength))
 
 
@@ -514,7 +530,7 @@ class Event:
     def getXml(self):
         # create XML 
         try:
-            root = etree.Element('Event', name=self.name, groupeName=self.groupeName, channel=self.channel)
+            root = etree.Element('Event', name=self.name, groupName=self.groupName, channel=self.channel)
             for propKey in self.properties:
                 #propertyElem = etree.Element('Property')
                 
@@ -541,7 +557,7 @@ class Event:
             
     def toEDFStr(self):
         
-        if self.groupeName.lower() == "stage":
+        if self.groupName.lower() == "stage":
             eventStr = self.name
         else:
             eventStr = self.getXml()

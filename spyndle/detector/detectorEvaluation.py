@@ -298,7 +298,7 @@ class DetectorEvaluator:
         # of stage for this computation since we do not want to have, for example,
         # a serie of endStage2, beginStage2, endStage2, beginStage2 creating artigicial
         # discontinuities at each change of page
-        stageEventNames =  [e for e in readerGold.events if e.groupeName == "Stage"]  
+        stageEventNames =  [e for e in readerGold.events if e.groupName == "Stage"]  
         
         if stageEventNames[0].name in listDetectionStages:
             self.stageTransitions = [transition(stageEventNames[0].timeStart(), "A")]

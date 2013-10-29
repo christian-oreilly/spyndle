@@ -82,9 +82,9 @@ def secondToDays(seconds, startDay):
 
 
 class HarmonieEvent(Event):
-    def __init__(self, no, groupe, item, recordingStartTime):
+    def __init__(self, no, group, item, recordingStartTime):
         self.no          = no
-        self.groupeName  = groupe.GetName()
+        self.groupName   = group.GetName()
         self.channel     = item.GetChannel()
         
         self.name = item.GetName()  
@@ -94,7 +94,7 @@ class HarmonieEvent(Event):
         # Names for sleep stages in Harmonie are not constrained such that
         # there is no standard nqmes. Tore's lab, Julie's lab and clinical
         # lab use diffrent namings. So we must check for all possibles names.
-        if self.groupeName.lower() == u"stage" or self.groupeName.lower() == u"stade":
+        if self.groupName.lower() == u"stage" or self.groupName.lower() == u"stade":
             if  self.name.lower() == u"stage1" or self.name.lower() == u"stade1" \
                                                or self.name.lower() == u"std1" :   
                 self.name = u"Sleep stage 1"
@@ -128,7 +128,7 @@ class HarmonieEvent(Event):
                 self.name = u"Sleep stage ?"
                 
                 
-            self.groupeName = u"stage"
+            self.groupName = u"stage"
                                                          
 
         
@@ -141,19 +141,19 @@ class HarmonieEvent(Event):
         self.timeLength  = item.GetTimeLength()                
         self.startSample = item.GetStartSample()
         self.sampleLength= item.GetSampleLength()
-        self.color       = groupe.GetColor() 
+        self.color       = group.GetColor() 
 
         self.properties  = {}
         # Keys and properties should be in unicode
-        for i in range(groupe.GetItemPropertyCount()):
-            key = groupe.GetItemPropertyKey(i)
+        for i in range(group.GetItemPropertyCount()):
+            key = group.GetItemPropertyKey(i)
             self.properties[key] = item.GetItemPropertyValue(key)
             
     
 
             
     def __str__(self):
-        STR =  str(self.no) + " " + str(self.groupeName) + " " + str(self.channel) \
+        STR =  str(self.no) + " " + str(self.groupName) + " " + str(self.channel) \
                     + " " + str(self.name) + " " + str(self.startTime) + " " + str(self.timeLength)
                 
         for key in self.properties:
@@ -250,10 +250,7 @@ class HarmonieReader(EEGDBReaderBase):
         ISignalRecord = self.ISignalFile.CreateSignalRecord(RECORD_NB)
         ISignalRecord.SetStartSample(int(0))
         self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)  
-        self.recordingStartDateTime = ole2datetime(ISignalRecord.GetStartTime())        
-        self.startTimeInDays = ISignalRecord.GetStartTime()
-        self.startDay = floor(self.startTimeInDays)
-        self.recordingStartTime = dayToSecond(self.startTimeInDays, self.startDay)        
+        self.recordingStartTime  = ole2datetime(ISignalRecord.GetStartTime())              
         ###########################################     
 
         
@@ -262,7 +259,7 @@ class HarmonieReader(EEGDBReaderBase):
         for i in range(self.ISignalInfo.GetEventItemCount()):    
             IEventItem = self.ISignalInfo.GetEventItem(i)
             IEventGroup = IEventItem.GetGroup()
-            self.events.add(HarmonieEvent(i, IEventGroup, IEventItem, self.recordingStartDateTime))
+            self.events.add(HarmonieEvent(i, IEventGroup, IEventItem, self.recordingStartTime))
             
         # Patch used because data recorder with previous versions of Harmonie
         # inconsistent time stamp due to discontinuous recording. These lines
@@ -272,7 +269,7 @@ class HarmonieReader(EEGDBReaderBase):
         ###########################################
             
             
-        self.pageDuration = np.median([e.timeLength for e in self.events if e.groupeName.lower() == "stage"])
+        self.pageDuration = np.median([e.timeLength for e in self.events if e.groupName.lower() == "stage"])
 
         # We now avoid to use IRecordingMontage.GetBaseSampleFrequency() and always
         # use self.IRecordingMontage.GetBaseSampleFrequency() to avoid any confusion.
@@ -353,8 +350,8 @@ class HarmonieReader(EEGDBReaderBase):
     """
     def definePages(self):
     
-        discontinuitySample = array([e.startSample for e in self.events if e.groupeName == "Discontinuity" or
-                                                                     e.groupeName == "Recording Start"], dtype=int)    
+        discontinuitySample = array([e.startSample for e in self.events if e.groupName == "Discontinuity" or
+                                                                     e.groupName == "Recording Start"], dtype=int)    
         sampleTransitions = sorted(concatenate((discontinuitySample, array([self.nbSamples+1], dtype=int))))
                 
         noTransition = 0 
@@ -439,7 +436,7 @@ class HarmonieReader(EEGDBReaderBase):
             indS += nbSamples
 
         # TODO: Should return a "page" object which is common to all reader.
-        return EEGPage(self.channelFreqs, sigStart, recordedSignals, self.recordingStartDateTime)
+        return EEGPage(self.channelFreqs, sigStart, recordedSignals, self.recordingStartTime)
      
      
      
@@ -590,18 +587,29 @@ class HarmonieReader(EEGDBReaderBase):
         ISignalRecord = self.ISignalFile.CreateSignalRecord(RECORD_NB) 
         
         i = 0
-        while i < 30 and abs(time - approxTime) > 0.5/self.trueBaseFreq:
+        for i in range(30):
+            if abs(time - approxTime) <= 0.5/self.trueBaseFreq:
+                break
+            
             approxSample += int(round((time - approxTime)*self.trueBaseFreq))     
             if approxSample > self.nbSamples:
                 approxSample = self.nbSamples
+            elif approxSample <= 0 :
+                approxSample = 0
                 
             ISignalRecord.SetStartSample(approxSample)        
             self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
             startDateTime = ole2datetime(ISignalRecord.GetStartTime())
             
-            approxTime = (startDateTime - self.recordingStartDateTime).total_seconds()  
+            approxTime = (startDateTime - self.recordingStartTime).total_seconds()  
+            
+            # For convergence in cases of signal discontinuity, we must ensure
+            # that the condition approxTime - time < time is met.
+            if approxTime >= 2.0*time:
+                approxTime = time*1.5 
+            
         
-        if i == 30:
+        if i == 29:
             raise "Failed to get sample from time."
         else:
             return approxSample
@@ -651,8 +659,8 @@ class HarmonieReader(EEGDBReaderBase):
         #if not channel in self.getChannelLabels() :
         #    raise 
 
-        discontinuityEvent = [e for e in self.events if e.groupeName == "Discontinuity" or
-                                                        e.groupeName == "Recording Start"]      
+        discontinuityEvent = [e for e in self.events if e.groupName == "Discontinuity" or
+                                                        e.groupName == "Recording Start"]      
                                                         
         discontinuitySample = array([e.startSample for e in discontinuityEvent])                                                          
         # These sample are in base frequency. We must convert them in channel frequency.
@@ -678,7 +686,7 @@ class HarmonieReader(EEGDBReaderBase):
             self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
             event.dateTime    = ole2datetime(ISignalRecord.GetStartTime())
             # In seconds, since the begining of the recording of the EEG file.
-            self.startTime   = (event.dateTime - self.recordingStartDateTime).total_seconds()     
+            event.startTime   = (event.dateTime - self.recordingStartTime).total_seconds()   
 
 
     # Patch parce qu'il semble y avoir un problème avec le temps associé
@@ -796,14 +804,14 @@ class HarmonieReader(EEGDBReaderBase):
                 raise
 
             # Annotation channel            
-            page.startTime = (ole2datetime(ISignalRecord.GetStartTime()) - self.recordingStartDateTime).total_seconds()         
+            page.startTime = (ole2datetime(ISignalRecord.GetStartTime()) - self.recordingStartTime).total_seconds()         
 
             
             # This function call is the bottle neck of this section.
             self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
 
             # Annotation channel            
-            page.startTime = (ole2datetime(ISignalRecord.GetStartTime()) - self.recordingStartDateTime).total_seconds()         
+            page.startTime = (ole2datetime(ISignalRecord.GetStartTime()) - self.recordingStartTime).total_seconds()         
 
             if self.getNbSample() - page.startSample < RECORD_NB: 
                page.startTime += (page.startSample - (self.getNbSample() - RECORD_NB))/self.trueBaseFreq            
@@ -864,10 +872,10 @@ class HarmonieReader(EEGDBReaderBase):
         lname   = subjectFields(self.patientInfo["lastName"]).encode("ascii", "ignore")            
         dataHeader.subjectID = id + " " + gender + " " +  date + " " + fname + "_" + lname   
         
-        startdate    = dateStr(self.recordingStartDateTime) if self.recordingStartDateTime else "X"                     
+        startdate    = dateStr(self.recordingStartTime) if self.recordingStartTime else "X"                     
         dataHeader.recordingIR = "Startdate " + startdate + " " + "X" + " " + "X" + " " + "X"  
 
-        dataHeader.startDateTime = self.recordingStartDateTime
+        dataHeader.startDateTime = self.recordingStartTime
             
         ns = len(self.getChannelLabels())
         dataHeader.headerNbBytes      = 8 + 80 + 80 + 8 + 8 + 8 + 44 + 8 + 8 + 4 + (ns+1)* (16 + 80+ 8 + 8 + 8 + 8 + 8 + 80 + 8 + 32) 

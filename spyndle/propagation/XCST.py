@@ -56,11 +56,11 @@ from scipy.signal import correlate2d
 import numpy as np
 import pandas as pd
 
-
 from spyndle import diff2
 from spyndle import computeMST
+from spyndle.io.databaseMng import PSGNight, Propagation, TransientEvent, buildTransientEvent
 
-
+ 
 
 # Computation of the 2D cross-corellation of S-Transform spectra as described 
 # in [1].
@@ -74,9 +74,9 @@ from spyndle import computeMST
 #                     by the HarmonieReader class. If help is needed, contact
 #                     the author (christian.oreilly@umontreal.ca). 
 #    fileName       : File name of the EEG data.
-#    resPath        : Repertory where the results will be saved.
 #    eventName      : Name used to label the "spindle" events.
 #    channelLst     : List of the recorded channels.
+#    dbSession      : A SQLAlchemy session used to read/write from the database. 
 #    delta          : delta_w in [1]. The observation windows will be 
 #                     slid from -delta to +delta. See [1]. (in seconds)
 #                     Default value: 0.5
@@ -95,24 +95,25 @@ from spyndle import computeMST
 #                     Default value: 0.0
 #    eventProperties: List of string indicating the event properties that are 
 #                     to be save together with the propagation delay 
-#                     information.
-#                     Default value: []
-#   resFilesPrefix  : Prefix that is used to name the output files. 
-#                     Default value: "spindleDelays"
+#                     information. If left to None, we assume that all event
+#                     with name eventName has the same set of properties and
+#                     make a list of eventProperties from all the keys of the
+#                     event.properties dictionnary.
+#                     Default value: None
 #   intFct          : Allows to choose the function used in integration. By
 #                     default nympy.sum is used fut numpy.trapz could be used
 #                     for more precision (at cost of a much slower execution).
-#                     
 #
-def computeXCST(readerClass, fileName, resPath, eventName, channelLst, 
+def computeXCST(readerClass, fileName, eventName, channelLst, dbSession,
                  delta =0.5, beforePad=0.5, afterPad=0.5, 
                  artifactPad=0.25,
-                 offset=0.0, eventProperties = [],
-                 resFilesPrefix="spindleDelays", similIndexType="inf",
+                 offset=0.0, eventProperties = None,
+                 similIndexType="inf",
                  intFct=np.sum) :  
 
-    night = os.path.basename(fileName)
 
+    ############################ LOADING THE EEG FILE #########################              
+    night = os.path.basename(fileName)
     try:
         print 'Loading data of the file ' + night + '...'
         reader = readerClass(fileName)    
@@ -121,230 +122,209 @@ def computeXCST(readerClass, fileName, resPath, eventName, channelLst,
         print "Error : computeXCST : ", fileName, "could not be opened."
         raise      
     
+
+    ################# CREATING THE DATABASE TABLE IF NEEDED ###################       
+    if len(dbSession.query(PSGNight).filter_by(fileName=fileName).all()) == 0:
+        dbSession.add(PSGNight(fileName=fileName))
+    dbSession.add_all([buildTransientEvent(e, fileName) for e in reader.events if e.name == eventName])
+    dbSession.commit()
     
     
+    ################ PROCESSING PROPAGATION FOR EVERY CHANNEL #################        
     for refChannel in channelLst:        
         
         print "Processing propagation:", night, refChannel   
         
-        events = filter(lambda e: e.name == eventName and e.channel == refChannel, reader.events)
-        
-        if len(events) :
-            keys = events[0].properties.keys()  
-            resultDict = {"no":[], "startTime":[], "duration":[]}
+        events = dbSession.query(TransientEvent).filter_by(channel=refChannel)
 
-            for testChannel in channelLst:                    
-                resultDict["similarity_" + testChannel] = []
-                resultDict["delay_" + testChannel]      = []
+        artifactPadSample = int(artifactPad*reader.getChannelFreq(refChannel))  
+        for event in events:
+     
+            #### These are reinitialized at each event because their balue
+            # can be altered during the computation og the XCST for
+            # a given event
+            deltaSampleStart = int(delta*reader.getChannelFreq(refChannel))        
+            deltaStart       = deltaSampleStart/reader.getChannelFreq(refChannel)    
+            deltaSampleEnd   = deltaSampleStart    
+            deltaEnd         = deltaStart
+            #### 
+                
+            startTime = event.startTime -  beforePad  - artifactPad    
+            duration  = event.duration + beforePad + afterPad + 2*artifactPad
+            
+            
 
-            for eventProperty in keys:
-                resultDict[eventProperty]               = []        
-        
+            """
+             The signal at startTime - delta might not be available and the 
+             reader will start reading at the next available sample following 
+             the startTime requested. If this happens we may miss some samples 
+             in this signal. We remove these samples in both synchronous and
+             asynchronous signals (for them to have the same size) by reducing  
+             the delta accordingly.
+            """
+            refStartTime = reader.getNextSampleStartTime(refChannel, startTime - deltaStart)
+            deltaStartRef = int((refStartTime - (startTime - deltaStart ))*reader.getChannelFreq(refChannel))
+                
+            if deltaStartRef > 0 : 
+                # In case that the signal is not sufficiently long signal 
+                # before the spindle to compute delays that are at least half
+                # of the limit asked by the parameter delta, we reject this spindle
+                if deltaStartRef >  deltaSampleStart/2:      
+                    # The condition of this assert should never be met if 
+                    # there is no bug in spindle detection and EEG data readers.
+                    assert(startTime - deltaStart <= event.startTime)
+                    continue
+                
+                deltaSampleStart -= deltaStartRef
+                deltaStart        = deltaSampleStart/reader.getChannelFreq(refChannel)                  
+
+
+            signalsDataRef = reader.read([refChannel], startTime - deltaStart         , duration + deltaStart + deltaEnd)                  
             
-            artifactPadSample = int(artifactPad*reader.getChannelFreq(refChannel))  
-            for i, event in zip(range(len(events)), events):
-         
-                #### These are reinitialized at each event because their balue
-                # can be altered during the computation og the XCST for
-                # a given event
-                deltaSampleStart = int(delta*reader.getChannelFreq(refChannel))        
-                deltaStart       = deltaSampleStart/reader.getChannelFreq(refChannel)    
-                deltaSampleEnd   = deltaSampleStart    
-                deltaEnd         = deltaStart
-                #### 
-                    
-                startTime = event.startTime -  beforePad  - artifactPad    
-                duration  = event.timeLength + beforePad + afterPad + 2*artifactPad
-                
-                
-    
-                """
-                 The signal at startTime - delta might not be available and the 
-                 reader will start reading at the next available sample following 
-                 the startTime requested. If this happens we may miss some samples 
-                 in this signal. We remove these samples in both synchronous and
-                 asynchronous signals (for them to have the same size) by reducing  
-                 the delta accordingly.
-                """
-                refStartTime = reader.getNextSampleStartTime(refChannel, startTime - deltaStart)
-                deltaStartRef = int((refStartTime - (startTime - deltaStart ))*reader.getChannelFreq(refChannel))
-                    
-                if deltaStartRef > 0 : 
-                    # In case that the signal is not sufficiently long signal 
-                    # before the spindle to compute delays that are at least half
-                    # of the limit asked by the parameter delta, we reject this spindle
-                    if deltaStartRef >  deltaSampleStart/2:      
-                        # The condition of this assert should never be met if 
-                        # there is no bug in spindle detection and EEG data readers.
-                        assert(startTime - deltaStart <= event.startTime)
-                        continue
-                    
-                    deltaSampleStart -= deltaStartRef
-                    deltaStart        = deltaSampleStart/reader.getChannelFreq(refChannel)                  
-    
-    
-                signalsDataRef = reader.read([refChannel], startTime - deltaStart         , duration + deltaStart + deltaEnd)                  
-                
-                
-                """
-                 The signal at startTime - delta + offset might not be 
-                 available and the reader will start reading at the
-                 next available sample following the startTime requested. If this
-                 happens for the offset signal, just adjust the offset accordingly.
-                """
-                cmpStartTime = reader.getNextSampleStartTime(refChannel, startTime - deltaStart + offset)
-                deltaStartCmp = int((cmpStartTime - (startTime - deltaStart + offset))*reader.getChannelFreq(refChannel))
-    
-                if deltaStartCmp > 0 : 
-                    signalsDataCmp = reader.read(channelLst, cmpStartTime                    , duration + deltaStart + deltaEnd)  
-                else:
-                    signalsDataCmp = reader.read(channelLst, startTime - deltaStart + offset , duration + deltaStart + deltaEnd)  
-                    
-                
-                ##############
-    
-                #print signalsDataCmp[refChannel].signal.shape, signalsDataRef[refChannel].signal.shape
-    
-                #################################################################
-                # Because of numerical approximation, the signal length between the
-                # synchronous and the asychronous comparisons can be different 
-                # of 1 sample. We need to fix them to the same size to avoid
-                # comparison problems.
-                if offset != 0.0:
-                    if len(signalsDataCmp[refChannel].signal) > len(signalsDataRef[refChannel].signal):
-                        for channel in signalsDataCmp:
-                            signalsDataCmp[channel].signal = signalsDataCmp[channel].signal[:-1]
-                    elif len(signalsDataCmp[refChannel].signal) < len(signalsDataRef[refChannel].signal):
-                        signalsDataRef[refChannel].signal = signalsDataRef[refChannel].signal[:-1]
-                ##############
-    
-    
-                fs = signalsDataCmp[refChannel].samplingRate                   
-    
-                # Spectra computation
-                X, fXRef = computeMST(signalsDataRef[refChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)     
-                X = abs(transpose(X))                
-                try:
-                    #Y = zeros(X.shape)
-                    #Y[:, (deltaSampleStart+artifactPadSample):-(deltaSampleEnd+artifactPadSample)] = X[:, (deltaSampleStart+artifactPadSample):-(deltaSampleEnd+artifactPadSample)]
-                    X = {"Ref" :X[:, (deltaSampleStart+artifactPadSample):-(deltaSampleEnd+artifactPadSample)]}
-                    #X["Ref2"] = Y
-                except IndexError:
-                    print deltaSampleStart, deltaSampleEnd, X.shape, artifactPadSample
-                    raise               
-                
-                for testChannel in channelLst :      
-                    Xtmp, fXtmp = computeMST(signalsDataCmp[testChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)         
-                    X[testChannel] = abs(transpose(Xtmp))[:, artifactPadSample:-artifactPadSample]              
             
-                refShape = list(shape(X["Ref"]))      
+            """
+             The signal at startTime - delta + offset might not be 
+             available and the reader will start reading at the
+             next available sample following the startTime requested. If this
+             happens for the offset signal, just adjust the offset accordingly.
+            """
+            cmpStartTime = reader.getNextSampleStartTime(refChannel, startTime - deltaStart + offset)
+            deltaStartCmp = int((cmpStartTime - (startTime - deltaStart + offset))*reader.getChannelFreq(refChannel))
+
+            if deltaStartCmp > 0 : 
+                signalsDataCmp = reader.read(channelLst, cmpStartTime                    , duration + deltaStart + deltaEnd)  
+            else:
+                signalsDataCmp = reader.read(channelLst, startTime - deltaStart + offset , duration + deltaStart + deltaEnd)  
                 
-                maxCrosscor = {}
-                maxDeltay   = {}
-                
-                unnormCrossCorr = zeros(deltaSampleStart + deltaSampleEnd)
-                time        = (arange(deltaSampleStart + deltaSampleEnd)-deltaSampleStart)/fs
-                refSelfCor  = intFct(intFct(X["Ref"]*X["Ref"])) 
-                indOffsets = arange(deltaSampleStart + deltaSampleEnd)
-                
-    
-                for testChannel in channelLst :
-                    if testChannel == refChannel:
-                        maxDeltay[testChannel]   = 0       
-                        maxCrosscor[testChannel] = 1.0              
-                    else:                
-                        XCmpSquare = X[testChannel]*X[testChannel]
-                        XCmpSquare_colTrapz = intFct(XCmpSquare, axis=0)     
-                        
-                        
-                        """
-                        equivalent to:
-                        CmpSelfCor  = zeros(deltaSampleStart + deltaSampleEnd)                        
-                        for indOffset in indOffsets:
-                            CmpSelfCor[indOffset]       = sum(XCmpSquare_colTrapz[indOffset:(indOffset+refShape[1])])                         
-                        """
-                        cums = np.cumsum(XCmpSquare_colTrapz)
-                        CmpSelfCor = np.concatenate(( [cums[refShape[1]-1]], 
-                                                    cums[indOffsets[1:] + refShape[1]-1] - cums[indOffsets[:-1]]))
-    
-    
-                                          
-                        # This...                        
-                        #unnormCrossCorr = correlate2d(X[testChannel], X["Ref"], mode="valid")[0][indOffsets]   
-    
-                        # and this...
-                        #K = X[testChannel].shape[1] 
-                        #H = X["Ref"].shape[0]
-                        #N = X["Ref"].shape[1]   
-                        #y = np.concatenate((X["Ref"], zeros((H, K-1))), axis=1)           
-                        #FFTy = np.conjugate(np.fft.fft(y, axis=1)) 
-                        #x = np.concatenate((zeros((H, N-1)), X[testChannel]), axis=1)                        
-                        #unnormCrossCorr = np.real(np.fft.ifft(np.fft.fft(x, axis=1)*FFTy, axis=1)[:, (N-1):(N-1 + deltaSampleStart + deltaSampleEnd)]) 
-                        #unnormCrossCorr = np.sum(unnormCrossCorr, axis=0)                        
-    
-    
-                        # are slower than that:
-                        for indOffset in indOffsets:
-                            XCmp                        = X[testChannel][:, indOffset:(indOffset+refShape[1])]
-                            unnormCrossCorr[indOffset]  = intFct(intFct(XCmp*X["Ref"]))            
-    
-    
-                        if similIndexType == "inf":
-                            den = np.maximum(CmpSelfCor, refSelfCor)
-                        elif similIndexType == "euclidean":
-                            den = sqrt(CmpSelfCor**2 + refSelfCor**2)                                
-                        else: 
-                            print "Error. The similarity index type " + similIndexType + "is unknown."
-                            raise TypeError
-                            
-                        crosscor = unnormCrossCorr/den
-    
-                        ind          = argmax(crosscor)                    
-                        diffCrosscor = diff2(arange(deltaSampleStart + deltaSampleEnd), crosscor)                
+            
+            ##############
+
+            #print signalsDataCmp[refChannel].signal.shape, signalsDataRef[refChannel].signal.shape
+
+            #################################################################
+            # Because of numerical approximation, the signal length between the
+            # synchronous and the asychronous comparisons can be different 
+            # of 1 sample. We need to fix them to the same size to avoid
+            # comparison problems.
+            if offset != 0.0:
+                if len(signalsDataCmp[refChannel].signal) > len(signalsDataRef[refChannel].signal):
+                    for channel in signalsDataCmp:
+                        signalsDataCmp[channel].signal = signalsDataCmp[channel].signal[:-1]
+                elif len(signalsDataCmp[refChannel].signal) < len(signalsDataRef[refChannel].signal):
+                    signalsDataRef[refChannel].signal = signalsDataRef[refChannel].signal[:-1]
+            ##############
+
+
+            fs = signalsDataCmp[refChannel].samplingRate                   
+
+            # Spectra computation
+            X, fXRef = computeMST(signalsDataRef[refChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)     
+            X = abs(transpose(X))                
+            try:
+                #Y = zeros(X.shape)
+                #Y[:, (deltaSampleStart+artifactPadSample):-(deltaSampleEnd+artifactPadSample)] = X[:, (deltaSampleStart+artifactPadSample):-(deltaSampleEnd+artifactPadSample)]
+                X = {"Ref" :X[:, (deltaSampleStart+artifactPadSample):-(deltaSampleEnd+artifactPadSample)]}
+                #X["Ref2"] = Y
+            except IndexError:
+                print deltaSampleStart, deltaSampleEnd, X.shape, artifactPadSample
+                raise               
+            
+            for testChannel in channelLst :      
+                Xtmp, fXtmp = computeMST(signalsDataCmp[testChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)         
+                X[testChannel] = abs(transpose(Xtmp))[:, artifactPadSample:-artifactPadSample]              
         
-                        # Interpolation to find the position of the true maximum
-                        # which normally falls between samples
-                        maxInd = len(crosscor)-1
-                        if ind == 0 or ind == maxInd:
-                            maxDeltay[testChannel]   = time[ind]       
-                            maxCrosscor[testChannel] = crosscor[ind]                      
-                        else:
-                            if ind-2 > 0 :
-                                indm = ind-2
-                            else:
-                                indm = 0
-                                
-                            if ind+2 < maxInd :
-                                indp = ind+2
-                            else:
-                                indp = maxInd
-        
-                            pindinc = where(diff(sign(diffCrosscor[indm:(indp+1)])) != 0)[0][0]                
-                            indFloor = indm +pindinc 
-                            indCeil  = indFloor + 1
-                            indFrac  = diffCrosscor[indFloor]/(diffCrosscor[indFloor] - diffCrosscor[indCeil])
-                          
-                            maxDeltay[testChannel]   = time[indFloor]      + indFrac*(time[indCeil]-time[indFloor])       
-                            maxCrosscor[testChannel] = crosscor[indFloor]  + indFrac*(crosscor[indCeil]-crosscor[indFloor])       
-                                            
-                        assert(abs(maxDeltay[testChannel]) <= delta)
-             
-                resultDict["no"].append(i)
-                resultDict["startTime"].append(event.startTime)
-                resultDict["duration"].append(event.timeLength)
-                
-                for testChannel in channelLst:
-                    resultDict["similarity_" + testChannel].append(maxCrosscor[testChannel])
-                    resultDict["delay_" + testChannel].append(maxDeltay[testChannel])
+            refShape = list(shape(X["Ref"]))      
+            
+
+            unnormCrossCorr = zeros(deltaSampleStart + deltaSampleEnd)
+            time        = (arange(deltaSampleStart + deltaSampleEnd)-deltaSampleStart)/fs
+            refSelfCor  = intFct(intFct(X["Ref"]*X["Ref"])) 
+            indOffsets = arange(deltaSampleStart + deltaSampleEnd)
+            
+
+            for testChannel in channelLst :
+                if testChannel == refChannel:
+                    maxDeltay  = 0       
+                    maxCrosscor = 1.0              
+                else:                
+                    XCmpSquare = X[testChannel]*X[testChannel]
+                    XCmpSquare_colTrapz = intFct(XCmpSquare, axis=0)     
                     
-                # Depending on the available properties 
-                for eventProperty in keys:
-                    if eventProperty in event.properties:
-                        resultDict[eventProperty].append(event.properties[eventProperty])
+                    
+                    """
+                    equivalent to:
+                    CmpSelfCor  = zeros(deltaSampleStart + deltaSampleEnd)                        
+                    for indOffset in indOffsets:
+                        CmpSelfCor[indOffset]       = sum(XCmpSquare_colTrapz[indOffset:(indOffset+refShape[1])])                         
+                    """
+                    cums = np.cumsum(XCmpSquare_colTrapz)
+                    CmpSelfCor = np.concatenate(( [cums[refShape[1]-1]], 
+                                                cums[indOffsets[1:] + refShape[1]-1] - cums[indOffsets[:-1]]))
+
+
+                                      
+                    # This...                        
+                    #unnormCrossCorr = correlate2d(X[testChannel], X["Ref"], mode="valid")[0][indOffsets]   
+
+                    # and this...
+                    #K = X[testChannel].shape[1] 
+                    #H = X["Ref"].shape[0]
+                    #N = X["Ref"].shape[1]   
+                    #y = np.concatenate((X["Ref"], zeros((H, K-1))), axis=1)           
+                    #FFTy = np.conjugate(np.fft.fft(y, axis=1)) 
+                    #x = np.concatenate((zeros((H, N-1)), X[testChannel]), axis=1)                        
+                    #unnormCrossCorr = np.real(np.fft.ifft(np.fft.fft(x, axis=1)*FFTy, axis=1)[:, (N-1):(N-1 + deltaSampleStart + deltaSampleEnd)]) 
+                    #unnormCrossCorr = np.sum(unnormCrossCorr, axis=0)                        
+
+
+                    # are slower than that:
+                    for indOffset in indOffsets:
+                        XCmp                        = X[testChannel][:, indOffset:(indOffset+refShape[1])]
+                        unnormCrossCorr[indOffset]  = intFct(intFct(XCmp*X["Ref"]))            
+
+
+                    if similIndexType == "inf":
+                        den = np.maximum(CmpSelfCor, refSelfCor)
+                    elif similIndexType == "euclidean":
+                        den = sqrt(CmpSelfCor**2 + refSelfCor**2)                                
+                    else: 
+                        print "Error. The similarity index type " + similIndexType + "is unknown."
+                        raise TypeError
+                        
+                    crosscor = unnormCrossCorr/den
+
+                    ind          = argmax(crosscor)                    
+                    diffCrosscor = diff2(arange(deltaSampleStart + deltaSampleEnd), crosscor)                
+    
+                    # Interpolation to find the position of the true maximum
+                    # which normally falls between samples
+                    maxInd = len(crosscor)-1
+                    if ind == 0 or ind == maxInd:
+                        maxDeltay   = time[ind]       
+                        maxCrosscor = crosscor[ind]                      
                     else:
-                        resultDict[eventProperty].append(np.nan)
-
-
-            resultDF = pd.DataFrame(resultDict, index = range(len(resultDict["no"])))
-            resultDF.to_csv(resPath + resFilesPrefix + "_" + night + "_" + refChannel + ".txt", index=False, sep=";")               
-                
+                        if ind-2 > 0 :
+                            indm = ind-2
+                        else:
+                            indm = 0
+                            
+                        if ind+2 < maxInd :
+                            indp = ind+2
+                        else:
+                            indp = maxInd
+    
+                        pindinc = where(diff(sign(diffCrosscor[indm:(indp+1)])) != 0)[0][0]                
+                        indFloor = indm +pindinc 
+                        indCeil  = indFloor + 1
+                        indFrac  = diffCrosscor[indFloor]/(diffCrosscor[indFloor] - diffCrosscor[indCeil])
+                      
+                        maxDeltay   = time[indFloor]      + indFrac*(time[indCeil]-time[indFloor])       
+                        maxCrosscor = crosscor[indFloor]  + indFrac*(crosscor[indCeil]-crosscor[indFloor])       
+                                        
+                    assert(abs(maxDeltay) <= delta)
+                    
+                dbSession.add(Propagation(spindleNo=event.no, testChannel=testChannel, 
+                                            similarity=maxCrosscor, delay=maxDeltay,
+                                            offset=offset))
+                    
+        dbSession.commit()

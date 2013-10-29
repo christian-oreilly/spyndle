@@ -5,3 +5,7 @@ build/*
 extractionScripts/*
 tests/*
 io/tests/trash/*
+dist/*
+bitbucket*/*
+requests*/*
+spyndle.eeg*/*
