@@ -15,123 +15,19 @@ from scipy import isnan, sqrt, nan, logical_not, reshape, median, std
 from sklearn.covariance import MinCovDet
 from numpy import in1d
 import pandas as pd
+import sqlalchemy
+from sqlalchemy import distinct, and_
 
+from spyndle.propagation import computeXCST
 from spyndle.EEG import getActiveElectrode
+from spyndle.io.databaseMng import PSGNight, Propagation, TransientEvent, \
+    DatabaseMng, PropagationRelationship, SPF, Channel
 
 
 
 ###############################################################################
 # Internal functions
 ###############################################################################
-
-
-# Retourne la liste des indices, parmis candidateInds, qui sont des électrodes
-# liées avec l'électrode référence de refRow.
-def getLinkedInd(Data, refRow, candidateInds):
-
-    filteredData =  Data.iloc[candidateInds, ]
-    refs  = array(filteredData["ref"], dtype=str)
-    tests = array(filteredData["test"], dtype=str)
-    
-    lastLinked = array([Data["ref"].iloc[refRow]], dtype=str)
-    lastLinked  = unique(concatenate((lastLinked, 
-                                       tests[in1d(refs, lastLinked)],
-                                       refs[in1d(tests, lastLinked)]  
-                                     )))  
-                                          
-                                  
-    newLinked = unique(concatenate((lastLinked, 
-                                       tests[in1d(refs, lastLinked)],
-                                       refs[in1d(tests, lastLinked)]  
-                                     )))  
-                                  
-    # Les lignes ci-dessus pourraient être intégrées dans la boucle ci-dessous. Cependant, cela 
-    # causerait de évaluation inutile de la condition du while, ce que l'on veut éviter puisque le
-    # temps d'exécution de cette fonction est critique.
-    while not all(in1d(newLinked, lastLinked)) :
-        lastLinked = newLinked
-        newLinked = unique(concatenate((newLinked, 
-                                       tests[in1d(refs, lastLinked)],
-                                       refs[in1d(tests, lastLinked)]  
-                                     )))   
-                                  
-                                 
-                                  
-    # Non nécessaire de vérifier les références ET les électrodes tests étant donné la définition même
-    # de ce que sont des électrodes liées.
-    #return(candidateInds[inlist(filteredData$elect, lastLinked) | inlist(filteredData$ref, lastLinked)])
-    return array(candidateInds[in1d(tests, lastLinked)])
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Vérifie s'il y a une relation bidirectionnelle entre l'électrode ref et source
-# de noRow et si oui retourne l'indice de la ligne bidirectionnelle avec refRow
-def findBidirectionnality(Data, refRow, candidateInds):
-
-    # We make sure refRow is not in CandidateInds, else the function would trivially
-    # return refRow
-    if refRow in candidateInds:
-        candidateInds = candidateInds[candidateInds != refRow]
-        
-    if len(candidateInds) == 0:
-        return None
-    
-    # S'il y a plusieurs candidats, on ne garde que celui dont l'occurence est 
-    # la plus proche de celle de noRow. Cela correspond
-    # au premier indice de la liste.  
-    IND = where(array((Data["ref" ].iloc[refRow] == Data["ref"].iloc[candidateInds])*
-                    (Data["test"].iloc[refRow] == Data["test" ].iloc[candidateInds])))[0]
-                                    
-    if len(IND) == 0:
-        return None
-    else:
-        return candidateInds[IND[0]]
-
-
-
-## Déplacé dans EEG.system_10_20 
-"""
- Considering an EEG channel as constituted of two electrodes, a passive
- (the reference) and an active (the other), this function return the 
- active electrode name from the channel label. This is used, for example
- to get 'F3' from 'F3-ref'. The function tries to 
- find in channelLabel the presence of the strings electrodeNames
-def getActiveElectrode(channelLabel, electrodeNames=['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 
-                                                'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 
-                                                'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz', 'Oz',
-                                                'fp1', 'fp2', 'f7', 'f8', 'f3', 'f4', 
-                                                't3', 't4', 'c3', 'c4', 't5', 't6', 'p3', 
-                                                'p4', 'o1', 'o2', 'fz', 'cz', 'pz', 'oz'], 
-                                                excludePatterns=[]):
-    
-    retName = ""
-    for electrodeName in electrodeNames:
-        if electrodeName in channelLabel :
-            if retName == "":
-                retName = electrodeName
-            else:
-                raise "Conficting electrode names."
-
-    for pattern in excludePatterns:
-        if pattern in channelLabel :
-            return ""
-            
-    return retName
-"""
 
 
 """
@@ -143,462 +39,641 @@ def getActiveElectrode(channelLabel, electrodeNames=['Fp1', 'Fp2', 'F7', 'F8', '
   Don Mills, Ont., 1977.
 """
 def getOutliers(data, coef=1.5):
+    t1, t2 = getOutlierThresholds(data, coef=1.5)
+    return where((data > t2)*(data < t1))[0]
+
+def getInliers(data, coef=1.5):
+    t1, t2 = getOutlierThresholds(data, coef=1.5)
+    return where((data <= t2)*(data >= t1))[0]
+
+       
+def getOutlierThresholds(data, coef=1.5):
     Q1   = percentile(data, 25.0)
     Q3   = percentile(data, 75.0)
-    return where((data > Q3 + coef*(Q3-Q1))*(data < Q1 - coef*(Q3-Q1)))[0]
-
-def getNotOutliers(data, coef=1.5):
-    Q1   = percentile(data, 25.0)
-    Q3   = percentile(data, 75.0)
-    return where((data <= Q3 + coef*(Q3-Q1))*(data >= Q1 - coef*(Q3-Q1)))[0]
+    return Q1 - coef*(Q3-Q1), Q3 + coef*(Q3-Q1), 
 
 
 
+# Change a set of rows obtained with session.query.all() in a pandas DataFrame 
+# object
+def rows2df(rows):
+    if len(rows) == 0:
+        return pd.DataFrame()
+    
+    d = {}
+    for column in rows[0].__table__.columns:
+        d[column.name] = [getattr(rows[0], column.name)]
 
-###########################################################################    
-# Computing the cutoff
-###########################################################################
-def computingCutOff(path, fileNameAsyncList, channelList, electrodeList, alpha = 10.0):        
+    for row in rows[1:]:
+        for column in row.__table__.columns:
+            d[column.name].append(getattr(row, column.name))
 
-    dataCutOff = DataFrame()
-    # For eletrodes of this recording night (these are the reference electrodes)
-    for refElectrode, refChannel, fileNameAsync in zip(electrodeList, channelList, fileNameAsyncList):
-        async = read_csv(path + fileNameAsync, sep=';') 
+    return pd.DataFrame(d)         
 
-        for testElectrode, testChannel in zip(unique(electrodeList), unique(channelList)) :
-            if testElectrode != refElectrode: # and not any(is.na(async[nameSim])) :
-                if async["similarity_" + testChannel].shape[0]:
-                    cutoff = percentile(async["similarity_" + testChannel], 100-alpha)
-                    row = DataFrame({"ref":refElectrode, "test":testElectrode, 
-                                     "cutoff":cutoff}, index=[0])
-                    dataCutOff = dataCutOff.append(row, ignore_index=True)
+
+
+class SPFEvaluator : 
+    
+    def __init__(self, night, eventName, dbSession=None, dbName = "sqlite:///:memory:", verbose = False):
         
-    return dataCutOff
+        self.night      = night
+        self.eventName  = eventName
+        self.verbose    = verbose
+        
+        if not dbSession is None:
+            self.session  = dbSession
+            self.dbMng      = None
+            
+        else:
+            if dbName == "sqlite:///:memory:":
+                print "No database session passed. Using in-memory database."
+            else:     
+                print "No database session passed. Using the " + dbName + " database."           
+            try:
 
+                self.dbMng = DatabaseMng(dbName)
+                self.session = self.dbMng.session
+            except sqlalchemy.exc.ArgumentError, error:
+                 print "Error connecting to the specified database URL. "\
+                       "The format of the database path is invalid."     \
+                       "\n\nSQLAlchemy error message: " + str(error)
+            
         
 
 
+    def __del__(self):
+        if not self.dbMng is None:
+            self.dbMng.disconnectDatabase()
+    
+    
+    
+
+    """
+      Wrapper around the XCST.computeXCST(...) functions to simplify the computation
+      of XCST when performed in for SPF computation.
+    """
+    def computeXCST(self, readerClass, **kwargs) :  
+      
+        computeXCST(readerClass, self.night, self.eventName, 
+                    dbSession=self.session, verbose=self.verbose, **kwargs) 
 
 
 
-
-
-###########################################################################    
-# FALSE DETECTION AND OUTLIERS REJECTION
-###########################################################################
-def readingSyncData(path, night, fileNameSyncList, channelList, electrodeList):        
-
-    DataProp = DataFrame()
-    # For eletrodes of this recording night (these are the reference electrodes)
-    for refElectrode, refChannel, fileNameSync in zip(electrodeList, channelList, fileNameSyncList):
-        
-        try:
-            sync  = read_csv(path + fileNameSync, sep=';')
-        except(pd._parser.CParserError) as detail:
-             print path + fileNameSync, detail      
-
-        for testElectrode, testChannel in zip(unique(electrodeList), unique(channelList)) :
-                     
-            if testElectrode != refElectrode: # and not any(is.na(async[nameSim])) :
+    """
+     Computing SPF for self.night.
+    """
+    def computeSPF(self, channelList = None, addBehavior='raise', alpha = 10.0):        
+                        
+        self.addBehavior = addBehavior
                 
-                sim       = sync["similarity_" + testChannel]
-                delays    = sync["delay_"      + testChannel]
+        if channelList is None:
+            # Getting all the records for the night
+            channelList = self.session.query(distinct(Channel.name))\
+                            .join(TransientEvent, Channel.name == TransientEvent.channelName)\
+                            .filter(and_(TransientEvent.psgNight == self.night,
+                                         TransientEvent.eventName == self.eventName)).all()
+            channelList = list(zip(*channelList)[0])
+            
+    
+        # Computing cutoff threshold from asychronized comparisons
+        if self.verbose :
+            print "Computing cutoff for night ", self.night
+        self.computingCutOff(channelList, alpha)
+    
+        # FALSE DETECTION AND OUTLIERS REJECTION
+        if self.verbose:
+            print "Rejecting outliers"
+        self.propagationRejection(channelList, alpha)
+    
+        # CORRECTING DELAYS TO HAVE ONLY PROPAGATION WITH POSITIVE TIME DELAYS 
+        if self.verbose: 
+            print "Correcting negative delays"   
+        self.negativeDelayCorrection()    
+    
+        # COMPUTING SPINDLE PROPAGATION FIELD      
+        if self.verbose: 
+            print "Identifying SPF" 
+        self.identifySPF()            
+    
+        # REMOVING DUPLICATE PROPAGATION DUE TO BIDIRECTIONNALITY
+        if self.verbose: 
+            print "Removing duplicates"        
+        self.removeBidirectionnalDuplicates()  
                 
-                if len(sim):  
-                    # Keep all the fields exctep the delay and similarity related ones
-                    colNames = [colName for colName in sync.columns.tolist() if not ("delay_" in colName or "similarity_" in colName)] 
-                    newData  = sync[colNames]
+    
+
+    
+    ###########################################################################    
+    # Computing the cutoff
+    ###########################################################################
+    def computingCutOff(self, channelList, alpha = 10.0):        
+    
+        # Getting all the records for the night
+        nightQuery = self.session.query(Propagation.similarity)\
+                                        .join(TransientEvent, TransientEvent.no == Propagation.spindleNo)\
+                                        .filter(and_(TransientEvent.psgNight == self.night,
+                                                     TransientEvent.eventName == self.eventName))         
+        
+        
+        # Keeping only offset records        
+        nightQuery = nightQuery.filter(Propagation.offset != 0.0)     
+
+        for testChannel in channelList :  
+            testQuery = nightQuery.filter(Propagation.sinkChannelName==testChannel)    
+            for refChannel in channelList:
+                if testChannel == refChannel:
+                    continue
+
+                similarities = testQuery.filter(Propagation.sourceChannelName==refChannel).all()   
+                
+                if len(similarities):
+                    cutoff = percentile(similarities, 100-alpha)
                     
-                    # Add the other fields
-                    newData["ref"]          = refElectrode
-                    newData["test"]         = testElectrode
-                    newData["delay"]        = delays
-                    newData["similarity"]   = sim
-  
-                    DataProp = DataProp.append(newData, ignore_index=True)
+                    propRel = PropagationRelationship(sinkChannelName    = testChannel, 
+                                                      sourceChannelName  = refChannel, 
+                                                      psgNight           = self.night,
+                                                      cutoff             = cutoff,
+                                                      eventName          = self.eventName)
+                                                      
+                    propRel.add(self.session, self.addBehavior)
+
+          
+            
+    
+    ###########################################################################    
+    # FALSE DETECTION AND OUTLIERS REJECTION
+    ###########################################################################
+    
+    def propagationRejection(self, channelList, alpha):        
+    
+        # Getting all the records for the night
+        nightQueryProp   = self.session.query(Propagation)\
+                                        .join(TransientEvent, TransientEvent.no == Propagation.spindleNo)\
+                                        .filter(TransientEvent.psgNight == self.night)\
+                                        .filter(TransientEvent.eventName == self.eventName)
         
-    return DataProp
-
-
-
-###########################################################################    
-# FALSE DETECTION AND OUTLIERS REJECTION
-###########################################################################
-
-def propagationRejection(night, dataIn, dataCutOff, alpha, verbose = True):        
-
-    DataProp = DataFrame()
-    # For eletrodes of this recording night (these are the reference electrodes)
-    for refElectrode in unique(dataIn["ref"]):
-                
-        if verbose :
-            print "ref:", refElectrode     
+        nightQueryCutoff = self.session.query(PropagationRelationship)\
+                                        .filter_by(psgNight  = self.night,
+                                                   eventName = self.eventName)
         
-        for testElectrode in unique(dataIn["test"]) :
-                     
-            if testElectrode != refElectrode: # and not any(is.na(async[nameSim])) :
+        # Keeping only synchronous records        
+        nightQueryProp = nightQueryProp.filter(Propagation.offset == 0.0)     
+
+        for testChannel in channelList :  
+            testQueryProp   = nightQueryProp.filter(Propagation.sinkChannelName==testChannel)    
+            testQueryCutoff = nightQueryCutoff.filter(PropagationRelationship.sinkChannelName==testChannel)    
+            
+            if self.verbose :
+                print "test:", testChannel                 
+            
+            for refChannel in channelList:
+                if testChannel == refChannel:
+                    pass
                 
-                dataIn2   = dataIn.iloc[where((dataIn["ref"] == refElectrode)*(dataIn["test"] == testElectrode))[0]] 
-                   
-                # Rejection because of a too low similarity
-                cutoff    = dataCutOff["cutoff"].iloc[where((dataCutOff["ref"]  == refElectrode)*
-                                                            (dataCutOff["test"] == testElectrode))[0]]
-                                 
+
+                propRel = testQueryCutoff.filter(PropagationRelationship.sourceChannelName==refChannel).all()                   
+
                 # Cutoff should be either equal to a float or to []
                 # The "if" clause is necessary to avoid using len() on
                 # a fload, raising an error.
-                if isinstance(cutoff, float): 
-                    pass                   
-                elif len(cutoff) == 0: 
+                if len(propRel) == 0: 
                     continue 
+                elif  len(propRel) == 1:
+                    propRel = propRel[0]
+                    if not isinstance(propRel, PropagationRelationship): 
+                        raise TypeError("propRel = " + str(propRel) + " with type" + str(type(propRel)))                 
                 else:
-                    raise TypeError                                                        
-                                   
-                N    = len(dataIn2["similarity"])
-                IND1 = where(dataIn2["similarity"] >= float(cutoff))[0] 
-                if len(IND1) == 0: 
+                    raise TypeError("propRel = " + str(propRel) + " with type" + str(type(propRel)))                                       
+    
+                cutoff = propRel.cutoff
+    
+                testRefQueryProp = testQueryProp.filter(Propagation.sourceChannelName==refChannel)         
+                validQuery       = testRefQueryProp.filter(Propagation.similarity >= cutoff)                
+                
+                
+                # Rejection because of a too low similarity                                                                                   
+                N      = testRefQueryProp.count()
+                Nvalid = validQuery.count()                 
+                if Nvalid == 0: 
                     continue
                 
                 # Expected false detection rate
-                FDR = (alpha/100.0)/(float(len(IND1))/float(N))
+                propRel.FDR = (alpha/100.0)/(float(Nvalid)/float(N))                
                 
-                # Rejection of delays outliers
-                IND2      = getNotOutliers(dataIn2["delay"].iloc[IND1])
-                          
-                if len(IND2):  
-                    # Keep all the fields exctep the delay and similarity related ones
-                    newData = dataIn2.iloc[IND1[IND2]]
-                    
-                    # Add the other fields
-                    newData["night"]        = night
-                    newData["FDR"]          = FDR
-  
-                    DataProp = DataProp.append(newData, ignore_index=True)
-        
-    return DataProp
-
-        
-        
-        
-"""        
-   Identify the spindle propagation fields (SPF). That is, it makes links between
-   detected spindles on separated electrodes to postulate, from different observations
-   on different channel, a same physiological entity (i.e., the SPF).
-"""     
-def identifySPF(dataProp) :
-        
-    dataProp             = dataProp.sort("startTime")
-    dataProp             = dataProp.rename(dict(zip(dataProp.index.tolist(), range(len(dataProp)))))
-        
-    delta                = 0.5
-    dataProp["source"]   = -1
-    dataProp["bidirect"] = -1
-    dataProp["noSpindle"]= -1
-    
-    # Compute the widht of the window in which we will be looking for coocuring 
-    # sleep spindles. 
-    N = dataProp.shape[0]
-    Window = min(10, N)
-    while min(array(dataProp.startTime[Window:N]) - 
-              array(dataProp.startTime[0:(N-Window)])) < delta :
-      Window += 1
-      if Window >= N:
-          break
-    
-    for noRow in range(N):
-        #if mod(noRow, 1000) == 0:
-        #    print noRow, N
-        
-        rowBiDir = dataProp.bidirect[noRow]        
-        if rowBiDir > -1 :
-
-            # On prend le temps moyen de propagation calculé de X à Y ce qui correspond à la moyenne
-            # du délais de X à Y et de la valeur négative du délais de Y à X.
-            dataProp.delay[rowBiDir] = sum(dataProp.delay[[rowBiDir, noRow]])/2.0
-     
-        else:
-
-            # Une formulation comme 
-            #inds = which(DataInd$timeDiff[noRow:length(DataInd$timeDiff)] - DataInd$timeDiff[noRow] <= delta) + noRow-1
-            # utilise beaucoup de temps de processeur, d'où l'importance d'utiliser une fenêre. Celle-ci nécessite
-            # bien sûr que les valeurs de DataInd$timeDiff soit triées en ordre croissant.
-            inds = where(dataProp.startTime[noRow:min(noRow+Window, N)] - 
-                                                    dataProp.startTime[noRow] <= delta )[0] + noRow
-            
-            # On doit garder seulements les entrées liées à l'électrode Ref de noRow.
-            inds = getLinkedInd(dataProp, noRow, inds)            
-
-
-            # Si une ou plusieurs sources sont présumés pour noRow, on conserve celle dont 
-            # le temps d'occurence est le plus près de celui de noRow.  Celle-ci sera la dernière 
-            # découverte, ce qui ne nous oblige qu'à garder la dernière en mémoire.  
-            # Notons qu'une source doit avoir une référence différente de celle de noRow
-            condition = array(dataProp.ref[noRow] != dataProp.ref[inds])
-            if array(condition).shape == () :
-                condition = condition.reshape(1)
-            dataProp.source[inds[condition]] = noRow
-  
-  
-            # Enlever bidirectionnalité :
-            # Si une ou plusieurs relations bidirectionnelles ont étées détectées avec
-            # noRow, on considère celle dont le temps d'occurence est le plus près de celui
-            # de noRow. Celle-ci sera la dernière découverte, ce qui ne nous oblige 
-            # qu'à garder la dernière en mémoire. On réécrit donc directement sur toute relations
-            # bidirectionnelles ayant été déjà trouvées.
-            indBidir = findBidirectionnality(dataProp, noRow, inds)
-            if not indBidir is None :
-                # We mark one (the first one) row as being bidirectionnal
-                # by putting its bidirect attribute to -2. This row will be kept
-                # and its delay will be the average of the two delays of the
-                # bidirectionnal relationship. Labelling it -2 distinguished by
-                # the non bidirectionnal channel pairs which are all labels -1
-                dataProp.bidirect[noRow]    = -2   
+                outlierMin, outlierMax = getOutlierThresholds([prop.delay for prop in validQuery.all()])
                 
-                # To mark the other (the second one) ow of the bidirectionnal
-                # relationship as being linked to the first on by indicating
-                # the row of the first row as its bidirect attribute. Once it
-                # has been used to compute the average delay, this second row
-                # will be removed.
-                dataProp.bidirect[indBidir] = noRow  
+                #print validQuery.all()
+                for prop in validQuery.all(): 
+                    prop.isFP       = False
+                    prop.isOutlier  = prop.delay < outlierMin or  prop.delay > outlierMax
+
+        
+        self.session.commit()
+        
+
+    
+            
+            
+            
+    """        
+       Identify the spindle propagation fields (SPF). That is, it makes links between
+       detected spindles on separated electrodes to postulate, from different observations
+       on different channel, a same physiological entity (i.e., the SPF).
+    """     
+    def identifySPF(self) :
+            
+            
+        
+        # Retourne la liste des indices, parmis candidateInds, qui sont des électrodes
+        # liées avec l'électrode référence de refRow.
+        def getLinkedInd(refRow, candidateInds):
+        
+
+            refs  = sources[candidateInds]
+            tests = sinks[candidateInds]
+            
+            
+            lastLinked = array([props[refRow].sourceChannelName], dtype=str)
+            lastLinked  = unique(concatenate((lastLinked, 
+                                               tests[in1d(refs, lastLinked)],
+                                               refs[in1d(tests, lastLinked)]  
+                                             )))  
+                                                  
+                                          
+            newLinked = unique(concatenate((lastLinked, 
+                                               tests[in1d(refs, lastLinked)],
+                                               refs[in1d(tests, lastLinked)]  
+                                             )))  
+                                          
+            # Les lignes ci-dessus pourraient être intégrées dans la boucle ci-dessous. Cependant, cela 
+            # causerait de évaluation inutile de la condition du while, ce que l'on veut éviter puisque le
+            # temps d'exécution de cette fonction est critique.
+            while not all(in1d(newLinked, lastLinked)) :
+                lastLinked = newLinked
+                newLinked = unique(concatenate((newLinked, 
+                                               tests[in1d(refs, lastLinked)],
+                                               refs[in1d(tests, lastLinked)]  
+                                             )))   
+                                          
+                                         
+                                          
+            # Non nécessaire de vérifier les références ET les électrodes tests étant donné la définition même
+            # de ce que sont des électrodes liées.
+            #return(candidateInds[inlist(filteredData$elect, lastLinked) | inlist(filteredData$ref, lastLinked)])
+            return array(candidateInds[in1d(tests, lastLinked)])
+        
+        
+        
+        
+        
+        # Vérifie s'il y a une relation bidirectionnelle entre l'électrode ref et source
+        # de noRow et si oui retourne l'indice de la ligne bidirectionnelle avec refRow
+        def findBidirectionnality(refRow, candidateInds):
+        
+            # We make sure refRow is not in CandidateInds, else the function would trivially
+            # return refRow
+            if refRow in candidateInds:
+                candidateInds = candidateInds[candidateInds != refRow]
                 
-
-    
-    DataSourceM1 = dataProp[dataProp.source == -1]
-    dataTmp = DataSourceM1[["startTime", "ref"]].drop_duplicates()
-    for iRowTmp, startTime, ref in zip(range(len(dataTmp)), dataTmp.startTime, dataTmp.ref) :
-               
-        #TODO: voir cas inversés
-        DataSourceM1.noSpindle[(DataSourceM1.startTime == startTime)*(DataSourceM1.ref == ref) ] = iRowTmp   
-    
-    dataProp[dataProp.source == -1] = DataSourceM1
-
-    inds = arange(len(dataProp))
-    while any(dataProp.noSpindle == -1) :
-        iRowTmp = inds[dataProp.noSpindle == -1]        
-        sources = array(dataProp.source[iRowTmp], dtype=int)
-        dataProp.noSpindle[iRowTmp] = array(dataProp.noSpindle[sources], dtype=int)  
-
-
-    return dataProp
-
-
-"""
- When a spindle has been detected on two channels and that for both these
- detection, a propagation has been detected between these channels, we are
- left with two records related to a same physiological propagation. We therefore
- remove this duplicate. The duplicate record to remove have been labeled by 
- a value -1 in the field "bidirect" during the execution of identifySPF().
-"""
-def removeBidirectionnalDuplicates(dataProp):
-    
-    dataRet = dataProp[dataProp["bidirect"] <= -1]
-    dataRet.bidirect[dataRet.bidirect == -1] = 0
-    dataRet.bidirect[dataRet.bidirect == -2] = 1
-    return dataRet
-
-
-
-
-"""
- CORRECTING DELAYS TO HAVE ONLY PROPAGATION WITH POSITIVE TIME DELAYS 
-"""
-def negativeDelayCorrection(dataProp): 
-    
-    if not "delay" in dataProp:
-        return dataProp
+            if len(candidateInds) == 0:
+                return None
         
-    indNeg                          = dataProp["delay"] < 0.0   
-    test                            = dataProp["test"][indNeg]
-    ref                             = dataProp["ref"][indNeg]
-    dataProp["delay"][indNeg]       = -dataProp["delay"][indNeg]
-    dataProp["ref"][indNeg]         = test
-    dataProp["test"][indNeg]        = ref
-    dataProp["inverted"]            = 0
-    dataProp["inverted"][indNeg]    = 1
 
-    return dataProp
-
-
-
-
-
-
-
-
-
-
-
-
-
-###############################################################################
-# External functions.
-###############################################################################
-
-"""
- Compute spindle propagation fields.
- TODO:  Maybe object which contain the rules for obtaining the files and 
-        its information (suject, nights, etc.) should be passed instead.
-"""
-def computeSPF_allFiles(path, offsetFilePattern="spindleDelays_offset_*.bdf_*.txt", 
-               includeElectrodePatterns=['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 
-                                         'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 
-                                         'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz', 'Oz'],
-               excludeElectrodePatterns=[], alpha = 10.0, verbose = True):
-
-    
-    files = glob(path + offsetFilePattern)
-    rePattern =  offsetFilePattern.replace("*", "|").replace(".", '\.')
-        
-    tmp = map(lambda f: re.split(rePattern, f)[1:3], files)
-    nights = [record[0] for record in tmp]
-    channels = [record[1] for record in tmp]
-    
-    # Keeping only the part of the channel name identifying the active electrode.
-    electrodes = map(lambda channel: getActiveElectrode(channel, includeElectrodePatterns, excludeElectrodePatterns), channels)
-
-    tokens =  offsetFilePattern.split("*")
-    
-    # for each subject in the file list
-    for night in unique(nights):
-        
-        channelList     = [channel for strNight, channel in zip(nights, channels) if strNight == night ]
-        electrodeList   = [electrode for strNight, electrode in zip(nights, electrodes) if strNight == night ]
-        
-        fileNameSyncList  = []
-        fileNameAsyncList = [] 
-        # For eletrodes of this recording night (these are the reference electrodes)
-        for refElectrode, refChannel in zip(electrodeList, channelList):
-            
-            if verbose :
-                print "ref:", refElectrode        
-            
-            fileNameSyncList.append(tokens[0][:-7] + night + tokens[1] + refChannel + tokens[2])
-            fileNameAsyncList.append(tokens[0] + night + tokens[1] + refChannel + tokens[2])
-    
-        computeSPF(path, night, fileNameSyncList, fileNameAsyncList, channelList, electrodeList, alpha, verbose)        
-        
-       
-       
-       
-       
-       
-def computeSPF(path, night, fileNameSyncList, fileNameAsyncList, channelList, electrodeList, alpha = 10.0, verbose = True):        
-                
-
-    if verbose :
-        print "Computing cutoff for night ", night
-    
-
-    # Computing cutoff threshold from asychronized comparisons
-    dataCutOff = computingCutOff(path, fileNameAsyncList, 
-                                    channelList, electrodeList, alpha)
-
-    # Reading synchronized comparisons
-    dataProp = readingSyncData(path, night, fileNameSyncList,
-                                    channelList, electrodeList)
-
-
-    # FALSE DETECTION AND OUTLIERS REJECTION
-    dataProp = propagationRejection(night, dataProp, dataCutOff, alpha, verbose)
-
-    # CORRECTING DELAYS TO HAVE ONLY PROPAGATION WITH POSITIVE TIME DELAYS 
-    if verbose: 
-        print "correcting negative delays"   
-    dataProp = negativeDelayCorrection(dataProp)    
-
-    # COMPUTING SPINDLE PROPAGATION FIELD      
-    dataProp = identifySPF(dataProp)            
-
-    # REMOVING DUPLICATE PROPAGATION DUE TO BIDIRECTIONNALITY
-    if verbose: 
-        print "removing duplicates"        
-    dataProp = removeBidirectionnalDuplicates(dataProp)  
-
-    # Saving the result.
-    dataProp.to_csv(path + "correctedData_" + night + ".csv", sep=";")
-    
-           
-           
-           
-               
-               
-               
-               
-"""
-  Compute robust central tendencies of observationVariables, aggregated at 
-  aggeragationlevels.
-"""            
-def computeAveragePropagation(path, aggeragationlevels,
-                              observationVariables, pattern="correctedData_*.csv", 
-                              verbose=True, minNbValid=40, outputFile = "meanData.csv"):
-
-    def computeCellAverages(data, observationVariables, 
-                            aggeragationlevels, levelInstanciation):
-
-        dataOut = {}
-        # For the N variables ....
-        NbTotal = len(data)
-        for observationVariable in observationVariables:
-            X          = array(data[observationVariable])
-            notOutInd  = getNotOutliers(X, coef=1.5)
-            nbOut      = NbTotal-len(notOutInd)
-            
-            validX     = X[notOutInd]    
-            validX     = validX[logical_not(isnan(validX))]                    
-            
-            #valids = !(X %in% outTau$out) & !is.na(X)
-            if len(validX) >= minNbValid :   # criterion c4
-                try:
-                    # MinCovDet().fit() crashes if we don't make this reshape...
-                    validX = reshape(validX, (len(validX), 1))
-                    covX    = MinCovDet().fit(validX)
-                    meanX   = covX.location_[0]
-                    sdX     = sqrt(covX.covariance_[0, 0])
-                except ValueError:
-                    # When the spindle detection resulted in discretized values
-                    # of spindle characteristics, the distribution of the variable
-                    # might not be acceptable for MCD algorithm which craches
-                    # with a "ValueError: expected square matrix" error. In these
-                    # time we fall back to simple statistics. 
-                    meanX   = median(validX)
-                    sdX     = std(validX)                        
+            # S'il y a plusieurs candidats, on ne garde que celui dont l'occurence est 
+            # la plus proche de celle de noRow. Cela correspond
+            # au premier indice de la liste.  
+            IND = where(array((sources[refRow] == sinks[candidateInds])*
+                            (sinks[refRow] == sources[candidateInds])))[0]
+                                            
+            if len(IND) == 0:
+                return None
             else:
-                meanX   = nan
-                sdX     = nan     
-                
-            dataOut[observationVariable + "_mean"]    = meanX
-            dataOut[observationVariable + "_sd"]      = sdX
-            dataOut[observationVariable + "_nbOut"]   = nbOut
-            dataOut[observationVariable + "_nbValid"] = len(validX)
+                return candidateInds[IND[0]]
         
-        for key in levelInstanciation:
-            dataOut[key] = levelInstanciation[key]
-        
-        for level in aggeragationlevels:
-            dataOut[level] = str(data[level].iloc[0])
+
+
+
+
+
+        #######################################################################
+        # START OF THE FUNCTION BODY
             
-        return DataFrame(dataOut, [1])   
+        # Getting all the records for the night
+        nightQueryProp_unsorted   = self.session.query(Propagation)\
+                                        .join(TransientEvent, TransientEvent.no == Propagation.spindleNo)\
+                                        .filter(TransientEvent.psgNight == self.night)        
+
+        nightQueryProp   = nightQueryProp_unsorted.order_by(TransientEvent.startTime)           
+
+
+            
+        props = nightQueryProp.all()     
         
-                        
-    ##########################################################################
-    # Code execution   
-    files = glob(path+pattern)
+        sources  = array([prop.sourceChannelName for prop in props], dtype=str)
+        sinks = array([prop.sinkChannelName for prop in props], dtype=str)
+
+        delta                = 0.5
+        
+        # Compute the widht of the window in which we will be looking for coocuring 
+        # sleep spindles. 
+        startTimes = array([prop.transientEvent.startTime for prop in props])
+        N = nightQueryProp.count()
+        if N == 0:
+            return
+        
+        Window = min(10, N)
+        while min(startTimes[Window:N] - startTimes[0:(N-Window)]) < delta :
+          Window += 1
+          if Window >= N:
+              break
+
+        
+        for noRow in range(N):
+            #if mod(noRow, 1000) == 0:
+            #    print noRow, N
+            
+            rowBiDir = props[noRow].bidirect        
+            if rowBiDir > -1 :
     
-    meanData = DataFrame() 
-    for f in files:            
-        rePattern =  pattern.replace("*", "|").replace(".", '\.')
-        night = re.split(rePattern, f)[1]         
-        
-        if verbose:
-            print night        
-        levelInstanciation = {"night":night}
-
-
-        dat          = read_csv(f, sep=";").groupby(aggeragationlevels).apply(lambda x: computeCellAverages(x, observationVariables, aggeragationlevels, levelInstanciation))
-        meanData     = meanData.append(dat, ignore_index=True)           
+                # On prend le temps moyen de propagation calculé de X à Y ce qui correspond à la moyenne
+                # du délais de X à Y et de la valeur négative du délais de Y à X.
+                assert(props[noRow].delay > 0 and props[rowBiDir].delay > 0)
+                props[rowBiDir].delay += props[noRow].delay
+                props[rowBiDir].delay /= 2.0
          
-    meanData.to_csv(path + outputFile, sep=";")
+            else:
     
+                # Une formulation comme 
+                # inds = which(DataInd$timeDiff[noRow:length(DataInd$timeDiff)] - DataInd$timeDiff[noRow] <= delta) + noRow-1
+                # utilise beaucoup de temps de processeur, d'où l'importance d'utiliser une fenêre. Celle-ci nécessite
+                # bien sûr que les valeurs de DataInd$timeDiff soit triées en ordre croissant.
+                inds = where(startTimes[noRow:min(noRow+Window, N)] - 
+                                                        startTimes[noRow] <= delta )[0] + noRow
+                
+                # On doit garder seulements les entrées liées à l'électrode Ref de noRow.
+                inds = getLinkedInd(noRow, inds)            
+    
+    
+                # Si une ou plusieurs sources sont présumés pour noRow, on conserve celle dont 
+                # le temps d'occurence est le plus près de celui de noRow.  Celle-ci sera la dernière 
+                # découverte, ce qui ne nous oblige qu'à garder la dernière en mémoire.  
+                # Notons qu'une source doit avoir une référence différente de celle de noRow
+                for ind in inds:
+                    if props[noRow].sourceChannelName != props[ind].sourceChannelName :
+                        props[ind].source = props[noRow].no
+
+
+      
+                # Enlever bidirectionnalité :
+                # Si une ou plusieurs relations bidirectionnelles ont étées détectées avec
+                # noRow, on considère celle dont le temps d'occurence est le plus près de celui
+                # de noRow. Celle-ci sera la dernière découverte, ce qui ne nous oblige 
+                # qu'à garder la dernière en mémoire. On réécrit donc directement sur toute relations
+                # bidirectionnelles ayant été déjà trouvées.
+                indBidir = findBidirectionnality(noRow, inds)
+                if not indBidir is None :
+                    # We mark one (the first one) row as being bidirectionnal
+                    # by putting its bidirect attribute to -2. This row will be kept
+                    # and its delay will be the average of the two delays of the
+                    # bidirectionnal relationship. Labelling it -2 distinguished by
+                    # the non bidirectionnal channel pairs which are all labels -1
+                    props[noRow].bidirect    = -2   
+                    
+                    # To mark the other (the second one) ow of the bidirectionnal
+                    # relationship as being linked to the first on by indicating
+                    # the row of the first row as its bidirect attribute. Once it
+                    # has been used to compute the average delay, this second row
+                    # will be removed.
+                    props[indBidir].bidirect = noRow  
+    
+    
+        self.session.commit()    
+       
+       
+        # SQLAlchemy do not allow to perform Query.update() when order_by() has 
+        # been called. Thus, for the following part we ue unsorted data.
+
+        DataSourceM1 = nightQueryProp_unsorted.filter(Propagation.source == -1) 
+        dataTmp = set(((prop.transientEvent.startTime, prop.sourceChannelName) for prop in DataSourceM1.all() ))
+        SPFs = [SPF(psgNight = self.night)]*len(dataTmp)
+        self.session.add_all(SPFs)
+        self.session.commit()    
+        
+        for aSPF, (startTime, ref) in zip(SPFs, dataTmp) :
+            props = DataSourceM1\
+                        .filter(and_(TransientEvent.startTime == startTime,\
+                                     Propagation.sourceChannelName == ref))\
+                        .all()
+            for prop in props:
+                prop.noSPF = aSPF.no
+
+
+            #DataSourceM1\
+            #    .filter(and_(TransientEvent.startTime == startTime,\
+            #                 Propagation.sourceChannelName == ref))\
+            #    .update({Propagation.noSPF: aSPF.no})
+
+        self.session.commit()    
+                
+    
+        whileQuery = nightQueryProp_unsorted.filter(Propagation.noSPF == -1)
+        while whileQuery.count() :
+            for prop in whileQuery.all():   
+                prop.noSPF = nightQueryProp_unsorted.filter(Propagation.no == prop.source).one().noSPF            
+            whileQuery = nightQueryProp_unsorted.filter(Propagation.noSPF == -1)
+
+        self.session.commit()
+               
+           
+    
+    
+    """
+     When a spindle has been detected on two channels and that for both these
+     detection, a propagation has been detected between these channels, we are
+     left with two records related to a same physiological propagation. We therefore
+     remove this duplicate. The duplicate record to remove have been labeled by 
+     a value -1 in the field "bidirect" during the execution of identifySPF().
+    """
+    def removeBidirectionnalDuplicates(self):
+        
+        self.session.query(Propagation).filter(Propagation.bidirect >= 0).delete()
+        self.session.query(Propagation).update({Propagation.bidirect: -(Propagation.bidirect +1)},
+                                               synchronize_session=False)
+        self.session.commit()        
+        
+
+    
+    
+    
+    """
+     CORRECTING DELAYS TO HAVE ONLY PROPAGATION WITH POSITIVE TIME DELAYS 
+    """
+    def negativeDelayCorrection(self): 
+        
+        
+        negQuery = self.session.query(Propagation).filter(Propagation.delay < 0.0 )
+        negQuery.update({Propagation.inverted           : True, 
+                         Propagation.delay              : -Propagation.delay,
+                         Propagation.sourceChannelName  : Propagation.sinkChannelName,
+                         Propagation.sinkChannelName    : Propagation.sourceChannelName},
+                         synchronize_session=False)
+        self.session.commit()        
+
+
+
+
+
+    """
+      Compute robust central tendencies of observationVariables, aggregated at 
+      aggeragationlevels.
+    """            
+    def computeAveragePropagation(self, aggeragationlevels, observationVariables, minNbValid=40):
+    
+        def computeCellAverages(data, observationVariables, 
+                                aggeragationlevels, levelInstanciation):
+    
+            dataOut = {}
+            # For the N variables ....
+            NbTotal = len(data)
+            for observationVariable in observationVariables:
+                X          = array(data[observationVariable])
+                notOutInd  = getInliers(X, coef=1.5)
+                nbOut      = NbTotal-len(notOutInd)
+                
+                validX     = X[notOutInd]    
+                validX     = validX[logical_not(isnan(validX))]                    
+                
+                #valids = !(X %in% outTau$out) & !is.na(X)
+                if len(validX) >= minNbValid :   # criterion c4
+                    try:
+                        # MinCovDet().fit() crashes if we don't make this reshape...
+                        validX = reshape(validX, (len(validX), 1))
+                        covX    = MinCovDet().fit(validX)
+                        meanX   = covX.location_[0]
+                        sdX     = sqrt(covX.covariance_[0, 0])
+                    except ValueError:
+                        # When the spindle detection resulted in discretized values
+                        # of spindle characteristics, the distribution of the variable
+                        # might not be acceptable for MCD algorithm which craches
+                        # with a "ValueError: expected square matrix" error. In these
+                        # time we fall back to simple statistics. 
+                        meanX   = median(validX)
+                        sdX     = std(validX)                        
+                else:
+                    meanX   = nan
+                    sdX     = nan     
+                    
+                dataOut[observationVariable + "_mean"]    = meanX
+                dataOut[observationVariable + "_sd"]      = sdX
+                dataOut[observationVariable + "_nbOut"]   = nbOut
+                dataOut[observationVariable + "_nbValid"] = len(validX)
+            
+            for key in levelInstanciation:
+                dataOut[key] = levelInstanciation[key]
+            
+            for level in aggeragationlevels:
+                dataOut[level] = str(data[level].iloc[0])
+                
+            return DataFrame(dataOut, [1])   
+            
+            
+                   
+        ##########################################################################
+        # Code execution   
+
+        levelInstanciation = {"night":self.night}
+
+
+        query = self.session.query(Propagation)\
+                        .join(TransientEvent, TransientEvent.no == Propagation.spindleNo)\
+                        .filter(and_(TransientEvent.psgNight  == self.night,
+                                     TransientEvent.eventName == self.eventName,  
+                                     Propagation.isFP == False,
+                                     Propagation.isOutlier == False))        
+
+        df  = rows2df(query.all())
+        dat = df.groupby(aggeragationlevels).apply(lambda x: computeCellAverages(x, observationVariables, aggeragationlevels, levelInstanciation))
+        
+        for norow in range(dat.shape[0]):
+            row = dict(dat.iloc[norow])       
+            
+            propRel = self.session.query(PropagationRelationship)\
+                            .filter_by(sinkChannelName   = row["sinkChannelName"],
+                                       sourceChannelName = row["sourceChannelName"],  
+                                       psgNight          = row["night"],
+                                       eventName         = self.eventName).one()             
+
+            del row["sinkChannelName"]
+            del row["sourceChannelName"]
+            del row["night"]
+
+            propRel.update(self.session, row, behavior="addMissingFields")
+        
+
+    def getAveragePropagation(self):
+        propRels = self.session.query(PropagationRelationship)\
+                        .filter_by(psgNight  = self.night,
+                                   eventName = self.eventName).all()                   
+        
+        import collections
+        result = collections.defaultdict(list)
+        for d in [propRel.getDict(self.session) for propRel in propRels]:
+            for k, v in d.items():
+                result[k].append(v)
+                
+        return pd.DataFrame(result)
+    
+    
+    """
+     Helper function used to provide an easy interface for computing SPF of a 
+     set of files.
+    """
+    """
+    def computeSPF_allFiles(path, offsetFilePattern="spindleDelays_offset_*.bdf_*.txt", 
+                   includeElectrodePatterns=['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 
+                                             'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 
+                                             'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz', 'Oz'],
+                   excludeElectrodePatterns=[], alpha = 10.0, verbose = True):
+    
+        
+        files = glob(path + offsetFilePattern)
+        rePattern =  offsetFilePattern.replace("*", "|").replace(".", '\.')
+            
+        tmp = map(lambda f: re.split(rePattern, f)[1:3], files)
+        nights = [record[0] for record in tmp]
+        channels = [record[1] for record in tmp]
+        
+        # Keeping only the part of the channel name identifying the active electrode.
+        electrodes = map(lambda channel: getActiveElectrode(channel, includeElectrodePatterns, excludeElectrodePatterns), channels)
+    
+        tokens =  offsetFilePattern.split("*")
+        
+        # for each subject in the file list
+        for night in unique(nights):
+            
+            channelList     = [channel for strNight, channel in zip(nights, channels) if strNight == night ]
+            electrodeList   = [electrode for strNight, electrode in zip(nights, electrodes) if strNight == night ]
+            
+            fileNameSyncList  = []
+            fileNameAsyncList = [] 
+            # For eletrodes of this recording night (these are the reference electrodes)
+            for refElectrode, refChannel in zip(electrodeList, channelList):
+                
+                if verbose :
+                    print "ref:", refElectrode        
+                
+                fileNameSyncList.append(tokens[0][:-7] + night + tokens[1] + refChannel + tokens[2])
+                fileNameAsyncList.append(tokens[0] + night + tokens[1] + refChannel + tokens[2])
+        
+            computeSPF(path, night, fileNameSyncList, fileNameAsyncList, channelList, electrodeList, alpha, verbose)        
+            
+           
+    """
+
+
+
+            
+           
 def applyRejectionC3(data, deltaWindow = 0.5, alphaSD = 0.2):
     # Applying rejection criterion c3 and saving the result
     sdThreshold = deltaWindow*alphaSD/sqrt(12)  

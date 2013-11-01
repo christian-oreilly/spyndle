@@ -54,6 +54,7 @@ from spyndle import cycleDefinitions, computeDreamCycles
 from spyndle import computeST
 from spyndle.io import EEGDBReaderBase, Event
 from spyndle.errorMng import ErrPureVirtualCall
+from spyndle.EEG import getEEGChannels
 
 # Class representing a detected spindle.
 class DetectedSpindle:
@@ -330,7 +331,7 @@ class SpindleDectector:
             
 
         if listChannels is None:
-            self.listChannels = self.reader.getChannelLabels()            
+            self.listChannels = getEEGChannels(self.reader.getChannelLabels())            
         else:
             if isinstance(listChannels, list) or isinstance(listChannels, tuple):
                 

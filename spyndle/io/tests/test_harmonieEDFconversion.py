@@ -8,12 +8,13 @@ sys.path.insert(0,parentdir + "\\..\\..\\..")
 from spyndle.io.harmonie import HarmonieReader
 from spyndle.io.edf import EDFReader
 from scipy import log10, trapz
-
+import numpy as np
 
 import unittest
 
 class conversionHarmonieEDFTests(unittest.TestCase) :
     
+
     def testConversion(self):
         print "Reading the .sig file..."
         readerSIG =  HarmonieReader(parentdir + "/test.SIG")
@@ -43,14 +44,59 @@ class conversionHarmonieEDFTests(unittest.TestCase) :
                     SNR = 10.0*log10(trapz(Y1**2)/trapz((Y1-Y2)**2))
                     print "noPage=", noPage+1, "(of ", readerSIG.getNbPages(),")" , "channel=", channel, "SNR=", SNR
                     
-                    if SNR < 50.0:
+                    if channel != "Mic-Mic" and SNR < 50.0:
                         import pylab
                         pylab.plot(range(len(Y1)), Y1)
                         pylab.plot(range(len(Y2)), Y2)
                         pylab.show()
-                    self.failIf(SNR < 50.0)
+                    self.failIf(channel != "Mic-Mic" and SNR < 50.0)
             else:
                 print "Skiping incomplete page " + str(noPage+1)
+
+    
+    def testConversion_readChannel(self):
+        print "Reading the .sig file..."
+        readerSIG =  HarmonieReader(parentdir + "/test.SIG")
+        
+        print "Saving a copy in the BDF format..."
+        readerSIG.saveAsEDF(parentdir + "/test.BDF", "BDF")
+        
+        print "Reading the saved BDF file..."
+        readerEDF = EDFReader(parentdir + "/test.BDF")
+
+        channelList = readerSIG.getChannelLabels()
+
+        for channel in channelList:    
+            
+            data1 = readerSIG.readChannel(channel, False)
+            Y1    = data1.signal
+            T1    = readerSIG.getChannelTime(channel)
+            
+            #fsSIG       = data.samplingRate
+
+            data2 = readerEDF.readChannel(channel)
+            Y2    = data2.signal
+            T2    = readerEDF.getChannelTime(channel)
+            #fsEDF       = data.samplingRate
+           
+            print "1:", np.mean(abs(Y1)) , np.mean(abs(Y2))            
+            
+           
+            #print sum(np.in1d(T2, T1)), sum(np.in1d(T1, T2)), len(T1),  len(T2)    
+           
+            #SNR = 10.0*log10(trapz(Y1**2)/trapz((Y1-Y2)**2))
+            #print "channel=", channel, "SNR=", SNR
+            
+            #if SNR < 50.0:
+            #import pylab
+            #pylab.plot(T1, Y1)
+            #pylab.plot(T2, Y2)
+            #pylab.show()
+        
+            #self.failIf(SNR < 50.0)    
+                       
+    
+
 
 def main():
     unittest.main()

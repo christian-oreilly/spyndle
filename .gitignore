@@ -8,4 +8,4 @@ io/tests/trash/*
 dist/*
 bitbucket*/*
 requests*/*
-spyndle.eeg*/*
+spyndle.egg*/*

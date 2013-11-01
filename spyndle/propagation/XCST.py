@@ -50,17 +50,17 @@
 
 import os
 from scipy import where, zeros, transpose, arange, shape, diff, sign, argmax, sqrt
-from scipy.integrate import trapz
-from scipy import fft, ifft
-from scipy.signal import correlate2d
+#from scipy.integrate import trapz
+#from scipy import fft, ifft
+#from scipy.signal import correlate2d
 import numpy as np
-import pandas as pd
+#import pandas as pd
+import sqlalchemy
 
 from spyndle import diff2
 from spyndle import computeMST
-from spyndle.io.databaseMng import PSGNight, Propagation, TransientEvent, buildTransientEvent
-
- 
+from spyndle.io.databaseMng import PSGNight, Propagation, TransientEvent, Channel, buildTransientEvent, DatabaseMng
+from spyndle.EEG.system10_20 import getEEGChannels
 
 # Computation of the 2D cross-corellation of S-Transform spectra as described 
 # in [1].
@@ -75,7 +75,7 @@ from spyndle.io.databaseMng import PSGNight, Propagation, TransientEvent, buildT
 #                     the author (christian.oreilly@umontreal.ca). 
 #    fileName       : File name of the EEG data.
 #    eventName      : Name used to label the "spindle" events.
-#    channelLst     : List of the recorded channels.
+#    channelList    : List of the recorded channels.
 #    dbSession      : A SQLAlchemy session used to read/write from the database. 
 #    delta          : delta_w in [1]. The observation windows will be 
 #                     slid from -delta to +delta. See [1]. (in seconds)
@@ -104,12 +104,13 @@ from spyndle.io.databaseMng import PSGNight, Propagation, TransientEvent, buildT
 #                     default nympy.sum is used fut numpy.trapz could be used
 #                     for more precision (at cost of a much slower execution).
 #
-def computeXCST(readerClass, fileName, eventName, channelLst, dbSession,
+def computeXCST(readerClass, fileName, eventName, channelList=None, dbSession=None,
                  delta =0.5, beforePad=0.5, afterPad=0.5, 
                  artifactPad=0.25,
                  offset=0.0, eventProperties = None,
                  similIndexType="inf",
-                 intFct=np.sum) :  
+                 intFct=np.sum,
+                 verbose=False) :  
 
 
     ############################ LOADING THE EEG FILE #########################              
@@ -121,21 +122,47 @@ def computeXCST(readerClass, fileName, eventName, channelLst, dbSession,
     except IOError:     
         print "Error : computeXCST : ", fileName, "could not be opened."
         raise      
+
+    if channelList is None:
+        channelList = getEEGChannels(reader.getChannelLabels())
+
+    dbMng = None
+    if dbSession is None:
+        try:
+            print "No database session passed. Using in-memory database."
+            dbMng = DatabaseMng()
+            dbMng.connectDatabase("sqlite://")
+            dbMng.createTables()
+            if dbMng.isConnected():
+                dbSession = dbMng.session
+            else:
+                print "Error connecting to the database."
+                return 
+        except sqlalchemy.exc.ArgumentError, error:
+             print "Error connecting to the specified database URL. "\
+                   "The format of the database path is invalid."     \
+                   "\n\nSQLAlchemy error message: " + str(error)
     
 
-    ################# CREATING THE DATABASE TABLE IF NEEDED ###################       
+    ################# ADD THE SPINDLE INFORMATION #############################       
     if len(dbSession.query(PSGNight).filter_by(fileName=fileName).all()) == 0:
         dbSession.add(PSGNight(fileName=fileName))
+        
+    for channel in channelList:
+        if len(dbSession.query(Channel).filter_by(name=channel).all()) == 0:
+            dbSession.add(Channel(name=channel))        
+        
     dbSession.add_all([buildTransientEvent(e, fileName) for e in reader.events if e.name == eventName])
     dbSession.commit()
     
     
     ################ PROCESSING PROPAGATION FOR EVERY CHANNEL #################        
-    for refChannel in channelLst:        
+    for refChannel in channelList:        
         
-        print "Processing propagation:", night, refChannel   
+        if verbose:
+            print "Processing propagation:", night, refChannel   
         
-        events = dbSession.query(TransientEvent).filter_by(channel=refChannel)
+        events = dbSession.query(TransientEvent).filter_by(channelName=refChannel)
 
         artifactPadSample = int(artifactPad*reader.getChannelFreq(refChannel))  
         for event in events:
@@ -192,9 +219,9 @@ def computeXCST(readerClass, fileName, eventName, channelLst, dbSession,
             deltaStartCmp = int((cmpStartTime - (startTime - deltaStart + offset))*reader.getChannelFreq(refChannel))
 
             if deltaStartCmp > 0 : 
-                signalsDataCmp = reader.read(channelLst, cmpStartTime                    , duration + deltaStart + deltaEnd)  
+                signalsDataCmp = reader.read(channelList, cmpStartTime                    , duration + deltaStart + deltaEnd)  
             else:
-                signalsDataCmp = reader.read(channelLst, startTime - deltaStart + offset , duration + deltaStart + deltaEnd)  
+                signalsDataCmp = reader.read(channelList, startTime - deltaStart + offset , duration + deltaStart + deltaEnd)  
                 
             
             ##############
@@ -229,7 +256,7 @@ def computeXCST(readerClass, fileName, eventName, channelLst, dbSession,
                 print deltaSampleStart, deltaSampleEnd, X.shape, artifactPadSample
                 raise               
             
-            for testChannel in channelLst :      
+            for testChannel in channelList :      
                 Xtmp, fXtmp = computeMST(signalsDataCmp[testChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)         
                 X[testChannel] = abs(transpose(Xtmp))[:, artifactPadSample:-artifactPadSample]              
         
@@ -242,11 +269,8 @@ def computeXCST(readerClass, fileName, eventName, channelLst, dbSession,
             indOffsets = arange(deltaSampleStart + deltaSampleEnd)
             
 
-            for testChannel in channelLst :
-                if testChannel == refChannel:
-                    maxDeltay  = 0       
-                    maxCrosscor = 1.0              
-                else:                
+            for testChannel in channelList :
+                if testChannel != refChannel:             
                     XCmpSquare = X[testChannel]*X[testChannel]
                     XCmpSquare_colTrapz = intFct(XCmpSquare, axis=0)     
                     
@@ -323,8 +347,11 @@ def computeXCST(readerClass, fileName, eventName, channelLst, dbSession,
                                         
                     assert(abs(maxDeltay) <= delta)
                     
-                dbSession.add(Propagation(spindleNo=event.no, testChannel=testChannel, 
+                    dbSession.add(Propagation(spindleNo=event.no, sinkChannelName=testChannel, sourceChannelName=refChannel,
                                             similarity=maxCrosscor, delay=maxDeltay,
                                             offset=offset))
                     
         dbSession.commit()
+        
+    if not dbMng is None:
+        dbMng.disconnectDatabase()
