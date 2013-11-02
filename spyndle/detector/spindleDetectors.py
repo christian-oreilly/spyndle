@@ -55,6 +55,7 @@ from spyndle import computeST
 from spyndle.io import EEGDBReaderBase, Event
 from spyndle.errorMng import ErrPureVirtualCall
 from spyndle.EEG import getEEGChannels
+from spyndle.io.databaseMng import buildTransientEvent
 
 # Class representing a detected spindle.
 class DetectedSpindle:
@@ -221,14 +222,14 @@ class SpindleDectector:
       proposed version.
     """
     def computeRMS(self, fmin=11, fmax=16, ):
-        listChannels = unique([s.channel for s in self.detectedSpindles])        
+        channelList = unique([s.channel for s in self.detectedSpindles])        
         
         # Pickle data for each channel separatelly to simplify and accelerate
         # the reading of large files.    
         if self.usePickled :
-            self.reader.pickleCompleteRecord(listChannels)   
+            self.reader.pickleCompleteRecord(channelList)   
    
-        for channel in listChannels:    
+        for channel in channelList:    
             data        = self.reader.readChannel(channel, usePickled=self.usePickled)
 
             signal      = data.signal
@@ -310,13 +311,13 @@ class SpindleDectector:
 
 
     """
-     Detect every spindle in the channels listChannels of the file opened 
+     Detect every spindle in the channels channelList of the file opened 
      by the reader.
     """
     @abstractmethod
-    def detectSpindles(self, listChannels=None, reader=None, verbose=True) : 
-        if isinstance(listChannels, str) :
-            listChannels = [listChannels]
+    def detectSpindles(self, channelList=None, reader=None, verbose=True) : 
+        if isinstance(channelList, str) :
+            channelList = [channelList]
 
         if not reader is None:
             if isinstance(reader, EEGDBReaderBase):
@@ -330,13 +331,13 @@ class SpindleDectector:
                                  "as argument to the detectSpindles() method.")
             
 
-        if listChannels is None:
-            self.listChannels = getEEGChannels(self.reader.getChannelLabels())            
+        if channelList is None:
+            self.channelList = getEEGChannels(self.reader.getChannelLabels())            
         else:
-            if isinstance(listChannels, list) or isinstance(listChannels, tuple):
+            if isinstance(channelList, list) or isinstance(channelList, tuple):
                 
                 # Process only available channels to the reader...
-                self.listChannels = [channel for channel in listChannels 
+                self.channelList = [channel for channel in channelList 
                                             if channel in self.reader.getChannelLabels()]                                
             else:
                 raise TypeError            
@@ -350,7 +351,9 @@ class SpindleDectector:
 
     # Used to save detected spindle in EEG data file. 
     def saveSpindle(self, reader, eventName, 
-                    eventGroupName="Spindle", fileName = None):
+                    eventGroupName="Spindle", fileName = None, dbSession=None):
+               
+               
         for spindle in self.detectedSpindles:    
             event = Event(name          = eventName, 
                           groupName     = eventGroupName, 
@@ -363,10 +366,15 @@ class SpindleDectector:
                                         "meanFreq"          :spindle.meanFreq,
                                         "slopeOrigin"       :spindle.slopeOrigin,
                                         "slope"             :spindle.slope,
-                                        "stage"             :spindle.sleepStage})            
-                          
-            #print event.toEDFStr()
+                                        "stage"             :spindle.sleepStage})     
+
             reader.addEvent(event)
+
+            if dbSession :
+                dbSession.add(buildTransientEvent(event, reader.fileName))
+
+        if dbSession :
+            dbSession.commit()
         
         if fileName is None:
             reader.save()
@@ -506,10 +514,10 @@ class SpindleDectectorThreshold(SpindleDectector):
         
   
   
-    # Detect every spindle in the channels listChannels of the file opened by the reader.
-    def detectSpindles(self, listChannels=None, reader=None, verbose=True) :
+    # Detect every spindle in the channels channelList of the file opened by the reader.
+    def detectSpindles(self, channelList=None, reader=None, verbose=True) :
  
-        SpindleDectector.detectSpindles(self, listChannels, reader, verbose)
+        SpindleDectector.detectSpindles(self, channelList, reader, verbose)
 
         # Computing sleep cycles
         if self.perCycle :
@@ -521,9 +529,9 @@ class SpindleDectectorThreshold(SpindleDectector):
         # Pickle data for each channel separatelly to simplify and accelerate
         # the reading of large files.    
         if self.usePickled :
-            self.reader.pickleCompleteRecord(self.listChannels)   
+            self.reader.pickleCompleteRecord(self.channelList)   
    
-        for channel in self.listChannels:    
+        for channel in self.channelList:    
             if verbose:   print "Channel " + channel + "..."           
             
             data            = self.reader.readChannel(channel, usePickled=self.usePickled)
@@ -927,7 +935,7 @@ class SpindleDectectorRSP(SpindleDectectorThreshold):
         ###############################################################################
 
 
-    # Detect every spindle in the channels listChannels of the file opened by the reader.
+    # Detect every spindle in the channels channelList of the file opened by the reader.
     def preprocessing(self, data):
 
         fileName = self.reader.getFileName() + "_RSP_" + data.channel + ".mat"

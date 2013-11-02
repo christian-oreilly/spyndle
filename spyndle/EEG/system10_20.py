@@ -199,6 +199,9 @@ def get_10_20_3electrodeDistant_electrodes(adjElect):
 
 
 
+
+
+
 """
  Considering an EEG channel as constituted of two electrodes, a passive
  (the reference) and an active (the other), this function return the 
@@ -230,6 +233,10 @@ def getActiveElectrode(channelLabel, electrodeNames=electrodes, excludePatterns=
             return ""
             
     return retName
+
+def getActiveElectrodes(channelLabels, electrodeNames=electrodes, excludePatterns=[], caseSensitive=False):
+    return [getActiveElectrode(channelLabel, electrodeNames, excludePatterns, caseSensitive) 
+                                                                for channelLabel in channelLabels]
 
 
 

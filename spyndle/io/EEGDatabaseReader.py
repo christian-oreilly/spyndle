@@ -20,6 +20,7 @@ from scipy import array, arange, sqrt, mean, concatenate, zeros, fft
 from scipy.io import loadmat
 from scipy.fftpack import fftfreq
 
+import uuid
 import bisect
 import re
 import datetime
@@ -494,6 +495,7 @@ class Event:
     def __init__(self, name = "", groupName = "", channel = "", startTime = -1.0,
                  timeLength = -1.0, dateTime = None, properties = {}):
                      
+        self.ID          = str(uuid.uuid1())
         self.groupName   = groupName
         self.channel     = channel
         self.name        = name

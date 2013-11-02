@@ -7,8 +7,11 @@ Created on Thu Oct 10 19:54:09 2013
 
 import sqlalchemy as sa
 import sys
+import pandas as pd
+import numpy as np
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import create_engine
+
 
 from spyndle.io import Session
 
@@ -22,7 +25,7 @@ Base = declarative_base()
 class TransientEvent(Base): 
     __tablename__       = "transientEvent"
     
-    no                  = sa.Column(sa.Integer, primary_key=True)
+    ID                  = sa.Column(sa.String, primary_key=True)
     psgNight            = sa.Column(sa.String, sa.ForeignKey("psgNight.fileName"))
     startTime           = sa.Column(sa.Float)
     duration            = sa.Column(sa.Float)
@@ -58,12 +61,11 @@ def buildTransientEvent(event, psgNight):
     slope               = float(event.properties["slope"]) if "slope" in event.properties else None
     filteredRMSamp      = float(event.properties["filteredRMSamp"]) if "filteredRMSamp" in event.properties else None
 
-    return TransientEvent(psgNight = psgNight, startTime = startTime, duration = duration, 
+    return TransientEvent(ID = event.ID, psgNight = psgNight, startTime = startTime, duration = duration, 
                           channelName = channelName, RMSamp = RMSamp, meanFreq = meanFreq,
                           stage = stage, cycle = cycle, slopeOrigin = slopeOrigin,
                           slope = slope, filteredRMSamp= filteredRMSamp, eventName=eventName)
          
-             
 class PSGNight(Base): 
     __tablename__       = "psgNight"
     
@@ -120,11 +122,13 @@ class SPF_propagation(Base):
 
 class Propagation(Base): 
     __tablename__       = "propagation"
+    __table_args__      = {'sqlite_autoincrement': True}
 
     no                  = sa.Column(sa.Integer, primary_key=True)
     
     # ID of the spindle from which this propagation has been computed.
-    spindleNo           = sa.Column(sa.Integer, sa.ForeignKey("transientEvent.no"))
+    spindleID           = sa.Column(sa.String, sa.ForeignKey("transientEvent.ID"))
+    propRelNo           = sa.Column(sa.Integer, sa.ForeignKey("propagationRelationship.no"))
     
     sourceChannelName   = sa.Column(sa.String, sa.ForeignKey("channel.name"))
     sinkChannelName     = sa.Column(sa.String, sa.ForeignKey("channel.name"))
@@ -134,7 +138,7 @@ class Propagation(Base):
     offset              = sa.Column(sa.Float)
     
     transientEvent      = sa.orm.relationship("TransientEvent", #backref="propagations")
-                                                primaryjoin='Propagation.spindleNo==TransientEvent.no',
+                                                primaryjoin='Propagation.spindleID==TransientEvent.ID',
                                                 lazy='joined')    
     
     
@@ -161,6 +165,10 @@ class Propagation(Base):
     inverted            = sa.Column(sa.Boolean)
 
 
+    def __repr__(self):
+        return str(self.__dict__)
+
+
     def __init__(self, *args, **kwargs):
 
         super(Propagation, self).__init__(*args, **kwargs)  # call parent class init        
@@ -176,13 +184,14 @@ class Propagation(Base):
         self.source     = -1
         self.inverted   = False
         
+        if self.propRelNo is None:
+            raise ValueError("The Propagation.propRelNo cannot be None.")
 
 
 
 
 
-
-        
+"""        
 class DynamicProperty(Base): 
     __tablename__       = "dynamicProperty"
 
@@ -199,7 +208,7 @@ class PropRelProperty(Base):
 
     def __repr__(self):
         return "{noPropRel:'%s', propertyName:'%s', value:'%s'}" % (self.noPropRel, self.propertyName, self.value)
-
+"""
 
 class PropagationRelationship(Base): 
     __tablename__       = "propagationRelationship"
@@ -216,8 +225,16 @@ class PropagationRelationship(Base):
     
     cutoff              = sa.Column(sa.Float)
     FDR                 = sa.Column(sa.Float)
-            
+    nbValid             = sa.Column(sa.Integer)
+    nbOut               = sa.Column(sa.Integer)
+    delay_mean          = sa.Column(sa.Float)
+    delay_sd            = sa.Column(sa.Float)
+    
+    isValidC3           = sa.Column(sa.Boolean)
+    isValidC4           = sa.Column(sa.Boolean)
+             
 
+    """
     def getDict(self, session):
         retDict = {"sourceChannelName":self.sourceChannelName,
                    "sinkChannelName":self.sinkChannelName,
@@ -244,7 +261,8 @@ class PropagationRelationship(Base):
             
         return retDict
                    
-                   
+    """
+    """          
     def update(self, session, row, behavior="raise"):
         
 
@@ -252,7 +270,7 @@ class PropagationRelationship(Base):
             for key in row:
                 if session.query(DynamicProperty).filter_by(name = key).count() == 0:
                     session.add(DynamicProperty(name=key, type=str(type(row[key])).split("'")[1]))                    
-                   
+    
                         
 
         no = session.query(PropagationRelationship)\
@@ -265,6 +283,24 @@ class PropagationRelationship(Base):
         
         session.add_all([PropRelProperty(noPropRel=no, propertyName=key, value=str(row[key])) for key in row]) 
         session.commit()
+    """
+    
+    def testRejectionC3(self, deltaWindow = 0.5, alphaSD = 0.2):
+        # Applying rejection criterion c3 and saving the result
+        sdThreshold = deltaWindow*alphaSD/np.sqrt(12)  
+        self.isValidC3 = self.delay_sd < sdThreshold
+
+           
+    def testRejectionC4(self, minNbValid=40):
+        # Applying rejection criterion c3 and saving the result
+        self.isValidC4 = self.nbValid >= minNbValid
+        
+
+    def getValidPropagations(self, session):
+        return session.query(Propagation).filter_by(propRelNo  = self.no,
+                                                    isFP       = False,
+                                                    isOutlier  = False).all()
+                    
 
 
     def add(self, session, behavior = "raise"):
@@ -279,19 +315,17 @@ class PropagationRelationship(Base):
                 raise
              
             session.rollback()
-            # updateSilently keep the same primaryKey. We could implement
-            # also replaceSilently which whould also change the primary key...
             if behavior == "updateSilently":
                 
-                session.query(PropagationRelationship)\
+                old = session.query(PropagationRelationship)\
                             .filter_by(sourceChannelName = self.sourceChannelName,
                                        sinkChannelName   = self.sinkChannelName,
                                        psgNight          = self.psgNight,
-                                       eventName         = self.eventName )\
-                            .update({"cutoff": self.cutoff,
-                                     "FDR"   : self.FDR})
-                session.commit()
-
+                                       eventName         = self.eventName ).one()
+                self.no = old.no
+                session.delete(old)
+                session.add(self)
+                session.flush()
 
             elif behavior == "failSilently":
                 pass
@@ -319,6 +353,27 @@ def clearDatabase(dbName):
     dbMng.connectDatabase(dbName)       
     dbMng.clearDatabase()
     dbMng.disconnectDatabase()
+
+
+
+
+
+# Change a set of rows obtained with session.query.all() in a pandas DataFrame 
+# object
+def rows2df(rows):
+    if len(rows) == 0:
+        return pd.DataFrame()
+    
+    d = {}
+    for column in rows[0].__table__.columns:
+        d[column.name] = [getattr(rows[0], column.name)]
+
+    for row in rows[1:]:
+        for column in row.__table__.columns:
+            d[column.name].append(getattr(row, column.name))
+
+    return pd.DataFrame(d)         
+
 
 
 
@@ -366,7 +421,16 @@ class DatabaseMng():
     def isConnected(self):
         return not self.session is None
         
+    def getTransientEvents(self, filteringDict={}, pandasFormat=False):
+        query = self.session.query(TransientEvent)
         
+        for key in filteringDict:
+            query = query.filter(getattr(TransientEvent, key) == filteringDict[key])
+
+        if pandasFormat:
+            return rows2df(query.all())
+        
+        return query.all()
     
         
 

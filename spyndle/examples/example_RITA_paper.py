@@ -37,15 +37,13 @@
 
 from spyndle.io import EDFReader, DatabaseMng
 from spyndle.detector import SpindleDectectorRMS
-from spyndle.propagation import computeXCST, SPFEvaluator, applyRejectionC3
+from spyndle.propagation import SPFEvaluator
 from spyndle.EEG import getAdjacentsPairs_10_20, plotArrowsBidirect, \
-    plotColorMap
+    plotColorMap, getActiveElectrodes
 
 from urllib import  urlretrieve,  ContentTooShortError
-from scipy import unique, array
-import pandas 
+from scipy import unique
 from datetime import datetime                                                  
-A = datetime.now()                                                             
 
 fileName        = "RITA_example.BDF"
 detectionStages = ["Sleep stage 2"]
@@ -55,86 +53,77 @@ print "Loading the data file from Internet. This may take some time, " \
       "the file is about 372 MB."
 url = "https://bitbucket.org/christian_oreilly/spyndle/"\
       "downloads/RITA_example.BDF"
-#try:
-#    urlretrieve(url, fileName)
-#except ContentTooShortError:
-#     print "The retreived file is shorter than expected. The download as "\
-#           "probably been interrupted"
-#     exit
-B = datetime.now()                                                             
-print B-A                                                                      
+
+"""
+t1 = datetime.now()                                                             
+try:
+    urlretrieve(url, fileName)
+except ContentTooShortError:
+     print "The retreived file is shorter than expected. The download as "\
+           "probably been interrupted"
+     exit
+t2 = datetime.now()                                                             
+print "Duration of data downloading : ", t2-t1                                                                      
+"""
+print "Creating a  database for recording final and intermediate results..."
+dbPath = "C:\\Python27\\Lib\\site-packages\\spyndle\\examples\\RITA.db"
+dbMng = DatabaseMng("sqlite:///" + dbPath)
+"""
+#channelList = ["fp1-ref", "fp2-ref"]############################################
 
 print "Reading the .bdf file..."
-#readerEDF    = EDFReader(fileName)
+readerEDF    = EDFReader(fileName)
 
 print "Detecting spindles..."
-#detector = SpindleDectectorRMS(readerEDF)
-#detector.setDetectionStages(detectionStages)
-#detector.detectSpindles()
-#detector.saveSpindle(readerEDF, eventName)
-C = datetime.now()                                                             
-print C-B                                                                      
+t1 = datetime.now()  
+detector = SpindleDectectorRMS(readerEDF)
+detector.setDetectionStages(detectionStages)
+detector.detectSpindles()#(channelList = channelList)    ########################
+detector.saveSpindle(readerEDF, eventName, dbSession=dbMng.session)
+t2 = datetime.now()                                                             
+print "Duration of spindle detection: ", t2-t1                                                                      
 
 
-dbMng = DatabaseMng("sqlite:///C:\\Python27\\Lib\\site-packages\\spyndle\\examples\\testPropagation.db")
-from spyndle.io.databaseMng import clearDatabase           ####################
-clearDatabase("sqlite:///C:\\Python27\\Lib\\site-packages\\spyndle\\examples\\testPropagation.db")                       ####################
+print "Plotting the results in result_example_a.png..."
+filteringDict = {"psgNight":fileName, "eventName":eventName}
+spindles = dbMng.getTransientEvents(filteringDict, pandasFormat=True)                       
+spindles["electrode"] = getActiveElectrodes(spindles["channelName"])
+medDat = spindles.groupby("electrode").median()
+plotColorMap(unique(spindles["electrode"]), medDat.duration, "example_a.png")
+"""
 
 
-
-channelLst = ["fp1-ref", "fp2-ref"]############################################
 evaluator = SPFEvaluator(fileName, eventName, dbSession = dbMng.session, verbose=True)
-                         
-
+"""                  
 print "Computing synchrone comparisons..."
-evaluator.computeXCST(EDFReader, offset=0.0,
-                      channelList = channelLst) ############################
-D = datetime.now()                                                             
-print D-C                                                                      
+t1 = datetime.now()  
+evaluator.computeXCST(EDFReader, offset=0.0)#,
+                      #channelList = channelList) ############################
+t2 = datetime.now()                                                              
+print "Duration of synchronous comparison computation: ", t2-t1                                                                     
 
 print "Computing asynchrone comparisons..."
-evaluator.computeXCST(EDFReader, offset=0.5,
-                      channelList = channelLst) ############################
-E = datetime.now()                                                             
-print E-D                                                                      
-
+t1 = datetime.now()  
+evaluator.computeXCST(EDFReader, offset=0.5)#,
+                      #channelList = channelList) ############################
+t2 = datetime.now()                                                           
+print "Duration of asynchronous comparison computation: ", t2-t1                                                                    
+"""
+t1 = datetime.now()  
 print "Computing SPFs..."
-evaluator.computeSPF()#addBehavior = "updateSilently")                   
-F = datetime.now()                                                             
-print F-E                                                                      
+#evaluator.computeSPF()#addBehavior = "updateSilently")                   
 
 print "Computing propagation averages..." 
-evaluator.computeAveragePropagation(aggeragationlevels = ["sourceChannelName", "sinkChannelName"],
-                  observationVariables = ["delay"])#["delay", "duration", "similarity"])
+#evaluator.computeAveragePropagation()
+t2 = datetime.now()                                                           
+print "Duration of spindle propagation field computation: ", t2-t1                                                                     
 
-
-
-#dbMng.get(listVariable, filterDict)
-#dbMng.get(["spindle.duration], filterDict)
-#dbMng.get(["propagation.delay], filterDict)
-#dbMng.getSpindles(filterDict)
-#evaluator.dbMng.getPropagations(filterDict)
-
-
-
-
-G = datetime.now()                                                             
-print G-F                                                                      
-
-
-#print "Plotting the results in result_example_a.png..."
-#
-#medData = dbMng.getSpindles(filterDict).groupby("sourceChannelName"]).median()
-#electrodes = array(medData.index, dtype=str)
-#plotColorMap(electrodes, medData.duration_mean, "result_example_a.png")
-                          
+  
 print "Plotting the results in result_example_b.png..."
-#propData = applyRejectionC3(propData)
+propagations = evaluator.getAveragePropagation(applyC3=True, applyC4=True)
+propagations["ref"] = getActiveElectrodes(propagations["sourceChannelName"])
+propagations["test"] = getActiveElectrodes(propagations["sinkChannelName"])
+adjPairs = getAdjacentsPairs_10_20(unique(propagations["ref"]))
+medDat = propagations.groupby(["ref", "test"]).median()["delay_mean"]
+plotArrowsBidirect(medDat, adjPairs, filename="example_b.png")
 
-print evaluator.getAveragePropagation()
-
-#adjPairs = getAdjacentsPairs_10_20(unique(medData.sourceChannelName))
-#medData  = dbMng.getPropagations(filterDict)\
-#                    .groupby(["sourceChannelName", "sinkChannelName"])\
-#                    .median()["delay_mean"]
-#plotArrowsBidirect(medData, adjPairs, filename="result_example_b.png")

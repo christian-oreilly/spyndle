@@ -21,7 +21,7 @@ from sqlalchemy import distinct, and_
 from spyndle.propagation import computeXCST
 from spyndle.EEG import getActiveElectrode
 from spyndle.io.databaseMng import PSGNight, Propagation, TransientEvent, \
-    DatabaseMng, PropagationRelationship, SPF, Channel
+    DatabaseMng, PropagationRelationship, SPF, Channel, rows2df
 
 
 
@@ -52,23 +52,6 @@ def getOutlierThresholds(data, coef=1.5):
     Q3   = percentile(data, 75.0)
     return Q1 - coef*(Q3-Q1), Q3 + coef*(Q3-Q1), 
 
-
-
-# Change a set of rows obtained with session.query.all() in a pandas DataFrame 
-# object
-def rows2df(rows):
-    if len(rows) == 0:
-        return pd.DataFrame()
-    
-    d = {}
-    for column in rows[0].__table__.columns:
-        d[column.name] = [getattr(rows[0], column.name)]
-
-    for row in rows[1:]:
-        for column in row.__table__.columns:
-            d[column.name].append(getattr(row, column.name))
-
-    return pd.DataFrame(d)         
 
 
 
@@ -132,9 +115,12 @@ class SPFEvaluator :
                             .join(TransientEvent, Channel.name == TransientEvent.channelName)\
                             .filter(and_(TransientEvent.psgNight == self.night,
                                          TransientEvent.eventName == self.eventName)).all()
-            channelList = list(zip(*channelList)[0])
-            
+            if len(channelList):
+                channelList = list(zip(*channelList)[0])
+            else:
+                raise UserWarning("No channel availables for computing SPFs.")
     
+
         # Computing cutoff threshold from asychronized comparisons
         if self.verbose :
             print "Computing cutoff for night ", self.night
@@ -149,7 +135,7 @@ class SPFEvaluator :
         if self.verbose: 
             print "Correcting negative delays"   
         self.negativeDelayCorrection()    
-    
+
         # COMPUTING SPINDLE PROPAGATION FIELD      
         if self.verbose: 
             print "Identifying SPF" 
@@ -170,7 +156,7 @@ class SPFEvaluator :
     
         # Getting all the records for the night
         nightQuery = self.session.query(Propagation.similarity)\
-                                        .join(TransientEvent, TransientEvent.no == Propagation.spindleNo)\
+                                        .join(TransientEvent, TransientEvent.ID == Propagation.spindleID)\
                                         .filter(and_(TransientEvent.psgNight == self.night,
                                                      TransientEvent.eventName == self.eventName))         
         
@@ -187,16 +173,13 @@ class SPFEvaluator :
                 similarities = testQuery.filter(Propagation.sourceChannelName==refChannel).all()   
                 
                 if len(similarities):
-                    cutoff = percentile(similarities, 100-alpha)
+                    propRel = self.session.query(PropagationRelationship)\
+                                                    .filter_by(psgNight          = self.night,
+                                                               eventName         = self.eventName,
+                                                               sourceChannelName = refChannel,
+                                                               sinkChannelName   = testChannel).one()                      
                     
-                    propRel = PropagationRelationship(sinkChannelName    = testChannel, 
-                                                      sourceChannelName  = refChannel, 
-                                                      psgNight           = self.night,
-                                                      cutoff             = cutoff,
-                                                      eventName          = self.eventName)
-                                                      
-                    propRel.add(self.session, self.addBehavior)
-
+                    propRel.cutoff = percentile(similarities, 100-alpha)
           
             
     
@@ -205,10 +188,11 @@ class SPFEvaluator :
     ###########################################################################
     
     def propagationRejection(self, channelList, alpha):        
+
     
         # Getting all the records for the night
         nightQueryProp   = self.session.query(Propagation)\
-                                        .join(TransientEvent, TransientEvent.no == Propagation.spindleNo)\
+                                        .join(TransientEvent, TransientEvent.ID == Propagation.spindleID)\
                                         .filter(TransientEvent.psgNight == self.night)\
                                         .filter(TransientEvent.eventName == self.eventName)
         
@@ -228,9 +212,8 @@ class SPFEvaluator :
             
             for refChannel in channelList:
                 if testChannel == refChannel:
-                    pass
-                
-
+                    continue
+            
                 propRel = testQueryCutoff.filter(PropagationRelationship.sourceChannelName==refChannel).all()                   
 
                 # Cutoff should be either equal to a float or to []
@@ -249,8 +232,7 @@ class SPFEvaluator :
     
                 testRefQueryProp = testQueryProp.filter(Propagation.sourceChannelName==refChannel)         
                 validQuery       = testRefQueryProp.filter(Propagation.similarity >= cutoff)                
-                
-                
+                            
                 # Rejection because of a too low similarity                                                                                   
                 N      = testRefQueryProp.count()
                 Nvalid = validQuery.count()                 
@@ -263,11 +245,21 @@ class SPFEvaluator :
                 outlierMin, outlierMax = getOutlierThresholds([prop.delay for prop in validQuery.all()])
                 
                 #print validQuery.all()
+                nbOut   = 0
+                nbValid = 0
                 for prop in validQuery.all(): 
                     prop.isFP       = False
                     prop.isOutlier  = prop.delay < outlierMin or  prop.delay > outlierMax
+                    
+                    if prop.isOutlier:
+                        nbOut   += 1
+                    else:
+                        nbValid += 1                        
 
-        
+                propRel.nbValid = nbValid    
+                propRel.nbOut   = nbOut
+                self.session.flush()
+
         self.session.commit()
         
 
@@ -358,17 +350,20 @@ class SPFEvaluator :
         #######################################################################
         # START OF THE FUNCTION BODY
             
+        from datetime import datetime 
+        print datetime.now()
         # Getting all the records for the night
         nightQueryProp_unsorted   = self.session.query(Propagation)\
-                                        .join(TransientEvent, TransientEvent.no == Propagation.spindleNo)\
-                                        .filter(TransientEvent.psgNight == self.night)        
+                                        .join(TransientEvent, TransientEvent.ID == Propagation.spindleID)\
+                                        .filter(TransientEvent.psgNight == self.night)\
+                                        .filter(TransientEvent.eventName == self.eventName)\
+                                        .filter(Propagation.isFP == False)\
+                                        .filter(Propagation.isOutlier == False)     
 
         nightQueryProp   = nightQueryProp_unsorted.order_by(TransientEvent.startTime)           
 
-
-            
         props = nightQueryProp.all()     
-        
+
         sources  = array([prop.sourceChannelName for prop in props], dtype=str)
         sinks = array([prop.sinkChannelName for prop in props], dtype=str)
 
@@ -387,6 +382,7 @@ class SPFEvaluator :
           if Window >= N:
               break
 
+        print datetime.now()
         
         for noRow in range(N):
             #if mod(noRow, 1000) == 0:
@@ -447,17 +443,18 @@ class SPFEvaluator :
                     props[indBidir].bidirect = noRow  
     
     
-        self.session.commit()    
+        self.session.flush()    
+        print datetime.now()
        
        
         # SQLAlchemy do not allow to perform Query.update() when order_by() has 
         # been called. Thus, for the following part we ue unsorted data.
-
+        """
         DataSourceM1 = nightQueryProp_unsorted.filter(Propagation.source == -1) 
         dataTmp = set(((prop.transientEvent.startTime, prop.sourceChannelName) for prop in DataSourceM1.all() ))
         SPFs = [SPF(psgNight = self.night)]*len(dataTmp)
         self.session.add_all(SPFs)
-        self.session.commit()    
+        self.session.flush()    
         
         for aSPF, (startTime, ref) in zip(SPFs, dataTmp) :
             props = DataSourceM1\
@@ -473,7 +470,8 @@ class SPFEvaluator :
             #                 Propagation.sourceChannelName == ref))\
             #    .update({Propagation.noSPF: aSPF.no})
 
-        self.session.commit()    
+        self.session.flush()    
+        print datetime.now()
                 
     
         whileQuery = nightQueryProp_unsorted.filter(Propagation.noSPF == -1)
@@ -481,8 +479,9 @@ class SPFEvaluator :
             for prop in whileQuery.all():   
                 prop.noSPF = nightQueryProp_unsorted.filter(Propagation.no == prop.source).one().noSPF            
             whileQuery = nightQueryProp_unsorted.filter(Propagation.noSPF == -1)
-
+        """
         self.session.commit()
+        print datetime.now()
                
            
     
@@ -526,7 +525,8 @@ class SPFEvaluator :
     """
       Compute robust central tendencies of observationVariables, aggregated at 
       aggeragationlevels.
-    """            
+    """         
+    """
     def computeAveragePropagation(self, aggeragationlevels, observationVariables, minNbValid=40):
     
         def computeCellAverages(data, observationVariables, 
@@ -585,7 +585,7 @@ class SPFEvaluator :
 
 
         query = self.session.query(Propagation)\
-                        .join(TransientEvent, TransientEvent.no == Propagation.spindleNo)\
+                        .join(TransientEvent, TransientEvent.ID == Propagation.spindleID)\
                         .filter(and_(TransientEvent.psgNight  == self.night,
                                      TransientEvent.eventName == self.eventName,  
                                      Propagation.isFP == False,
@@ -608,13 +608,66 @@ class SPFEvaluator :
             del row["night"]
 
             propRel.update(self.session, row, behavior="addMissingFields")
-        
+    """  
 
-    def getAveragePropagation(self):
+
+
+
+    """
+      Compute robust central tendencies of observationVariables, aggregated at 
+      aggeragationlevels.
+    """            
+    def computeAveragePropagation(self, deltaWindow = 0.5, alphaSD = 0.2, minNbValid=40):
+    
         propRels = self.session.query(PropagationRelationship)\
+                                        .filter_by(psgNight  = self.night,
+                                                   eventName = self.eventName).all() 
+
+        for propRel in propRels:
+            
+            if propRel.nbValid >= 2 :
+                try:
+                    props   = propRel.getValidPropagations(self.session)
+                    delays  = [prop.delay for prop in props]
+                    covX    = MinCovDet().fit(array(delays))
+                    meanX   = covX.location_[0]
+                    sdX     = sqrt(covX.covariance_[0, 0])
+                except ValueError:
+                    # When the spindle detection resulted in discretized values
+                    # of spindle characteristics, the distribution of the variable
+                    # might not be acceptable for MCD algorithm which craches
+                    # with a "ValueError: expected square matrix" error. In these
+                    # time we fall back to simple statistics. 
+                    meanX   = median(delays)
+                    sdX     = std(delays)                        
+            else:
+                meanX   = nan
+                sdX     = nan     
+            
+            propRel.delay_mean = meanX
+            propRel.delay_sd   = sdX
+            
+            propRel.testRejectionC3(deltaWindow, alphaSD)
+            propRel.testRejectionC4(minNbValid)
+                  
+        self.session.commit()
+
+
+
+
+    def getAveragePropagation(self, applyC3=True, applyC4=True):
+        query = self.session.query(PropagationRelationship)\
                         .filter_by(psgNight  = self.night,
-                                   eventName = self.eventName).all()                   
+                                   eventName = self.eventName)                  
         
+        if applyC3:
+            query = query.filter_by(isValidC3 = True)
+        if applyC4:
+            query = query.filter_by(isValidC4 = True)
+        
+        return rows2df(query.all())
+        
+        """
         import collections
         result = collections.defaultdict(list)
         for d in [propRel.getDict(self.session) for propRel in propRels]:
@@ -622,6 +675,17 @@ class SPFEvaluator :
                 result[k].append(v)
                 
         return pd.DataFrame(result)
+        """
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     
     
     """
@@ -673,9 +737,5 @@ class SPFEvaluator :
 
 
             
-           
-def applyRejectionC3(data, deltaWindow = 0.5, alphaSD = 0.2):
-    # Applying rejection criterion c3 and saving the result
-    sdThreshold = deltaWindow*alphaSD/sqrt(12)  
-    return data.iloc[where(data["delay_sd"] < sdThreshold)[0]]
+
     

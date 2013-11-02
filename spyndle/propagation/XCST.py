@@ -59,7 +59,8 @@ import sqlalchemy
 
 from spyndle import diff2
 from spyndle import computeMST
-from spyndle.io.databaseMng import PSGNight, Propagation, TransientEvent, Channel, buildTransientEvent, DatabaseMng
+from spyndle.io.databaseMng import PSGNight, Propagation, TransientEvent, \
+    Channel, buildTransientEvent, DatabaseMng, PropagationRelationship
 from spyndle.EEG.system10_20 import getEEGChannels
 
 # Computation of the 2D cross-corellation of S-Transform spectra as described 
@@ -145,16 +146,30 @@ def computeXCST(readerClass, fileName, eventName, channelList=None, dbSession=No
     
 
     ################# ADD THE SPINDLE INFORMATION #############################       
-    if len(dbSession.query(PSGNight).filter_by(fileName=fileName).all()) == 0:
+    #if len(dbSession.query(PSGNight).filter_by(fileName=fileName).all()) == 0:
         dbSession.add(PSGNight(fileName=fileName))
         
     for channel in channelList:
         if len(dbSession.query(Channel).filter_by(name=channel).all()) == 0:
             dbSession.add(Channel(name=channel))        
         
-    dbSession.add_all([buildTransientEvent(e, fileName) for e in reader.events if e.name == eventName])
-    dbSession.commit()
-    
+    #dbSession.add_all([buildTransientEvent(e, fileName) for e in reader.events if e.name == eventName])
+
+    propRelNos = {}
+    for ref in channelList:
+        for test in channelList:
+            if ref != test:            
+                propRel = PropagationRelationship(sinkChannelName    = test, 
+                                                  sourceChannelName  = ref, 
+                                                  psgNight           = fileName,
+                                                  eventName          = eventName)
+                                                  
+                # Add the propagation relationship only if it does not already
+                # exist.
+                propRel.add(dbSession, behavior = "updateSilently")
+                propRelNos[ref + test] = propRel.no
+
+    dbSession.commit()    
     
     ################ PROCESSING PROPAGATION FOR EVERY CHANNEL #################        
     for refChannel in channelList:        
@@ -347,9 +362,9 @@ def computeXCST(readerClass, fileName, eventName, channelList=None, dbSession=No
                                         
                     assert(abs(maxDeltay) <= delta)
                     
-                    dbSession.add(Propagation(spindleNo=event.no, sinkChannelName=testChannel, sourceChannelName=refChannel,
+                    dbSession.add(Propagation(spindleID=event.ID, sinkChannelName=testChannel, sourceChannelName=refChannel,
                                             similarity=maxCrosscor, delay=maxDeltay,
-                                            offset=offset))
+                                            offset=offset, propRelNo = propRelNos[refChannel + testChannel]))
                     
         dbSession.commit()
         
