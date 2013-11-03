@@ -1,27 +1,65 @@
 # -*- coding: utf-8 -*-
+
 """
-Created on Mon Jun 10 14:06:58 2013
+    Module implementing the computation of the spindle propagation files (SPF)
+    as defined in [1, 2].
 
-@author: REVESTECH
+    Copyright (C) 2012-2013  Christian O'Reilly
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+
+    For personnal, educationnal, and research purpose, this software is 
+    provided under the GNU GPL (V.3) license: you can redistribute it and/or
+    modify it under the terms of the version 3 of the GNU General Public 
+    License as published by the Free Software Foundation.
+          
+    To use this software in commercial application, please contact the author. 
+    If used for research purpose, the reference [1, 2] should  be cited in the 
+    derived publication to refere the reader to the description of the 
+    methodology.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+ Author: Christian O'Reilly (christian.oreilly@umontreal.ca)
+ Date  : Jun 10, 2013
+
+ [1] O’Reilly, C., & Nielsen, T. (2013). Assessing the propagation of EEG 
+     transient activity, Proceedings of the 8th International Workshop on 
+     Systems, Signal Processing and their Applications, Algiers, Algeria, 
+     12-15 May 2013, 132-139.
+ [2] O'Reilly, C. & Nielsen, T. (2013) Assessing EEG sleep spindle propagation. 
+     Part 1: Theory and proposed methodology, Submitted to Journal of 
+     Neuroscience Methods. doi: 10.1016/j.jneumeth.2013.08.013
+ [3] O'Reilly, C. & Nielsen, T. (2013) Assessing EEG sleep spindle propagation. 
+     Part 2: Experimental characterization, Submitted to Journal of 
+     Neuroscience Methods. doi: 10.1016/j.jneumeth.2013.08.014    
 """
 
 
-import re
-
-from pandas import DataFrame, read_csv
-from glob import glob
-from scipy import unique, where, percentile, concatenate, array, arange
-from scipy import isnan, sqrt, nan, logical_not, reshape, median, std
+###############################################################################
+# IMPORTS
+###############################################################################
+from scipy import unique, where, percentile, concatenate, array
+from scipy import sqrt, nan, median, std
 from sklearn.covariance import MinCovDet
 from numpy import in1d
-import pandas as pd
 import sqlalchemy
 from sqlalchemy import distinct, and_
 
 from spyndle.propagation import computeXCST
-from spyndle.EEG import getActiveElectrode
-from spyndle.io.databaseMng import PSGNight, Propagation, TransientEvent, \
-    DatabaseMng, PropagationRelationship, SPF, Channel, rows2df
+from spyndle.io import Propagation, TransientEvent, \
+    DatabaseMng, PropagationRelationship, Channel, rows2df
 
 
 

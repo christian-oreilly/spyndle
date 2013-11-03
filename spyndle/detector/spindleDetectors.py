@@ -33,12 +33,13 @@
 
 """
 
-import os, gc, copy, numpy
+import os, gc, copy
 
 from abc import ABCMeta, abstractmethod
 import numpy as np
 import warnings
 import bisect
+import serpent
 
 from scipy import concatenate, zeros, mean, sqrt, mod, diff, where, fft
 from scipy import array, arange, ones, unique
@@ -47,15 +48,18 @@ from scipy.fftpack import fftfreq
 from scipy.io import savemat, loadmat
 from scipy.integrate import trapz
 
-from datetime import timedelta
+from datetime import timedelta, datetime
 
-from spyndle import Filter
+from spyndle import Filter, __version__
 from spyndle import cycleDefinitions, computeDreamCycles
 from spyndle import computeST
-from spyndle.io import EEGDBReaderBase, Event
 from spyndle.errorMng import ErrPureVirtualCall
 from spyndle.EEG import getEEGChannels
-from spyndle.io.databaseMng import buildTransientEvent
+from spyndle.io import EEGDBReaderBase, Event, DataManipulationProcess, \
+    PSGNight, Channel, TransientEvent
+
+
+
 
 # Class representing a detected spindle.
 class DetectedSpindle:
@@ -158,6 +162,9 @@ class SpindleDectector:
     __metaclass__ = ABCMeta    
     
     def __init__(self, reader=None, usePickled=False):
+
+        self.__spyndle_version = __version__
+
         ###############################################################################
         # Detection patameters
         ###############################################################################
@@ -205,7 +212,14 @@ class SpindleDectector:
         self.computeFreq        = False       
         self.computeSlopeFreq   = False
         
-
+        
+        
+    def __repr__(self):
+        # serpent does not manage a whole lot of types such as numpy types. 
+        # It look premature to use it for now.
+        #return serpent.dumps(self, indent=False, set_literals=False)
+        # TODO: Improve on this representation...
+        return str(self.__dict__)
 
     def setReader(self, reader):
         self.reader = reader
@@ -352,7 +366,18 @@ class SpindleDectector:
     # Used to save detected spindle in EEG data file. 
     def saveSpindle(self, reader, eventName, 
                     eventGroupName="Spindle", fileName = None, dbSession=None):
-               
+              
+        if dbSession :
+            dataManipObj = DataManipulationProcess(reprStr  = repr(self))
+            dbSession.add(dataManipObj)                         
+              
+            if dbSession.query(PSGNight).filter_by(fileName=reader.fileName).count() == 0:
+                dbSession.add(PSGNight(fileName=reader.fileName))
+                
+            for channel in unique([e.channel for e in self.detectedSpindles]):
+                if dbSession.query(Channel).filter_by(name=channel).count() == 0:
+                    dbSession.add(Channel(name=channel))                  
+    
                
         for spindle in self.detectedSpindles:    
             event = Event(name          = eventName, 
@@ -371,7 +396,7 @@ class SpindleDectector:
             reader.addEvent(event)
 
             if dbSession :
-                dbSession.add(buildTransientEvent(event, reader.fileName))
+                dbSession.add(TransientEvent.fromEvent(event, reader.fileName))
 
         if dbSession :
             dbSession.commit()
@@ -382,7 +407,7 @@ class SpindleDectector:
             reader.saveAs(fileName)  
         
 
-    # Used to save detected spindle in EEG data file. 
+    # Save detected spindle in EEG data file. 
     def saveSpindleTxt(self, fileName):
 
         try:
@@ -425,7 +450,7 @@ class SpindleDectector:
    
             X, fX = computeST(sig, fs, fmin=self.lowFreq-1, fmax=self.highFreq+1)  
             
-            Y = abs(numpy.transpose(X))
+            Y = abs(np.transpose(X))
                             
             regx = arange(len(sig))/fs
             regy = []
@@ -438,15 +463,19 @@ class SpindleDectector:
                 print channelTime[startInd:stopInd]
                 raise
 
-            z = numpy.polyfit(regx, regy, deg=1)     
+            z = np.polyfit(regx, regy, deg=1)     
 
             spindle.slopeOrigin = z[1]
             spindle.slope       = z[0]
  
 
 
-
-
+"""
+ All spindle detector based on using some variable bearing information on
+ spindle presence can be thought using a same general framework. This class
+ implement this general framework. Threshold-based detector can be implemented
+ by subclassing this classe.
+"""
 class SpindleDectectorThreshold(SpindleDectector):
     __metaclass__ = ABCMeta    
         
@@ -772,7 +801,7 @@ class SpindleDectectorRMS(SpindleDectectorThreshold):
         # rank based statistics (such as quatiles) will give exactly the same
         # result. We use the numpy implementation of abs() because it is the
         # faster alternative.
-        return self.averaging(numpy.abs(signal), windowNbSample)
+        return self.averaging(np.abs(signal), windowNbSample)
     
     
     

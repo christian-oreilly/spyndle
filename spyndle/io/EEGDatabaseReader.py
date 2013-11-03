@@ -454,16 +454,32 @@ class RecordedChannel:
         
         
         
-"""        
+
+"""
+class EventGroup:
+    
+    def __init__():
+                     
+        self.groupName   = groupName
+        self.color       = "black"
+"""
+
+
+@total_ordering
+class Event:
+    """      
+    Abstract class representing an EEG event.    
+    
+    Note:   
     In order to facilitate the cross-operation of readers for multiple data
     format, some event names and group names are standerdized. It is to the
     specific reader to ensure that data format using differents names transale
     them in correct standerdized designation if these events are to be 
     recognize correctly by other classes, such as detectors. 
-    
+        
     Standard group names : 
         Stage : For all events used in sleep stage scoring.
-
+    
     Standard names: (these are compatible with http://www.edfplus.info/specs/edftexts.html#annotations)
         Sleep stage 1
         Sleep stage 2
@@ -476,20 +492,9 @@ class RecordedChannel:
         Sleep stage N1 	
         Sleep stage N2 	
         Sleep stage N3
-"""    
-
-
-class EventGroup:
+    """    
     
-    def __init__():
-                     
-        self.groupName   = groupName
-        self.color       = "black"
-
-
-
-@total_ordering
-class Event:
+    
     __metaclass__ = ABCMeta
     
     def __init__(self, name = "", groupName = "", channel = "", startTime = -1.0,
@@ -525,8 +530,8 @@ class Event:
                 + " " + str(self.name) + " " + str(self.startTime) + " " + str(self.timeLength))
 
 
-    def __eq__(self, other): 
-        return self.__dict__ == other.__dict__
+    #def __eq__(self, other): 
+    #    return self.__dict__ == other.__dict__
 
 
     def getXml(self):

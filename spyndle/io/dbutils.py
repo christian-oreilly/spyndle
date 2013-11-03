@@ -1,8 +1,7 @@
-# __init__.py
 # -*- coding: utf-8 -*-
 
 """
-    Initialization of the spyndle.io module.
+    Module implementing database interaction utilitary functions.
     
     Copyright (C) 2013  Christian O'Reilly
 
@@ -31,31 +30,23 @@
 """
 
 
-import sqlalchemy as sa
-import sqlalchemy.ext.declarative as sad
-
-# Getting an SQLAchemy base class
-Base    = sad.declarative_base()
-
-# Getting an SQLAchemy session factory
-Session = sa.orm.sessionmaker()    
+import pandas as pd
 
 
-# Reader base
-from spyndle.io.EEGDatabaseReader import Event, RecordedChannel, \
-    EEGDBReaderBase, EventList
+def rows2df(rows):
+    """
+    Convert a set of rows obtained with session.query.all() in a pandas DataFrame 
+    object.
+    """     
+    if len(rows) == 0:
+        return pd.DataFrame()
     
-# Readers
-from spyndle.io.edf import EDFReader
-from spyndle.io.harmonie import HarmonieReader
-from spyndle.io.devuyst import DevuystReader
+    d = {}
+    for column in rows[0].__table__.columns:
+        d[column.name] = [getattr(rows[0], column.name)]
 
-# Database management
-from spyndle.io.dbutils import rows2df
-from spyndle.io.dataModel import DataModelMng, TransientEvent, PSGNight, \
-    Channel, SPF, Propagation, EventClass, DataManipulationProcess, \
-    PropagationRelationship
-from spyndle.io.databaseMng import DatabaseMng, clearDatabase
+    for row in rows[1:]:
+        for column in row.__table__.columns:
+            d[column.name].append(getattr(row, column.name))
 
-    
-    
+    return pd.DataFrame(d)         

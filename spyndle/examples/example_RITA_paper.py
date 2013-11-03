@@ -54,7 +54,7 @@ print "Loading the data file from Internet. This may take some time, " \
 url = "https://bitbucket.org/christian_oreilly/spyndle/"\
       "downloads/RITA_example.BDF"
 
-"""
+
 t1 = datetime.now()                                                             
 try:
     urlretrieve(url, fileName)
@@ -64,12 +64,10 @@ except ContentTooShortError:
      exit
 t2 = datetime.now()                                                             
 print "Duration of data downloading : ", t2-t1                                                                      
-"""
+
 print "Creating a  database for recording final and intermediate results..."
 dbPath = "C:\\Python27\\Lib\\site-packages\\spyndle\\examples\\RITA.db"
 dbMng = DatabaseMng("sqlite:///" + dbPath)
-"""
-#channelList = ["fp1-ref", "fp2-ref"]############################################
 
 print "Reading the .bdf file..."
 readerEDF    = EDFReader(fileName)
@@ -78,7 +76,7 @@ print "Detecting spindles..."
 t1 = datetime.now()  
 detector = SpindleDectectorRMS(readerEDF)
 detector.setDetectionStages(detectionStages)
-detector.detectSpindles()#(channelList = channelList)    ########################
+detector.detectSpindles()
 detector.saveSpindle(readerEDF, eventName, dbSession=dbMng.session)
 t2 = datetime.now()                                                             
 print "Duration of spindle detection: ", t2-t1                                                                      
@@ -90,31 +88,29 @@ spindles = dbMng.getTransientEvents(filteringDict, pandasFormat=True)
 spindles["electrode"] = getActiveElectrodes(spindles["channelName"])
 medDat = spindles.groupby("electrode").median()
 plotColorMap(unique(spindles["electrode"]), medDat.duration, "example_a.png")
-"""
+
 
 
 evaluator = SPFEvaluator(fileName, eventName, dbSession = dbMng.session, verbose=True)
-"""                  
+               
 print "Computing synchrone comparisons..."
 t1 = datetime.now()  
-evaluator.computeXCST(EDFReader, offset=0.0)#,
-                      #channelList = channelList) ############################
+evaluator.computeXCST(EDFReader, offset=0.0)
 t2 = datetime.now()                                                              
 print "Duration of synchronous comparison computation: ", t2-t1                                                                     
 
 print "Computing asynchrone comparisons..."
 t1 = datetime.now()  
-evaluator.computeXCST(EDFReader, offset=0.5)#,
-                      #channelList = channelList) ############################
+evaluator.computeXCST(EDFReader, offset=0.5)
 t2 = datetime.now()                                                           
 print "Duration of asynchronous comparison computation: ", t2-t1                                                                    
-"""
+
 t1 = datetime.now()  
 print "Computing SPFs..."
-#evaluator.computeSPF()#addBehavior = "updateSilently")                   
+evaluator.computeSPF()            
 
 print "Computing propagation averages..." 
-#evaluator.computeAveragePropagation()
+evaluator.computeAveragePropagation()
 t2 = datetime.now()                                                           
 print "Duration of spindle propagation field computation: ", t2-t1                                                                     
 
