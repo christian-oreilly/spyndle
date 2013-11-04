@@ -106,13 +106,13 @@ print "Computing SPFs..."
 evaluator.computeSPF()            
 
 print "Computing propagation averages..." 
-evaluator.computeAveragePropagation()
+evaluator.computeAveragePropagation(minNbValid=20)
 t2 = datetime.now()                                                           
 print "Duration of spindle propagation field computation: ", t2-t1                                                                     
 
-  
 print "Plotting the results in result_example_b.png..."
 propagations = evaluator.getAveragePropagation(applyC3=True, applyC4=True)
+print propagations
 propagations["ref"] = getActiveElectrodes(propagations["sourceChannelName"])
 propagations["test"] = getActiveElectrodes(propagations["sinkChannelName"])
 adjPairs = getAdjacentsPairs_10_20(unique(propagations["ref"]))
