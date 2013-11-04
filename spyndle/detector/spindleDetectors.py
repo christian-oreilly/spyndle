@@ -763,7 +763,7 @@ class SpindleDectectorRMS(SpindleDectectorThreshold):
         ###############################################################################
     
         # Quantile of spindle amplitude used to determine spindle activity
-        self.threshold = 0.925
+        self.threshold = 0.95
 
         # Width of the window used to computer the RMS amplitude.
         ### Choosing such that it always encompass at least two cycles of the 
