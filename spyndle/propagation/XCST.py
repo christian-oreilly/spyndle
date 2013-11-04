@@ -93,10 +93,10 @@ def computeXCST(readerClass, fileName, eventName, dbSession=None,
     Note: This function returns nothing. Computation results are stored in an
     SQL database which can be chosen by setting the dbSession parameter or 
     that is an in-memory sqlite database.
-    """                    
+    """                  
     evaluator = XCSTEvaluator(eventName, verbose)        
     evaluator.createEEGReader(fileName, readerClass)
-    evaluator.prepareDatabase(dbSession)
+    evaluator.prepareDatabase(dbSession)   
     evaluator.compute(**kwargs)
             
             
@@ -179,28 +179,6 @@ class XCSTEvaluator:
     @staticmethod        
     def intTrapz(X, axis=0) : 
         return np.trapz(X, axis=0)
-
-
-    ######################################################################
-    # Setting default values for parameters of the algorithm
-    delta              = 0.5 
-    beforePad          = 0.5 
-    afterPad           = 0.5 
-    artifactPad        = 0.25 
-    offset             = 0.0 
-    similIndexType     = "inf" 
-    intFct             = intSum    
-  
-    # Setting default values for other attributes.
-    __spyndle_version  = __version__       
-    propRelNos         = {}
-    channelList        = []     
-    reader             = None
-    dbSession          = None
-    dbMng              = None
-    dataManipObj       = None    
-    
-
   
   
 
@@ -216,6 +194,27 @@ class XCSTEvaluator:
         """                            
         self.eventName          = eventName    
         self.verbose            = verbose
+    
+        ######################################################################
+        # Setting default values for parameters of the algorithm
+        self.delta              = 0.5 
+        self.beforePad          = 0.5 
+        self.afterPad           = 0.5 
+        self.artifactPad        = 0.25 
+        self.offset             = 0.0 
+        self.similIndexType     = "inf" 
+        self.intFct             = XCSTEvaluator.intSum    
+      
+        # Setting default values for other attributes.
+        self.__spyndle_version  = __version__       
+        self.propRelNos         = {}
+        self.channelList        = []     
+        self.reader             = None
+        self.dbSession          = None
+        self.dbMng              = None
+        self.dataManipObj       = None    
+
+
 
 
         
@@ -368,7 +367,6 @@ class XCSTEvaluator:
             else:
                 ValueError("The keyword " + str(key) + " is unknown.") 
   
-
         events = self.dbSession.query(TransientEvent)\
                         .filter(TransientEvent.channelName.in_(self.channelList),
                                 TransientEvent.psgNight  == self.fileName,

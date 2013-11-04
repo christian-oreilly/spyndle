@@ -134,7 +134,6 @@ class SPFEvaluator :
       of XCST when performed in for SPF computation.
     """
     def computeXCST(self, readerClass, **kwargs) :  
-      
         computeXCST(readerClass, self.night, self.eventName, 
                     dbSession=self.session, verbose=self.verbose, **kwargs) 
 
@@ -198,9 +197,8 @@ class SPFEvaluator :
                                         .filter(and_(TransientEvent.psgNight == self.night,
                                                      TransientEvent.eventName == self.eventName))         
         
-        
         # Keeping only offset records        
-        nightQuery = nightQuery.filter(Propagation.offset != 0.0)     
+        nightQuery = nightQuery.filter(Propagation.offset != 0.0)    
 
         for testChannel in channelList :  
             testQuery = nightQuery.filter(Propagation.sinkChannelName==testChannel)    
@@ -208,7 +206,7 @@ class SPFEvaluator :
                 if testChannel == refChannel:
                     continue
 
-                similarities = testQuery.filter(Propagation.sourceChannelName==refChannel).all()   
+                similarities = testQuery.filter(Propagation.sourceChannelName==refChannel).all()       
 
                 propRel = self.session.query(PropagationRelationship)\
                                                 .filter_by(psgNight          = self.night,
@@ -269,7 +267,7 @@ class SPFEvaluator :
                     raise TypeError("propRel = " + str(propRel) + " with type" + str(type(propRel)))                                       
     
                 cutoff = propRel.cutoff
-                testRefQueryProp = testQueryProp.filter(Propagation.sourceChannelName==refChannel)         
+                testRefQueryProp = testQueryProp.filter(Propagation.sourceChannelName==refChannel)   
                 validQuery       = testRefQueryProp.filter(Propagation.similarity >= cutoff)                
                             
                 # Rejection because of a too low similarity                                                                                   
@@ -279,11 +277,10 @@ class SPFEvaluator :
                     continue
                 
                 # Expected false detection rate
-                propRel.FDR = (alpha/100.0)/(float(Nvalid)/float(N))                
+                propRel.FDR = (alpha/100.0)/(float(Nvalid)/float(N))            
                 
                 outlierMin, outlierMax = getOutlierThresholds([prop.delay for prop in validQuery.all()])
                 
-                #print validQuery.all()
                 nbOut   = 0
                 nbValid = 0
                 for prop in validQuery.all(): 
@@ -388,9 +385,7 @@ class SPFEvaluator :
 
         #######################################################################
         # START OF THE FUNCTION BODY
-            
-        from datetime import datetime 
-        print datetime.now()
+
         # Getting all the records for the night
         nightQueryProp_unsorted   = self.session.query(Propagation)\
                                         .join(TransientEvent, TransientEvent.ID == Propagation.transientEventID)\
@@ -421,11 +416,7 @@ class SPFEvaluator :
           if Window >= N:
               break
 
-        print datetime.now()
-        
         for noRow in range(N):
-            #if mod(noRow, 1000) == 0:
-            #    print noRow, N
             
             rowBiDir = props[noRow].bidirect        
             if rowBiDir > -1 :
@@ -483,7 +474,6 @@ class SPFEvaluator :
     
     
         self.session.flush()    
-        print datetime.now()
        
        
         # SQLAlchemy do not allow to perform Query.update() when order_by() has 
@@ -520,7 +510,6 @@ class SPFEvaluator :
             whileQuery = nightQueryProp_unsorted.filter(Propagation.noSPF == -1)
         """
         self.session.commit()
-        print datetime.now()
                
            
     

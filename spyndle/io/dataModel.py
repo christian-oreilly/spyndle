@@ -374,7 +374,11 @@ class PropagationRelationship(Base):
     isValidC3           = sa.Column(sa.Boolean)
     isValidC4           = sa.Column(sa.Boolean)
              
-    
+    def __repr__(self):
+        """
+        Propagation representative string. 
+        """        
+        return str(self.__dict__)    
 
     def testRejectionC3(self, deltaWindow = 0.5, alphaSD = 0.2):
         """
