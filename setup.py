@@ -8,7 +8,7 @@ AUTHOR = "Christian O'Reilly"
 AUTHOR_EMAIL = "christian.oreilly@umontreal.ca"
 VERSION = __import__(PACKAGE).__version__
 URL = "https://bitbucket.org/christian_oreilly/spyndle/"
-#DOWNLOAD_URL = URL + "downloads/" + NAME + "-" + VERSION + ".zip"
+DOWNLOAD_URL = URL + "downloads/" + NAME + "-" + VERSION + ".zip"
 
 
 def is_package(path):
@@ -46,7 +46,25 @@ setup(
     long_description=open("README.txt").read(),
     author=AUTHOR,
     author_email=AUTHOR_EMAIL,
+    maintainer=AUTHOR,
+    maintainer_email=AUTHOR_EMAIL,  
     license='LICENSE.txt',
     url=URL,
-    setup_requires=['bitbucket-distutils >= 0.1.2',
-                    'pandas >= 0.11.0', 'lxml', 'comtypes'])
+    download_url=DOWNLOAD_URL,
+    requires=['pandas >= 0.11.0', 'lxml', 'comtypes', 'sqlalchemy'],
+	classifiers=["Development Status :: 3 - Alpha",
+			"Environment :: MacOS X",
+			"Environment :: Win32 (MS Windows)",
+			"Environment :: X11 Applications",
+			"Intended Audience :: Developers",
+			"Intended Audience :: Science/Research",
+			"License :: Free for non-commercial use",
+			"License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+			"Natural Language :: English",
+			"Programming Language :: Python :: 2.7",
+			"Topic :: Scientific/Engineering"])
+	
+	
+	
+	
+	

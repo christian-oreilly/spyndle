@@ -64,6 +64,16 @@ class DataModelMng:
     TODO: Complete this class to provide easy access to most data.
     """    
 
+    def __init__(self, session):
+        """
+        DataModelMng constructor.
+        
+        Parameter:
+            session : SQLAlchemy session used to interact with the data model.
+        """    
+        self.session = session
+        
+
     def getTransientEvents(self, filteringDict={}, pandasFormat=False):
         """
         Return the transient events filtered using the filteringDict, either as

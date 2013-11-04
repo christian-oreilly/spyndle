@@ -72,7 +72,7 @@ class DatabaseMng():
             if not self.isConnected():
                 raise IOError("Error connecting to the database.")   
                 
-        self.dmm = DataModelMng()  
+        self.dmm = DataModelMng(self.session)  
         
             
             

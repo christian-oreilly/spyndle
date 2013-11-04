@@ -3,7 +3,6 @@ recursive-include spyndle/io/tests *.SIG
 recursive-include spyndle/io/tests *.STS
 recursive-include spyndle/io/tests *.BDF
 recursive-include spyndle/DevuystDB *.txt
-recursive-include spyndle/DevuystDB *.edf
 recursive-include spyndle/EEG *.png
 recursive-include spyndle/EEG *.svg
 recursive-include spyndle *.py

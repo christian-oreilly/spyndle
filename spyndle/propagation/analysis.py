@@ -194,7 +194,7 @@ class SPFEvaluator :
     
         # Getting all the records for the night
         nightQuery = self.session.query(Propagation.similarity)\
-                                        .join(TransientEvent, TransientEvent.ID == Propagation.spindleID)\
+                                        .join(TransientEvent, TransientEvent.ID == Propagation.transientEventID)\
                                         .filter(and_(TransientEvent.psgNight == self.night,
                                                      TransientEvent.eventName == self.eventName))         
         
@@ -209,15 +209,17 @@ class SPFEvaluator :
                     continue
 
                 similarities = testQuery.filter(Propagation.sourceChannelName==refChannel).all()   
+
+                propRel = self.session.query(PropagationRelationship)\
+                                                .filter_by(psgNight          = self.night,
+                                                           eventName         = self.eventName,
+                                                           sourceChannelName = refChannel,
+                                                           sinkChannelName   = testChannel).one()     
                 
-                if len(similarities):
-                    propRel = self.session.query(PropagationRelationship)\
-                                                    .filter_by(psgNight          = self.night,
-                                                               eventName         = self.eventName,
-                                                               sourceChannelName = refChannel,
-                                                               sinkChannelName   = testChannel).one()                      
-                    
+                if len(similarities):                    
                     propRel.cutoff = percentile(similarities, 100-alpha)
+                else:
+                    propRel.cutoff = 1.0
           
             
     
@@ -230,7 +232,7 @@ class SPFEvaluator :
     
         # Getting all the records for the night
         nightQueryProp   = self.session.query(Propagation)\
-                                        .join(TransientEvent, TransientEvent.ID == Propagation.spindleID)\
+                                        .join(TransientEvent, TransientEvent.ID == Propagation.transientEventID)\
                                         .filter(TransientEvent.psgNight == self.night)\
                                         .filter(TransientEvent.eventName == self.eventName)
         
@@ -267,7 +269,6 @@ class SPFEvaluator :
                     raise TypeError("propRel = " + str(propRel) + " with type" + str(type(propRel)))                                       
     
                 cutoff = propRel.cutoff
-    
                 testRefQueryProp = testQueryProp.filter(Propagation.sourceChannelName==refChannel)         
                 validQuery       = testRefQueryProp.filter(Propagation.similarity >= cutoff)                
                             
@@ -392,7 +393,7 @@ class SPFEvaluator :
         print datetime.now()
         # Getting all the records for the night
         nightQueryProp_unsorted   = self.session.query(Propagation)\
-                                        .join(TransientEvent, TransientEvent.ID == Propagation.spindleID)\
+                                        .join(TransientEvent, TransientEvent.ID == Propagation.transientEventID)\
                                         .filter(TransientEvent.psgNight == self.night)\
                                         .filter(TransientEvent.eventName == self.eventName)\
                                         .filter(Propagation.isFP == False)\
@@ -623,7 +624,7 @@ class SPFEvaluator :
 
 
         query = self.session.query(Propagation)\
-                        .join(TransientEvent, TransientEvent.ID == Propagation.spindleID)\
+                        .join(TransientEvent, TransientEvent.ID == Propagation.transientEventID)\
                         .filter(and_(TransientEvent.psgNight  == self.night,
                                      TransientEvent.eventName == self.eventName,  
                                      Propagation.isFP == False,

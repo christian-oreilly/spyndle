@@ -55,6 +55,7 @@ from scipy import where, zeros, transpose, arange, shape, diff, sign, argmax, sq
 import numpy as np
 import sqlalchemy as sa
 import serpent
+from datetime import datetime
 
 from spyndle import diff2, __version__
 from spyndle import computeMST
@@ -167,16 +168,28 @@ class XCSTEvaluator:
     
     """
 
+    """
+    Temporary patch because using simply np.sum or np.trapz for the value of 
+    the intFct attribute does not work for an unknown reason.
+    """
+    @staticmethod
+    def intSum(X, axis=0): 
+        return np.sum(X, axis=0)
+        
+    @staticmethod        
+    def intTrapz(X, axis=0) : 
+        return np.trapz(X, axis=0)
+
 
     ######################################################################
     # Setting default values for parameters of the algorithm
-    delta              = 0.5, 
-    beforePad          = 0.5, 
-    afterPad           = 0.5, 
-    artifactPad        = 0.25, 
-    offset             = 0.0, 
-    similIndexType     = "inf", 
-    intFct             = np.sum    
+    delta              = 0.5 
+    beforePad          = 0.5 
+    afterPad           = 0.5 
+    artifactPad        = 0.25 
+    offset             = 0.0 
+    similIndexType     = "inf" 
+    intFct             = intSum    
   
     # Setting default values for other attributes.
     __spyndle_version  = __version__       
@@ -187,6 +200,7 @@ class XCSTEvaluator:
     dbMng              = None
     dataManipObj       = None    
     
+
   
   
 
@@ -357,8 +371,8 @@ class XCSTEvaluator:
 
         events = self.dbSession.query(TransientEvent)\
                         .filter(TransientEvent.channelName.in_(self.channelList),
-                                TransientEvent.psgNight    == self.fileName,
-                                TransientEvent.eventName   == self.eventName).all()  
+                                TransientEvent.psgNight  == self.fileName,
+                                TransientEvent.eventName == self.eventName).all()  
   
         if self.verbose:
             print "Processing propagation for " + str(len(events)),
@@ -366,8 +380,27 @@ class XCSTEvaluator:
             print os.path.basename(self.fileName) + " on channels ",
             print str(self.channelList)   
   
-        for event in events:        
-            self.__computeForEvent(event)            
+  
+                                                                                                                     
+  
+  
+        if self.verbose and len(events) > 100:
+            
+            t1 = datetime.now()     
+            for event in events[:100]:        
+                self.__computeForEvent(event)   
+            t2 = datetime.now()    
+            
+            print "One hundred events have been processed in " + str((t2-t1).total_seconds()),
+            print " seconds. Estimated total processing time : ", 
+            print str((t2-t1).total_seconds()/100.0*len(events)) + " seconds."
+                
+            for event in events[100:]:        
+                self.__computeForEvent(event)   
+                 
+        else:
+            for event in events:        
+                self.__computeForEvent(event)            
             
         # Update the data manipulation process object.            
         self.dataManipObj.reprStr = repr(self)
@@ -486,7 +519,7 @@ class XCSTEvaluator:
         
         unnormCrossCorr = zeros(deltaSampleStart + deltaSampleEnd)
         time        = (arange(deltaSampleStart + deltaSampleEnd)-deltaSampleStart)/fs
-        refSelfCor  = self.intFct(self.intFct(X["Ref"]*X["Ref"])) 
+        refSelfCor  = self.intFct(self.intFct(X["Ref"]*X["Ref"]))
         indOffsets = arange(deltaSampleStart + deltaSampleEnd)
         
         
@@ -570,7 +603,7 @@ class XCSTEvaluator:
                                 
             assert(abs(maxDeltay) <= self.delta)
             
-            propagation = Propagation(spindleID=event.ID, sinkChannelName=testChannel, 
+            propagation = Propagation(transientEventID=event.ID, sinkChannelName=testChannel, 
                                     sourceChannelName=refChannel, similarity=maxCrosscor,
                                      delay=maxDeltay, offset=self.offset, 
                                     propRelNo = self.propRelNos[refChannel + testChannel])

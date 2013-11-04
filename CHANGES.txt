@@ -1,7 +1,28 @@
-v0.1.0a.dev1, 2013-04-10 -- Initial release.
+# spyndle change log
 
-v0.1.1a.dev1, 2013-06-05 -- Adding an EDF/BDF reader. Making the code compatible with the EDF reader has resulted in an important refactoring of large portions of code.
+## spyndle v0.1.0a.dev1 (2013-04-10)
+Initial release.
 
-v0.2.0.dev1, 2013-08-02 -- Initially, the package was used to generate intermediate results. R scripts were used to make various manipulations to transform these data in final results and generate summary figures. With this version, all these functionnalities have been added to the package.
+## spyndle v0.1.1a.dev1 (2013-06-05) 
+- Adding an EDF/BDF reader. 
+- Important refactoring of large portions of code for making the code compatible with the EDF reader.
 
-v0.2.1.dev1, 2013-08-27 -- This version corrects some packaging problems with the previous version. Also, some code related to the computation of spindle propagation has been optimized.
+## spyndle v0.2.0.dev1 (2013-08-02)
+- Adding functions for computing spindle propagation fields.
+- Adding functions for plotting propagation results.
+
+## spyndle v0.2.1.dev1 (2013-08-27)
+- Correction of some packaging problems. 
+- Code related to the computation of spindle propagation has been optimized.
+
+## spyndle v0.3.0 (2013-11-03)
+- Adding the possibility to reformat the EEG montage when using the EDFReader.
+- Refactoring of the detectors to reduce code duplications.
+- Linking data manipulation operations to an SQL database to avoid the multiplication of independent CSV file and to provide better traceability of data manipulations.
+- Implementation of a data schema using the SQLAlchemy ORM framework.
+- The EDFReader now can manage split EDF/EDFA files to keep in separate files the raw data and the annotations. This helps reducing computation by avoiding to recode the whole recording nights each time annotations are added.
+- Refactoring of the propagation.XCST and the propagation.analysis modules by providing evaluators objects, making the code more object-oriented and making it easier to register these manipulations in the SQL database. 
+- Adding a setStageToEvent(...) function to the base reader.
+- Correction of many bugs.
+- Improving a bit the documentation.
+- Removing the .edf files in the DevuystDB repertory. These EDF files seem to violate some rules of the EDF format making them unreadable by at least some of the publicly available EDF readers. Code of the spyndle package uses the .txt files to read the data of this database, making these redundant .edf files useless. Given the fact that they were adding about 100 MB to the package, these files have been removed.

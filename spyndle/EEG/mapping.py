@@ -133,7 +133,7 @@ def showColorMap(listeElectrodes, zVal):
 
 def getZZ(listeElectrodes, zVal):
 
-    cx, cy, transform = electrodesSVG.getElectrodeCoordinates(listeElectrodes)
+    cx, cy, transform = electrodesSVG.getElectrodeCoordinates()
     
     # Computing the coordinate of the electrodes.
     x_electrode = []

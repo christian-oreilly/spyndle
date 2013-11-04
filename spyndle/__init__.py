@@ -1,8 +1,7 @@
 # __init__.py
-__version__ = "0.2.1.dev1"
+__version__ = "0.3.0"
 
 
-#from propagation.XCST import computeXCST
 from miscellaneous.filters import Filter, channelType
 from miscellaneous.sleepCycles import cycleDefinitions, computeDreamCycles
 from miscellaneous.STransform import computeMST, computeST

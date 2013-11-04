@@ -34,7 +34,6 @@
 
 """
 
-
 from spyndle.io import EDFReader, DatabaseMng
 from spyndle.detector import SpindleDectectorRMS
 from spyndle.propagation import SPFEvaluator
@@ -81,18 +80,15 @@ detector.saveSpindle(readerEDF, eventName, dbSession=dbMng.session)
 t2 = datetime.now()                                                             
 print "Duration of spindle detection: ", t2-t1                                                                      
 
-
 print "Plotting the results in result_example_a.png..."
 filteringDict = {"psgNight":fileName, "eventName":eventName}
-spindles = dbMng.getTransientEvents(filteringDict, pandasFormat=True)                       
+spindles = dbMng.dmm.getTransientEvents(filteringDict, pandasFormat=True)                       
 spindles["electrode"] = getActiveElectrodes(spindles["channelName"])
 medDat = spindles.groupby("electrode").median()
 plotColorMap(unique(spindles["electrode"]), medDat.duration, "example_a.png")
 
-
-
 evaluator = SPFEvaluator(fileName, eventName, dbSession = dbMng.session, verbose=True)
-               
+         
 print "Computing synchrone comparisons..."
 t1 = datetime.now()  
 evaluator.computeXCST(EDFReader, offset=0.0)
