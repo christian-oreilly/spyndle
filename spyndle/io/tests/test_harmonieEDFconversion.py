@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
 
-import os,sys
+import os
 parentdir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0,parentdir + "\\..\\..\\..") 
 
+from urllib import  urlretrieve,  ContentTooShortError
+
+url      = "https://bitbucket.org/christian_oreilly/spyndle/downloads/test"
+fileName = os.path.join(parentdir, "test")
 
 from spyndle.io.harmonie import HarmonieReader
 from spyndle.io.edf import EDFReader
@@ -12,18 +15,42 @@ import numpy as np
 
 import unittest
 
+
+def loadFiles():
+    print "Reading the .sig file..."
+    if not os.path.exists(fileName + ".SIG"):
+        try:
+            print "Loading the .sig file from Internet."
+            urlretrieve(url + ".SIG", fileName + ".SIG")
+        except ContentTooShortError:
+             print "The retreived file is shorter than expected. The download as "\
+                   "probably been interrupted"
+             exit
+
+    if not os.path.exists(fileName + ".sts"):
+        try:
+            print "Loading the .sts file from Internet."
+            urlretrieve(url + ".sts", fileName + ".sts")
+        except ContentTooShortError:
+             print "The retreived file is shorter than expected. The download as "\
+                   "probably been interrupted"
+             exit
+                     
+
 class conversionHarmonieEDFTests(unittest.TestCase) :
     
 
     def testConversion(self):
-        print "Reading the .sig file..."
-        readerSIG =  HarmonieReader(parentdir + "/test.SIG")
         
+        loadFiles()
+                 
+        readerSIG =  HarmonieReader(os.path.join(parentdir, "test.SIG"))
+
         print "Saving a copy in the BDF format..."
-        readerSIG.saveAsEDF(parentdir + "/test.BDF", "BDF")
+        readerSIG.saveAsEDF(os.path.join(parentdir, "test.BDF"), "BDF")
         
         print "Reading the saved BDF file..."
-        readerEDF = EDFReader(parentdir + "/test.BDF")
+        readerEDF = EDFReader(os.path.join(parentdir, "test.BDF"))
 
         channelList = readerSIG.getChannelLabels()
         # For each pages, verify that the signals in reader and readerEDF
@@ -55,14 +82,18 @@ class conversionHarmonieEDFTests(unittest.TestCase) :
 
     
     def testConversion_readChannel(self):
+        
+
+        loadFiles()        
+        
         print "Reading the .sig file..."
-        readerSIG =  HarmonieReader(parentdir + "/test.SIG")
+        readerSIG =  HarmonieReader(os.path.join(parentdir, "test.SIG"))
         
         print "Saving a copy in the BDF format..."
-        readerSIG.saveAsEDF(parentdir + "/test.BDF", "BDF")
+        readerSIG.saveAsEDF(os.path.join(parentdir, "test.BDF"), "BDF")
         
         print "Reading the saved BDF file..."
-        readerEDF = EDFReader(parentdir + "/test.BDF")
+        readerEDF = EDFReader(os.path.join(parentdir, "test.BDF"))
 
         channelList = readerSIG.getChannelLabels()
 
