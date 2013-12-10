@@ -569,7 +569,7 @@ class EDFHeader :
    
 class EDFBaseReader(EEGDBReaderBase) :
 
-    def __init__(self, fname, isSplitted=None, annotation_fname=None):        
+    def __init__(self, fname, isSplitted=None, annotationFileName=None):        
         self.fileName = fname
         
         with io.open(fname, 'rb') as fileObj:
@@ -1200,21 +1200,21 @@ class EDFReader(EEGDBReaderBase) :
 
      The parameter isSplitted (boolean) can be used to specify wheter the 
      data file specified by fname is a splitted data/annotation set of files or
-     a single file. If isSplitted == True, the annotation_fname
+     a single file. If isSplitted == True, the annotationFileName
      parameter will specify the name of the annotation file.
      If not specified, fname + "a" will be used.
      If isSplitted == False, no supplementary annotation file is considered
-     regardless of the value of annotation_fname. If isSplitted == None, then
-     if an annotation_fname is specified, this annotation file will be used; if
-     no annotation_fname is specified but there exist a  fname + "a" file, this
-     annotation file will be used; if no annotation_fname is specified and
+     regardless of the value of annotationFileName. If isSplitted == None, then
+     if an annotationFileName is specified, this annotation file will be used; if
+     no annotationFileName is specified but there exist a  fname + "a" file, this
+     annotation file will be used; if no annotationFileName is specified and
      there is no file fname + "a", no anotation file will be used.
      
      Note that if an annotation file is used, only the annotations in the 
      annotation file be available. These of the data file (if any) will be 
      masked.
     """
-    def __init__(self, fname, isSplitted=None, annotation_fname=None):        
+    def __init__(self, fname, isSplitted=None, annotationFileName=None):        
         
         if isSplitted is False:
             self.isSplitted = False
@@ -1222,18 +1222,18 @@ class EDFReader(EEGDBReaderBase) :
             
         elif isSplitted is True:
             self.isSplitted = True            
-            if not annotation_fname is None:
-                self.annotationFileName = annotation_fname
+            if not annotationFileName is None:
+                self.annotationFileName = annotationFileName
             elif os.path.isfile(fname + "a") :
                 self.annotationFileName = fname + "a"
             else:
                 raise "In EDFReader(...), the parameter isSplitted is set to True but"\
-                      " no annotation file name is specified using the annotation_fname"\
+                      " no annotation file name is specified using the annotationFileName"\
                       " parameter and no file " + fname + "a is existing."
                       
         elif isSplitted is None:
-            if not annotation_fname is None:
-                self.annotationFileName = annotation_fname
+            if not annotationFileName is None:
+                self.annotationFileName = annotationFileName
                 self.isSplitted         = True 
             elif os.path.isfile(fname + "a") :
                 self.annotationFileName = fname + "a"
