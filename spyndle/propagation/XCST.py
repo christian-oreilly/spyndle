@@ -66,7 +66,7 @@ from spyndle.EEG.system10_20 import getEEGChannels
 
 
 
-def computeXCST(readerClass, fileName, eventName, dbSession=None, 
+def computeXCST(readerClass, fileName, eventName, dbSession=None,  dbPath=None, 
                 verbose=False, **kwargs):
     """
     Helper function for a one-function-call processing of the 2D cross-corellation 
@@ -85,6 +85,8 @@ def computeXCST(readerClass, fileName, eventName, dbSession=None,
         dbSession      : [optional, default=None] A SQLAlchemy session used to 
                          read/write from the database. If equal to None, an 
                          in-memory sqlite database is used.
+        dbPath         : [optional, default=None] Database path that will be 
+                         used if no session are provided.                
         verbose        : [optional, default=False] If set to True, information 
                          messages about the execution will be printed.
         **kwargs       : Keyword arguments that will be passed to the 
@@ -96,7 +98,7 @@ def computeXCST(readerClass, fileName, eventName, dbSession=None,
     """                  
     evaluator = XCSTEvaluator(eventName, verbose)        
     evaluator.createEEGReader(fileName, readerClass)
-    evaluator.prepareDatabase(dbSession)   
+    evaluator.prepareDatabase(dbSession, dbPath)   
     evaluator.compute(**kwargs)
             
             
@@ -297,7 +299,7 @@ class XCSTEvaluator:
 
 
 
-    def prepareDatabase(self, dbSession=None): 
+    def prepareDatabase(self, dbSession=None, dbPath=None): 
         """
         Set-up the SQL database for recording results from data processing. 
         Create the PropagationRelationship records corresponding to the channel
@@ -311,10 +313,13 @@ class XCSTEvaluator:
         
         if dbSession is None:
             try:
-                if self.verbose:
-                    print "No database session passed. Using in-memory database."
-                    
-                self.dbMng      = DatabaseMng("sqlite://")
+                if dbPath is None:
+                    if self.verbose:
+                        print "No database session or path has been passed. "\
+                              "Using in-memory database."
+                    dbPath = "sqlite://"
+                        
+                self.dbMng      = DatabaseMng(dbPath)
                 self.dbSession  = self.dbMng.session
 
             except sa.exc.ArgumentError, error:
@@ -606,4 +611,5 @@ class XCSTEvaluator:
                                      delay=maxDeltay, offset=self.offset, 
                                     propRelNo = self.propRelNos[refChannel + testChannel])
             self.dbSession.add(propagation)
+            self.dbSession.commit()
     
