@@ -38,7 +38,7 @@ import sqlalchemy.ext.declarative as sad
 Base    = sad.declarative_base()
 
 # Getting an SQLAchemy session factory
-Session = sa.orm.sessionmaker()    
+Session = sa.orm.scoped_session(sa.orm.sessionmaker())
 
 
 # Reader base

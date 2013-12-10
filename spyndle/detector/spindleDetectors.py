@@ -56,7 +56,7 @@ from spyndle import computeST
 from spyndle.errorMng import ErrPureVirtualCall
 from spyndle.EEG import getEEGChannels
 from spyndle.io import EEGDBReaderBase, Event, DataManipulationProcess, \
-    PSGNight, Channel, TransientEvent
+    PSGNight, Channel, TransientEvent, EventClass
 
 
 
@@ -219,7 +219,13 @@ class SpindleDectector:
         # It look premature to use it for now.
         #return serpent.dumps(self, indent=False, set_literals=False)
         # TODO: Improve on this representation...
-        return str(self.__dict__)
+    
+        # We keep every fields of the object, except for the detectedSpindles 
+        # which would create a much too large representation. Moreover, 
+        # the detected spindles are stored as an attribute only for 
+        # convenience. They do not define the detector per se. 
+        return str({key: value for (key, value) in self.__dict__.iteritems() if key != 'detectedSpindles'})
+
 
     def setReader(self, reader):
         self.reader = reader
@@ -368,17 +374,35 @@ class SpindleDectector:
                     eventGroupName="Spindle", fileName = None, dbSession=None):
               
         if dbSession :
+            
+            # the with statement to explicitly begin a transaction, and 
+            # automatically commit (or rollback on any exception):
+            # Create the data manipulation process record.
             dataManipObj = DataManipulationProcess(reprStr  = repr(self))
-            dbSession.add(dataManipObj)                         
-              
+            dbSession.add(dataManipObj)
+            dbSession.commit()                               
+
+            # Create the event class record if none corresponding to this event class exist.                                       
+            if dbSession.query(EventClass).filter_by(name=eventName).count() == 0:
+                dbSession.add(EventClass(name=eventName))     
+            dbSession.commit()                               
+                
+            # Create the PSG night record if none corresponding to this night exist. 
             if dbSession.query(PSGNight).filter_by(fileName=reader.fileName).count() == 0:
                 dbSession.add(PSGNight(fileName=reader.fileName))
-                
+            dbSession.commit()                               
+
+            # Create the channel record if none corresponding to this channel exist.                    
             for channel in unique([e.channel for e in self.detectedSpindles]):
                 if dbSession.query(Channel).filter_by(name=channel).count() == 0:
                     dbSession.add(Channel(name=channel))                  
-    
-               
+            dbSession.commit()                               
+             
+
+
+        if dbSession :
+            transientEvents = []
+          
         for spindle in self.detectedSpindles:    
             event = Event(name          = eventName, 
                           groupName     = eventGroupName, 
@@ -396,9 +420,10 @@ class SpindleDectector:
             reader.addEvent(event)
 
             if dbSession :
-                dbSession.add(TransientEvent.fromEvent(event, reader.fileName))
+                transientEvents.append(TransientEvent.fromEvent(event, reader.fileName, dataManipObj.no))
 
         if dbSession :
+            dbSession.add_all(transientEvents)
             dbSession.commit()
         
         if fileName is None:

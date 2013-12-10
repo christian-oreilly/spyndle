@@ -59,7 +59,7 @@ from sqlalchemy import distinct, and_
 
 from spyndle.propagation import computeXCST
 from spyndle.io import Propagation, TransientEvent, \
-    DatabaseMng, PropagationRelationship, Channel, rows2df
+    DatabaseMng, PropagationRelationship, Channel, rows2df, Session
 
 
 
@@ -121,6 +121,20 @@ class SPFEvaluator :
             
         
 
+    """
+    For name compatibility with the XCSTEvaluator object.
+    """        
+    @property
+    def dbSession(self):
+        return self.session
+        
+    @dbSession.setter
+    def dbSession(self, dbSession):
+        self.session = dbSession
+        
+
+
+
 
     def __del__(self):
         if not self.dbMng is None:
@@ -152,6 +166,10 @@ class SPFEvaluator :
                             .join(TransientEvent, Channel.name == TransientEvent.channelName)\
                             .filter(and_(TransientEvent.psgNight == self.night,
                                          TransientEvent.eventName == self.eventName)).all()
+                                         
+            # Terminate the transaction
+            self.session.commit()
+                                         
             if len(channelList):
                 channelList = list(zip(*channelList)[0])
             else:
@@ -218,6 +236,9 @@ class SPFEvaluator :
                     propRel.cutoff = percentile(similarities, 100-alpha)
                 else:
                     propRel.cutoff = 1.0
+                    
+                # Terminate current transaction
+                self.session.commit()
           
             
     
@@ -294,10 +315,9 @@ class SPFEvaluator :
 
                 propRel.nbValid = nbValid    
                 propRel.nbOut   = nbOut
-                self.session.flush()
 
-        self.session.commit()
-        
+                # Terminate current transaction
+                self.session.commit()
 
     
             
@@ -472,9 +492,9 @@ class SPFEvaluator :
                     # will be removed.
                     props[indBidir].bidirect = noRow  
     
-    
-        self.session.flush()    
-       
+            # Terminate current transaction
+            self.session.commit()    
+
        
         # SQLAlchemy do not allow to perform Query.update() when order_by() has 
         # been called. Thus, for the following part we ue unsorted data.
@@ -678,7 +698,7 @@ class SPFEvaluator :
             propRel.testRejectionC3(deltaWindow, alphaSD)
             propRel.testRejectionC4(minNbValid)
                   
-        self.session.commit()
+            self.session.commit()
 
 
 
