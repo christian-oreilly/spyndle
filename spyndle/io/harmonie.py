@@ -719,36 +719,65 @@ class HarmonieReader(EEGDBReaderBase):
         return len(self.getInfoPages())
 
 
-    """
-     Convert and save the .sig/.sts files in EDF/BDF format. 
-     
-     When working with large datafiles such as whole night polysomnographic 
-     recording, recording the annotations in the same file as the recording
-     data can be inneficient since adding new annotations might requires 
-     reformatting the whole data file. In these case, it can be more interesting
-     to split the original data and the annotations in two separate files. 
-     
-     We suggest to always use the same name for both files, except for a 
-     supplementary "a" (for annotation) at the end of the extension of the 
-     annotation file (e.g. aFile.bdf/aFile.bdfa or someFile.edf/someFile.edfa).
-     Nevertheless, this class provide the option of using an arbitrary name 
-     for the annotation file.
 
-     The parameter isSplitted (boolean) can be used to specify wheter the 
-     data file specified by fname is a splitted data/annotation set of files or
-     a single file. If isSplitted == True, the annotation_fname
-     parameter will specify the name of the annotation file.
-     If not specified, fname + "a" will be used.
-     If isSplitted == False, no supplementary annotation file is considered
-     regardless of the value of annotation_fname.
-    """
-    def saveAsEDF(self, filename, fileType = "EDF", isSplitted=True, 
-                                          annotation_fname=None, verbose=True):
+    def saveAsEDF(self, fileName=None, fileType = "EDF", isSplitted=True, 
+                       annotationFileName=None, channelList=None,
+                       basePath=None, annotationBasePath=None, verbose=True):
         
+        """
+         Convert and save the .sig/.sts files in EDF/BDF format. 
+         
+         When working with large datafiles such as whole night polysomnographic 
+         recording, recording the annotations in the same file as the recording
+         data can be inneficient since adding new annotations might requires 
+         reformatting the whole data file. In these case, it can be more interesting
+         to split the original data and the annotations in two separate files. 
+         
+         We suggest to always use the same name for both files, except for a 
+         supplementary "a" (for annotation) at the end of the extension of the 
+         annotation file (e.g. aFile.bdf/aFile.bdfa or someFile.edf/someFile.edfa).
+         Nevertheless, this class provide the option of using an arbitrary name 
+         for the annotation file.
+    
+         The parameter isSplitted (boolean) can be used to specify wheter the 
+         data file specified by fname is a splitted data/annotation set of files or
+         a single file. If isSplitted == True, the annotationFileName
+         parameter will specify the name of the annotation file.
+         If not specified, fname + "a" will be used.
+         If isSplitted == False, no supplementary annotation file is considered
+         regardless of the value of annotationFileName.
+         
+         fileName   : File name to use to record the converted file. If a 
+                      basePath is given, the method only use the file name
+                      and append it to basePath. If left to None, use the name
+                      of the source file, replacing its extension.
+                      
+         channelList: If different than None, only the channel in that list 
+                      will be saved in the converted file. 
+                      
+         basePath   : If different than None, record the in this path. Else,
+                      use the same path as the source file or as in fileName. 
+        """        
+
+        if fileName is None:
+            # Use the same name as the source name, chnaging the extension.
+            fileName = ".".join(self.fileName.split(".")[:-1] + [fileType.lower()])
+  
+            
+        if not basePath is None:
+            fileName = os.path.join(basePath, os.path.basename(fileName))
         
+
         if isSplitted:        
-            if annotation_fname is None:
-                annotation_fname = filename + "a"        
+            if annotationFileName is None:
+                annotationFileName = fileName + "a"  
+                
+            if not annotationBasePath is None:
+                annotationFileName = os.path.join(annotationBasePath, os.path.basename(annotationFileName))                
+        
+
+        
+
         
         #######################################################################
         # Internal methods
@@ -877,14 +906,20 @@ class HarmonieReader(EEGDBReaderBase):
 
         dataHeader.startDateTime = self.recordingStartTime
             
-        ns = len(self.getChannelLabels())
+        if channelList is None:
+            acceptedChannels = self.getChannelLabels()   
+        else:
+            acceptedChannels = [channel for channel in self.getChannelLabels() if channel in channelList]            
+            
+            
+        ns = len(acceptedChannels)
         dataHeader.headerNbBytes      = 8 + 80 + 80 + 8 + 8 + 8 + 44 + 8 + 8 + 4 + (ns+1)* (16 + 80+ 8 + 8 + 8 + 8 + 8 + 80 + 8 + 32) 
         dataHeader.nbRecords          = self.getNbPages()
         dataHeader.recordDuration     = self.pageDuration
         dataHeader.nbChannels         = ns +1
-        dataHeader.channelLabels      = self.getChannelLabels() + ["EDF Annotations"]        
         
-
+        dataHeader.channelLabels      = acceptedChannels + ["EDF Annotations"]        
+        
         dataHeader.transducerType     = {}
         dataHeader.prefiltering       = {} 
         dataHeader.units              = {}
@@ -968,7 +1003,7 @@ class HarmonieReader(EEGDBReaderBase):
             annotationHeader.digitalMax         = {"EDF Annotations":32767}         
             annotationHeader.nbSamplesPerRecord = {"EDF Annotations":annotationFieldLength} 
             
-            with io.open(annotation_fname, 'wb') as f:    
+            with io.open(annotationFileName, 'wb') as f:    
                 
                 if verbose:
                     print "Writing annotation file header..."
@@ -993,7 +1028,7 @@ class HarmonieReader(EEGDBReaderBase):
         #######################################################################       
        
         # Using buffered writer
-        with io.open(filename, 'wb') as f:
+        with io.open(fileName, 'wb') as f:
 
 
             if verbose:
@@ -1030,6 +1065,7 @@ class HarmonieReader(EEGDBReaderBase):
                     # size of a complete record.                    
                     if not page.isComplete:
                         # Get the number of sample associate to the incomplete pages for that channel 
+
                         channelPageNbSample = int(page.getNbSamples()/self.trueBaseFreq*self.channelFreqs[channel])  
                         
                         recordedSignal = append(array(record[indS:(indS+channelPageNbSample)]), 
@@ -1040,30 +1076,32 @@ class HarmonieReader(EEGDBReaderBase):
                         recordedSignal = array(record[indS:(indS+self.pageNbSamples[channel])])
                         indS += self.pageNbSamples[channel]
                     
-                    
-                    # WRITE RECORDED SIGNAL....
-                    physical_min = physicalMinMicro[channel] 
-                    physical_max = physicalMaxMicro[channel] 
-                    digital_min  = digitalMin[channel] 
-                    digital_max  = digitalMax[channel] 
 
-                    phys_range = physical_max - physical_min
-                    dig_range = digital_max - digital_min
-                    assert numpy.all(phys_range > 0)
-                    assert numpy.all(dig_range > 0)
-                    gain = dig_range/phys_range                          
-
-                    recordedSignal = (recordedSignal - physical_min)*gain + digital_min  
-
-                    if nbByte == 2: # EDF
-                        f.write(recordedSignal.astype('<i2').tostring())
-                    elif nbByte == 3: #BDF
-                        # Writing in a string of 32-bit integers and removing every fourth byte
-                        # to obtain a string of 24-bit integers
-                        recordedSignal = recordedSignal.astype('<i').tostring()
-                        recordedSignal = "".join([recordedSignal[noBit] for noBit in range(len(recordedSignal)) if (noBit+1)%4])
-                        f.write(recordedSignal)
-                                                
+                    if channel in acceptedChannels:
+                                            
+                        # WRITE RECORDED SIGNAL....
+                        physical_min = physicalMinMicro[channel] 
+                        physical_max = physicalMaxMicro[channel] 
+                        digital_min  = digitalMin[channel] 
+                        digital_max  = digitalMax[channel] 
+    
+                        phys_range = physical_max - physical_min
+                        dig_range = digital_max - digital_min
+                        assert numpy.all(phys_range > 0)
+                        assert numpy.all(dig_range > 0)
+                        gain = dig_range/phys_range                          
+    
+                        recordedSignal = (recordedSignal - physical_min)*gain + digital_min  
+                        
+                        if nbByte == 2: # EDF
+                            f.write(recordedSignal.astype('<i2').tostring())
+                        elif nbByte == 3: #BDF
+                            # Writing in a string of 32-bit integers and removing every fourth byte
+                            # to obtain a string of 24-bit integers
+                            recordedSignal = recordedSignal.astype('<i').tostring()
+                            recordedSignal = "".join([recordedSignal[noBit] for noBit in range(len(recordedSignal)) if (noBit+1)%4])
+                            f.write(recordedSignal)
+                                                    
                
                 
                 # Annotation channel            
