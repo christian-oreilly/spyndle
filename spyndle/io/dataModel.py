@@ -95,7 +95,6 @@ class DataModelMng:
 
 
 
-
 ###############################################################################
 # Creating the ORM database classes 
 ###############################################################################
@@ -109,21 +108,23 @@ class TransientEvent(Base):
     TODO: The definition should depend on the type of transient event analyzed.
     """
 
-    __tablename__       = "transientEvent"
+    __tablename__   = "transientEvent"
+    __table_args__  = {'mysql_engine':'InnoDB'}
     
     # The ID is a Universal Unique Identifier (UUID) that can be provided using
     # str(uuid.uuid1()) after the importation of the uuid module. 
-    ID              = sa.Column(sa.String, primary_key=True)
+    ID              = sa.Column(sa.String(36), primary_key=True)
     
-    psgNight        = sa.Column(sa.String, sa.ForeignKey("psgNight.fileName"))
-    channelName     = sa.Column(sa.String, sa.ForeignKey("channel.name"))
-    eventName       = sa.Column(sa.String, sa.ForeignKey("eventClass.name"))
+    psgNight        = sa.Column(sa.String(255), sa.ForeignKey("psgNight.fileName"))
+    channelName     = sa.Column(sa.String(30), sa.ForeignKey("channel.name"))
+    eventName       = sa.Column(sa.String(30), sa.ForeignKey("eventClass.name"))
+    dataManipNo     = sa.Column(sa.Integer, sa.ForeignKey("dataManipulationProcess.no"), primary_key=True)    
     startTime       = sa.Column(sa.Float)
     duration        = sa.Column(sa.Float)
     
     RMSamp          = sa.Column(sa.Float)
     meanFreq        = sa.Column(sa.Float)
-    stage           = sa.Column(sa.String)
+    stage           = sa.Column(sa.String(30))
     cycle           = sa.Column(sa.Integer)
     slopeOrigin     = sa.Column(sa.Float)
     slope           = sa.Column(sa.Float)
@@ -135,7 +136,7 @@ class TransientEvent(Base):
      spyndle.io.Event object and a psgNight string.
     """
     @staticmethod
-    def fromEvent(event, psgNight):
+    def fromEvent(event, psgNight, dataManipNo):
         
         def getProperty(cls, label):
             return cls(event.properties[label]) if label in event.properties else None
@@ -158,7 +159,8 @@ class TransientEvent(Base):
                               channelName = channelName, RMSamp = RMSamp, 
                               meanFreq = meanFreq, stage = stage, cycle = cycle, 
                               slopeOrigin = slopeOrigin, slope = slope, 
-                              filteredRMSamp= filteredRMSamp, eventName=eventName)
+                              filteredRMSamp= filteredRMSamp, eventName=eventName,
+                              dataManipNo=dataManipNo)
 
 
 
@@ -172,8 +174,9 @@ class PSGNight(Base):
     """    
     
     __tablename__       = "psgNight"
+    __table_args__  = {'mysql_engine':'InnoDB'}
     
-    fileName            = sa.Column(sa.String, primary_key=True)
+    fileName            = sa.Column(sa.String(255), primary_key=True)
 
 
 
@@ -187,8 +190,9 @@ class Channel(Base):
     (e.g., recording gain, digitization frequency, etc.).
     """    
     __tablename__       = "channel"
+    __table_args__  = {'mysql_engine':'InnoDB'}
     
-    name                = sa.Column(sa.String, primary_key=True)
+    name                = sa.Column(sa.String(30), primary_key=True)
     #activeElectrode = sa.Column(sa.String)
     #reference       = sa.Column(sa.String)
 
@@ -203,10 +207,11 @@ class SPF(Base):
     (SPF) recording channel (see [1] for the SPF definition). 
     """    
     __tablename__       = "spf"
-    __table_args__      = {'sqlite_autoincrement': True}    
+    __table_args__      = {'sqlite_autoincrement': True,
+                           'mysql_engine':'InnoDB'}   
     
     no                  = sa.Column(sa.Integer, primary_key=True)
-    psgNight            = sa.Column(sa.String, sa.ForeignKey("psgNight.fileName"))
+    psgNight            = sa.Column(sa.String(255), sa.ForeignKey("psgNight.fileName"))
 
 
 
@@ -220,16 +225,16 @@ class Propagation(Base):
     """
     
     __tablename__       = "propagation"
-    __table_args__      = {'sqlite_autoincrement': True}
+    __table_args__      = {'sqlite_autoincrement': True,
+                           'mysql_engine':'InnoDB'}
 
     no                  = sa.Column(sa.Integer, primary_key=True)
     
     # ID of the spindle from which this propagation has been computed.
-    transientEventID    = sa.Column(sa.String, sa.ForeignKey("transientEvent.ID"))
+    transientEventID    = sa.Column(sa.String(36), sa.ForeignKey("transientEvent.ID"))
     propRelNo           = sa.Column(sa.Integer, sa.ForeignKey("propagationRelationship.no"))
-    
-    sourceChannelName   = sa.Column(sa.String, sa.ForeignKey("channel.name"))
-    sinkChannelName     = sa.Column(sa.String, sa.ForeignKey("channel.name"))
+    sourceChannelName   = sa.Column(sa.String(30), sa.ForeignKey("channel.name"))
+    sinkChannelName     = sa.Column(sa.String(30), sa.ForeignKey("channel.name"))
     
     similarity          = sa.Column(sa.Float)
     delay               = sa.Column(sa.Float)
@@ -241,9 +246,9 @@ class Propagation(Base):
     
     
     # Used in SPF computation.
-    noSPF               = sa.Column(sa.Integer, sa.ForeignKey("spf.no"))
+    noSPF               = sa.Column(sa.Integer) #, sa.ForeignKey("spf.no"))
     bidirect            = sa.Column(sa.Integer)
-    source              = sa.Column(sa.Integer, sa.ForeignKey("propagation.no"))
+    source              = sa.Column(sa.Integer) #, sa.ForeignKey("propagation.no"))
     inverted            = sa.Column(sa.Boolean)    
     
     
@@ -302,9 +307,13 @@ class EventClass(Base):
     """    
     
     __tablename__       = "eventClass"
+    __table_args__      = {'mysql_engine':'InnoDB'}
 
-    name                = sa.Column(sa.String, primary_key=True)
-    dataManipNo         = sa.Column(sa.Integer, sa.ForeignKey("dataManipulationProcess.no"))
+
+
+
+    name                = sa.Column(sa.String(30), primary_key=True)
+    #dataManipNo         = sa.Column(sa.Integer, sa.ForeignKey("dataManipulationProcess.no"), primary_key=True)
 
 
 
@@ -323,10 +332,11 @@ class DataManipulationProcess(Base):
     """    
     
     __tablename__       = "dataManipulationProcess"
-    __table_args__      = {'sqlite_autoincrement': True}   
+    __table_args__      = {'sqlite_autoincrement': True,
+                           'mysql_engine':'InnoDB'}   
     
     no                  = sa.Column(sa.Integer, primary_key=True)
-    reprStr             = sa.Column(sa.String)  
+    reprStr             = sa.Column(sa.Text)  
     datetime            = sa.Column(sa.DateTime)    
         
     
@@ -355,14 +365,15 @@ class PropagationRelationship(Base):
                                                "sinkChannelName",
                                                "psgNight",
                                                "eventName"), 
-                            {'sqlite_autoincrement': True} 
+                            {'sqlite_autoincrement': True,
+                             'mysql_engine':'InnoDB'}
                           )
 
     no                  = sa.Column(sa.Integer, primary_key=True)
-    sourceChannelName   = sa.Column(sa.String, sa.ForeignKey("channel.name"))
-    sinkChannelName     = sa.Column(sa.String, sa.ForeignKey("channel.name"))
-    psgNight            = sa.Column(sa.String, sa.ForeignKey("psgNight.fileName"))
-    eventName           = sa.Column(sa.String, sa.ForeignKey("eventClass.name"))
+    sourceChannelName   = sa.Column(sa.String(30), sa.ForeignKey("channel.name"))
+    sinkChannelName     = sa.Column(sa.String(30), sa.ForeignKey("channel.name"))
+    psgNight            = sa.Column(sa.String(255), sa.ForeignKey("psgNight.fileName"))
+    eventName           = sa.Column(sa.String(30), sa.ForeignKey("eventClass.name"))
     
     cutoff              = sa.Column(sa.Float)
     FDR                 = sa.Column(sa.Float)
@@ -448,12 +459,14 @@ class PropagationRelationship(Base):
                 self.no = old.no
                 session.delete(old)
                 session.add(self)
-                session.flush()
+                session.commit()
 
             elif behavior == "failSilently":
+                session.rollback()                
                 pass
             
             else:
+                session.rollback()       
                 raise ValueError("The value '" + behavior + "' is invalid for the behavior variable.")
 
 

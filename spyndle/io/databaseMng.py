@@ -32,7 +32,7 @@
 
 import sqlalchemy as sa
 from spyndle.io import Session, Base, DataModelMng
-
+from sqlalchemy.pool import NullPool, QueuePool
 
 
 def clearDatabase(dbName):
@@ -63,10 +63,9 @@ class DatabaseMng():
         If a name dbName is passed, connect to the database and create the 
         tablesof the data model if those are not already existent. Else, only 
         set the session to none and do nothing.
-        """        
-        if dbName == "":
-            self.session = None
-        else:
+        """ 
+        self.session = None
+        if dbName != "":
             self.connectDatabase(dbName)
             self.createTables()
             if not self.isConnected():
@@ -76,6 +75,11 @@ class DatabaseMng():
         
             
             
+    def __enter__(self):
+        return self
+    def __exit__(self, type, value, traceback):
+        self.disconnectDatabase()   
+  
       
      
     @property
@@ -100,16 +104,30 @@ class DatabaseMng():
 
 
      
-    def connectDatabase(self, dbName):        
+    def connectDatabase(self, URL):        
         """
-        Connect to the database dbName. This creates the session object which can
+        Connect to the database URL. This creates the session object which can
         be used to performs operation on this database.
+        
+        URL is of the form dialect+driver://user:password@host/dbname[?key=value..]
+        or is an URL.
         """         
-        self.dbEngine = sa.create_engine(dbName)
+        if URL.split(":")[0].split("+")[0] == "sqlite": 
+            self.dbEngine = sa.create_engine(URL, poolclass=QueuePool, pool_size=20,  
+                                             pool_timeout=180)#, isolation_level='READ UNCOMMITTED') #NullPool)
+        elif URL.split(":")[0].split("+")[0] == "mysql":
+            dbName = URL.split("@")[1].split("/")[1].split("[")[0]
+            connectStr = URL.split("@")[0] + "@" + URL.split("@")[1].split("/")[0]
+            self.dbEngine = sa.create_engine(connectStr, poolclass=QueuePool, pool_size=20,  
+                                             pool_timeout=180)#, isolation_level='READ UNCOMMITTED') #NullPool)            
+            self.dbEngine.execute("CREATE DATABASE IF NOT EXISTS " + dbName) #create db
+            self.dbEngine.execute("USE " + dbName) # select new db
+        else:
+            raise ValueError("Only sqlite and mysql are acccepted as database type for now.")
+            
+            
         Session.configure(bind=self.dbEngine)   
-        self.session = Session()
-        
-        
+        self.session = Session()            
     
     def clearDatabase(self):
         """
@@ -150,5 +168,5 @@ class DatabaseMng():
       
         
 
-
-
+    def __del__(self):
+        self.disconnectDatabase()
