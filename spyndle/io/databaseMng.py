@@ -56,7 +56,7 @@ class DatabaseMng():
     """
     
 
-    def __init__(self, dbName = ""):
+    def __init__(self, dbName = "", shard=None):
         """
         DatabaseMng constructor.
          
@@ -66,7 +66,11 @@ class DatabaseMng():
         """ 
         self.session = None
         if dbName != "":
-            self.connectDatabase(dbName)
+            if shard is None:
+                self.connectDatabase(dbName)
+            else:
+                shard = shard.replace(":", "_").replace("/", "_").replace("\\", "_").replace(".", "_")
+                self.connectDatabase(dbName + "___shard_" + shard)
             self.createTables()
             if not self.isConnected():
                 raise IOError("Error connecting to the database.")   
