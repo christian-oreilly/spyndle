@@ -39,7 +39,6 @@ from abc import ABCMeta, abstractmethod
 import numpy as np
 import warnings
 import bisect
-import serpent
 
 from scipy import concatenate, zeros, mean, sqrt, mod, diff, where, fft
 from scipy import array, arange, ones, unique
@@ -48,7 +47,7 @@ from scipy.fftpack import fftfreq
 from scipy.io import savemat, loadmat
 from scipy.integrate import trapz
 
-from datetime import timedelta, datetime
+from datetime import timedelta
 
 from spyndle import Filter, __version__
 from spyndle import cycleDefinitions, computeDreamCycles
@@ -375,28 +374,23 @@ class SpindleDectector:
               
         if dbSession :
             
-            # the with statement to explicitly begin a transaction, and 
-            # automatically commit (or rollback on any exception):
             # Create the data manipulation process record.
             dataManipObj = DataManipulationProcess(reprStr  = repr(self))
-            dbSession.add(dataManipObj)
-            dbSession.commit()                               
+            dbSession.add(dataManipObj)                             
 
             # Create the event class record if none corresponding to this event class exist.                                       
             if dbSession.query(EventClass).filter_by(name=eventName).count() == 0:
                 dbSession.add(EventClass(name=eventName))     
-            dbSession.commit()                               
-                
+
             # Create the PSG night record if none corresponding to this night exist. 
             if dbSession.query(PSGNight).filter_by(fileName=reader.fileName).count() == 0:
-                dbSession.add(PSGNight(fileName=reader.fileName))
-            dbSession.commit()                               
+                dbSession.add(PSGNight(fileName=reader.fileName))                            
 
             # Create the channel record if none corresponding to this channel exist.                    
             for channel in unique([e.channel for e in self.detectedSpindles]):
                 if dbSession.query(Channel).filter_by(name=channel).count() == 0:
-                    dbSession.add(Channel(name=channel))                  
-            dbSession.commit()                               
+                    dbSession.add(Channel(name=channel))                    
+            dbSession.flush()                          
              
 
 
@@ -424,7 +418,7 @@ class SpindleDectector:
 
         if dbSession :
             dbSession.add_all(transientEvents)
-            dbSession.commit()
+
         
         if fileName is None:
             reader.save()
