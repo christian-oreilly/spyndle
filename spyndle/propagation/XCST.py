@@ -66,7 +66,7 @@ from spyndle.EEG.system10_20 import getEEGChannels
 
 
 
-def computeXCST(readerClass, fileName, eventName, dbSession=None,  dbPath=None, 
+def computeXCST(readerClass, fileName, eventName, dbSession=None,  dbPath=None,  shard=None,
                 verbose=False, **kwargs):
     """
     Helper function for a one-function-call processing of the 2D cross-corellation 
@@ -98,7 +98,7 @@ def computeXCST(readerClass, fileName, eventName, dbSession=None,  dbPath=None,
     """                  
     evaluator = XCSTEvaluator(eventName, verbose)        
     evaluator.createEEGReader(fileName, readerClass)
-    evaluator.prepareDatabase(dbSession, dbPath)   
+    evaluator.prepareDatabase(dbSession, dbPath, shard)   
     evaluator.compute(**kwargs)
             
             
@@ -299,7 +299,7 @@ class XCSTEvaluator:
 
 
 
-    def prepareDatabase(self, dbSession=None, dbPath=None): 
+    def prepareDatabase(self, dbSession=None, dbPath=None, shard=None): 
         """
         Set-up the SQL database for recording results from data processing. 
         Create the PropagationRelationship records corresponding to the channel
@@ -319,7 +319,7 @@ class XCSTEvaluator:
                               "Using in-memory database."
                     dbPath = "sqlite://"
                         
-                self.dbMng      = DatabaseMng(dbPath)
+                self.dbMng      = DatabaseMng(dbPath, shard=shard)
                 self.dbSession  = self.dbMng.session
 
             except sa.exc.ArgumentError, error:
@@ -407,11 +407,14 @@ class XCSTEvaluator:
             
         # Update the data manipulation process object.            
         self.dataManipObj.reprStr = repr(self)
-        self.dbSession.commit()
+
             
         if not self.dbMng is None:
             self.dbMng.disconnectDatabase()
                     
+
+
+
             
          
     def __computeForEvent(self, event):       
@@ -525,7 +528,7 @@ class XCSTEvaluator:
         refSelfCor  = self.intFct(self.intFct(X["Ref"]*X["Ref"]))
         indOffsets = arange(deltaSampleStart + deltaSampleEnd)
         
-        
+        propagations = []
         for testChannel in self.channelList :
             if testChannel == refChannel:  
                 continue                
@@ -606,10 +609,9 @@ class XCSTEvaluator:
                                 
             assert(abs(maxDeltay) <= self.delta)
             
-            propagation = Propagation(transientEventID=event.ID, sinkChannelName=testChannel, 
+            propagations.append(Propagation(transientEventID=event.ID, sinkChannelName=testChannel, 
                                     sourceChannelName=refChannel, similarity=maxCrosscor,
                                      delay=maxDeltay, offset=self.offset, 
-                                    propRelNo = self.propRelNos[refChannel + testChannel])
-            self.dbSession.add(propagation)
-            self.dbSession.commit()
+                                    propRelNo = self.propRelNos[refChannel + testChannel]))
+        self.dbSession.add_all(propagations)
     
