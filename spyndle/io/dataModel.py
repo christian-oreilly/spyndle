@@ -116,9 +116,10 @@ class TransientEvent(Base):
     ID              = sa.Column(sa.String(36), primary_key=True)
     
     psgNight        = sa.Column(sa.String(255), sa.ForeignKey("psgNight.fileName"))
-    channelName     = sa.Column(sa.String(30), sa.ForeignKey("channel.name"))
-    eventName       = sa.Column(sa.String(30), sa.ForeignKey("eventClass.name"))
-    dataManipNo     = sa.Column(sa.Integer, sa.ForeignKey("dataManipulationProcess.no"), primary_key=True)    
+    channelName     = sa.Column(sa.String(30),  sa.ForeignKey("channel.name"))
+    eventName       = sa.Column(sa.String(30),  sa.ForeignKey("eventClass.name"))
+    dataManipNo     = sa.Column(sa.Integer,     sa.ForeignKey("dataManipulationProcess.no"))
+    
     startTime       = sa.Column(sa.Float)
     duration        = sa.Column(sa.Float)
     
@@ -232,7 +233,7 @@ class Propagation(Base):
     
     # ID of the spindle from which this propagation has been computed.
     transientEventID    = sa.Column(sa.String(36), sa.ForeignKey("transientEvent.ID"))
-    propRelNo           = sa.Column(sa.Integer, sa.ForeignKey("propagationRelationship.no"))
+    propRelNo           = sa.Column(sa.Integer,    sa.ForeignKey("propagationRelationship.no"))
     sourceChannelName   = sa.Column(sa.String(30), sa.ForeignKey("channel.name"))
     sinkChannelName     = sa.Column(sa.String(30), sa.ForeignKey("channel.name"))
     
