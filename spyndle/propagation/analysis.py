@@ -95,7 +95,8 @@ def getOutlierThresholds(data, coef=1.5):
 
 class SPFEvaluator : 
     
-    def __init__(self, night, eventName, dbSession=None, dbName = "sqlite:///:memory:", verbose = False):
+    def __init__(self, night, eventName, dbSession=None, dbName = "sqlite:///:memory:", 
+                 shard=None, verbose = False):
         
         self.night      = night
         self.eventName  = eventName
@@ -112,7 +113,7 @@ class SPFEvaluator :
                 print "No database session passed. Using the " + dbName + " database."           
             try:
 
-                self.dbMng = DatabaseMng(dbName)
+                self.dbMng = DatabaseMng(dbName, shard=shard)
                 self.session = self.dbMng.session
             except sqlalchemy.exc.ArgumentError, error:
                  print "Error connecting to the specified database URL. "\
@@ -167,23 +168,16 @@ class SPFEvaluator :
                             .filter(and_(TransientEvent.psgNight == self.night,
                                          TransientEvent.eventName == self.eventName)).all()
                                          
-            # Terminate the transaction
-            self.session.commit()
-                                         
             if len(channelList):
                 channelList = list(zip(*channelList)[0])
             else:
                 raise UserWarning("No channel availables for computing SPFs.")
     
 
-        # Computing cutoff threshold from asychronized comparisons
-        if self.verbose :
-            print "Computing cutoff for night ", self.night
-        self.computingCutOff(channelList, alpha)
-    
-        # FALSE DETECTION AND OUTLIERS REJECTION
+        # Computing cutoff threshold from asychronized comparisons and
+        # rejecting false detection and outliers
         if self.verbose:
-            print "Rejecting outliers"
+            print "Computing cutoff and rejecting outliers"
         self.propagationRejection(channelList, alpha)
     
         # CORRECTING DELAYS TO HAVE ONLY PROPAGATION WITH POSITIVE TIME DELAYS 
@@ -204,107 +198,79 @@ class SPFEvaluator :
     
 
     
-    ###########################################################################    
-    # Computing the cutoff
-    ###########################################################################
-    def computingCutOff(self, channelList, alpha = 10.0):        
+
+
+    def propagationRejection(self, channelList, alpha = 10.0):        
     
-        # Getting all the records for the night
-        nightQuery = self.session.query(Propagation.similarity)\
-                                        .join(TransientEvent, TransientEvent.ID == Propagation.transientEventID)\
-                                        .filter(and_(TransientEvent.psgNight == self.night,
-                                                     TransientEvent.eventName == self.eventName))         
-        
-        # Keeping only offset records        
-        nightQuery = nightQuery.filter(Propagation.offset != 0.0)    
+
 
         for testChannel in channelList :  
-            testQuery = nightQuery.filter(Propagation.sinkChannelName==testChannel)    
+            
+            if self.verbose :
+                print "test:", testChannel                
+                
             for refChannel in channelList:
                 if testChannel == refChannel:
                     continue
-
-                similarities = testQuery.filter(Propagation.sourceChannelName==refChannel).all()       
 
                 propRel = self.session.query(PropagationRelationship)\
                                                 .filter_by(psgNight          = self.night,
                                                            eventName         = self.eventName,
                                                            sourceChannelName = refChannel,
                                                            sinkChannelName   = testChannel).one()     
+
+                ###########################################################################    
+                # Computing the cutoff
+                ###########################################################################
                 
+                # Getting all the offset records for the night
+                  
+                # Keeping only offset records     
+                similarities = self.session.query(Propagation.similarity)\
+                                        .join(TransientEvent, TransientEvent.ID == Propagation.transientEventID)\
+                                        .filter(and_(TransientEvent.psgNight  == self.night,
+                                                     TransientEvent.eventName == self.eventName))\
+                                        .filter(Propagation.offset != 0.0)\
+                                        .filter(Propagation.sinkChannelName==testChannel)\
+                                        .filter(Propagation.sourceChannelName==refChannel).all()   
+
                 if len(similarities):                    
                     propRel.cutoff = percentile(similarities, 100-alpha)
                 else:
                     propRel.cutoff = 1.0
-                    
-                # Terminate current transaction
-                self.session.commit()
-          
-            
-    
-    ###########################################################################    
-    # FALSE DETECTION AND OUTLIERS REJECTION
-    ###########################################################################
-    
-    def propagationRejection(self, channelList, alpha):        
 
     
-        # Getting all the records for the night
-        nightQueryProp   = self.session.query(Propagation)\
-                                        .join(TransientEvent, TransientEvent.ID == Propagation.transientEventID)\
-                                        .filter(TransientEvent.psgNight == self.night)\
-                                        .filter(TransientEvent.eventName == self.eventName)
-        
-        nightQueryCutoff = self.session.query(PropagationRelationship)\
-                                        .filter_by(psgNight  = self.night,
-                                                   eventName = self.eventName)
-        
-        # Keeping only synchronous records        
-        nightQueryProp = nightQueryProp.filter(Propagation.offset == 0.0)     
-
-        for testChannel in channelList :  
-            testQueryProp   = nightQueryProp.filter(Propagation.sinkChannelName==testChannel)    
-            testQueryCutoff = nightQueryCutoff.filter(PropagationRelationship.sinkChannelName==testChannel)    
-            
-            if self.verbose :
-                print "test:", testChannel                 
-            
-            for refChannel in channelList:
-                if testChannel == refChannel:
-                    continue
-            
-                propRel = testQueryCutoff.filter(PropagationRelationship.sourceChannelName==refChannel).all()                   
-
-                # Cutoff should be either equal to a float or to []
-                # The "if" clause is necessary to avoid using len() on
-                # a fload, raising an error.
-                if len(propRel) == 0: 
-                    continue 
-                elif  len(propRel) == 1:
-                    propRel = propRel[0]
-                    if not isinstance(propRel, PropagationRelationship): 
-                        raise TypeError("propRel = " + str(propRel) + " with type" + str(type(propRel)))                 
-                else:
-                    raise TypeError("propRel = " + str(propRel) + " with type" + str(type(propRel)))                                       
-    
-                cutoff = propRel.cutoff
-                testRefQueryProp = testQueryProp.filter(Propagation.sourceChannelName==refChannel)   
-                validQuery       = testRefQueryProp.filter(Propagation.similarity >= cutoff)                
+                ###########################################################################    
+                # FALSE DETECTION AND OUTLIERS REJECTION
+                ###########################################################################
+                
+                
+                # Getting synchronous records for the specified night, source 
+                # channel, sink channel and event name.
+                testRefQueryProp   = self.session.query(Propagation)\
+                                                .join(TransientEvent, TransientEvent.ID == Propagation.transientEventID)\
+                                                .filter(TransientEvent.psgNight == self.night)\
+                                                .filter(TransientEvent.eventName == self.eventName)\
+                                                .filter(Propagation.offset == 0.0)\
+                                                .filter(Propagation.sinkChannelName==testChannel)\
+                                                .filter(Propagation.sourceChannelName==refChannel)   
+                                 
+                validProp  = testRefQueryProp.filter(Propagation.similarity >= propRel.cutoff).all()                
                             
                 # Rejection because of a too low similarity                                                                                   
                 N      = testRefQueryProp.count()
-                Nvalid = validQuery.count()                 
+                Nvalid = len(validProp)                 
                 if Nvalid == 0: 
                     continue
                 
                 # Expected false detection rate
                 propRel.FDR = (alpha/100.0)/(float(Nvalid)/float(N))            
                 
-                outlierMin, outlierMax = getOutlierThresholds([prop.delay for prop in validQuery.all()])
+                outlierMin, outlierMax = getOutlierThresholds([prop.delay for prop in validProp])
                 
                 nbOut   = 0
                 nbValid = 0
-                for prop in validQuery.all(): 
+                for prop in validProp: 
                     prop.isFP       = False
                     prop.isOutlier  = prop.delay < outlierMin or  prop.delay > outlierMax
                     
@@ -316,9 +282,11 @@ class SPFEvaluator :
                 propRel.nbValid = nbValid    
                 propRel.nbOut   = nbOut
 
-                # Terminate current transaction
-                self.session.commit()
-
+        
+    
+    
+    
+    
     
             
             
@@ -491,9 +459,6 @@ class SPFEvaluator :
                     # has been used to compute the average delay, this second row
                     # will be removed.
                     props[indBidir].bidirect = noRow  
-    
-            # Terminate current transaction
-            self.session.commit()    
 
        
         # SQLAlchemy do not allow to perform Query.update() when order_by() has 
@@ -529,7 +494,7 @@ class SPFEvaluator :
                 prop.noSPF = nightQueryProp_unsorted.filter(Propagation.no == prop.source).one().noSPF            
             whileQuery = nightQueryProp_unsorted.filter(Propagation.noSPF == -1)
         """
-        self.session.commit()
+
                
            
     
@@ -542,11 +507,19 @@ class SPFEvaluator :
      a value -1 in the field "bidirect" during the execution of identifySPF().
     """
     def removeBidirectionnalDuplicates(self):
-        
-        self.session.query(Propagation).filter(Propagation.bidirect >= 0).delete()
-        self.session.query(Propagation).update({Propagation.bidirect: -(Propagation.bidirect +1)},
+
+        teQuery   = self.session.query(TransientEvent.ID)\
+                            .filter(TransientEvent.psgNight == self.night)\
+                            .filter(TransientEvent.eventName == self.eventName)
+
+        baseQuery = self.session.query(Propagation)\
+                            .filter(Propagation.transientEventID.in_(teQuery.subquery()))
+
+        baseQuery.filter(Propagation.bidirect >= 0).delete(synchronize_session='fetch')
+
+        baseQuery.update({Propagation.bidirect: -(Propagation.bidirect +1)},
                                                synchronize_session=False)
-        self.session.commit()        
+
         
 
     
@@ -557,14 +530,17 @@ class SPFEvaluator :
     """
     def negativeDelayCorrection(self): 
         
-        
-        negQuery = self.session.query(Propagation).filter(Propagation.delay < 0.0 )
+        negQuery   = self.session.query(Propagation)\
+                                        .join(TransientEvent, TransientEvent.ID == Propagation.transientEventID)\
+                                        .filter(TransientEvent.psgNight == self.night)\
+                                        .filter(TransientEvent.eventName == self.eventName)\
+                                        .filter(Propagation.delay < 0.0 )
         negQuery.update({Propagation.inverted           : True, 
                          Propagation.delay              : -Propagation.delay,
                          Propagation.sourceChannelName  : Propagation.sinkChannelName,
                          Propagation.sinkChannelName    : Propagation.sourceChannelName},
                          synchronize_session=False)
-        self.session.commit()        
+
 
 
 
@@ -697,8 +673,7 @@ class SPFEvaluator :
             
             propRel.testRejectionC3(deltaWindow, alphaSD)
             propRel.testRejectionC4(minNbValid)
-                  
-            self.session.commit()
+
 
 
 
