@@ -149,7 +149,7 @@ class TransientEvent(Base):
         
         RMSamp          = getProperty(float, "RMSamp")
         meanFreq        = getProperty(float, "meanFreq")
-        stage           = getProperty(str,   "RMSamp")
+        stage           = getProperty(str,   "stage")
         cycle           = getProperty(int,   "cycle")
         slopeOrigin     = getProperty(float, "slopeOrigin")
         slope           = getProperty(float, "slope")
