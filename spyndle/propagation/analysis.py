@@ -665,8 +665,8 @@ class SPFEvaluator :
                     meanX   = median(delays)
                     sdX     = std(delays)                        
             else:
-                meanX   = nan
-                sdX     = nan     
+                meanX   = None #nan
+                sdX     = None #nan     
             
             propRel.delay_mean = meanX
             propRel.delay_sd   = sdX
