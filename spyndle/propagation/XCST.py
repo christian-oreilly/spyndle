@@ -348,9 +348,10 @@ class XCSTEvaluator:
                     # exist. If it already exist, keep its id number but update it
                     # with the new PropagationRelationship object.
                     propRel.add(self.dbSession, behavior = "updateSilently")
+                    self.dbSession.flush()
                     self.propRelNos[ref + test] = propRel.no
     
-
+        
 
     
 
