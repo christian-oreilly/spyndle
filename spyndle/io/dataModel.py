@@ -251,8 +251,7 @@ class Propagation(Base):
     bidirect            = sa.Column(sa.Integer)
     source              = sa.Column(sa.Integer) #, sa.ForeignKey("propagation.no"))
     inverted            = sa.Column(sa.Boolean)    
-    
-    
+
     ######################
     # Rejection criteria  
 
@@ -439,37 +438,43 @@ class PropagationRelationship(Base):
             - failSilently   : Fail to add the new record but do not raise any 
                                error or warning. In short, on error, do nothing.                            
         """
+
         
-        try:
+        query = session.query(PropagationRelationship)\
+                            .filter_by(sourceChannelName = self.sourceChannelName,
+                                       sinkChannelName   = self.sinkChannelName,
+                                       psgNight          = self.psgNight,
+                                       eventName         = self.eventName )
+                                       
+        if query.count() == 0:
             session.add(self)
-            session.commit()
-            
-        except sa.exc.IntegrityError:
+        else:         
             
             if behavior == "raise":
-                raise
-             
-            session.rollback()
+                raise sa.exc.IntegrityError
+    
+            
             if behavior == "updateSilently":
-                
+
                 old = session.query(PropagationRelationship)\
                             .filter_by(sourceChannelName = self.sourceChannelName,
                                        sinkChannelName   = self.sinkChannelName,
                                        psgNight          = self.psgNight,
                                        eventName         = self.eventName ).one()
+                                       
+
                 self.no = old.no
                 session.delete(old)
                 session.add(self)
-                session.commit()
-
-            elif behavior == "failSilently":
-                session.rollback()                
+                    
+            elif behavior == "failSilently":              
                 pass
             
-            else:
-                session.rollback()       
+            else: 
                 raise ValueError("The value '" + behavior + "' is invalid for the behavior variable.")
 
+ 
+            
 
 
 
