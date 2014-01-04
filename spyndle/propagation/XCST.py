@@ -65,7 +65,6 @@ from spyndle.EEG.system10_20 import getEEGChannels
 
 
 
-
 def computeXCST(readerClass, fileName, eventName, dbSession=None,  dbPath=None,  shard=None,
                 verbose=False, **kwargs):
     """
@@ -173,7 +172,7 @@ class XCSTEvaluator:
     """
     Temporary patch because using simply np.sum or np.trapz for the value of 
     the intFct attribute does not work for an unknown reason.
-    """
+    """    
     @staticmethod
     def intSum(X, axis=0): 
         return np.sum(X, axis=0)
@@ -182,6 +181,17 @@ class XCSTEvaluator:
     def intTrapz(X, axis=0) : 
         return np.trapz(X, axis=0)
   
+
+    
+    """
+     A flag specifying wheter an exception should be raised when an event is 
+     encountered outside the recorded epoch. Note that such an "outside event" can
+     also occurs if the offset applied to the XCST is such that an "inside event"
+     is pushed outside of the recorded epoch by the offset. If the flag is set 
+     to False, the "outside events" are simply dropped such that no propagation
+     are computed for them.
+    """
+    __RAISE_ON_OUTSIDE_EVENT__ = False
   
 
     def __init__(self, eventName, verbose = False):
@@ -334,6 +344,10 @@ class XCSTEvaluator:
         # the execution of this code.   
         self.dataManipObj = DataManipulationProcess(reprStr  = repr(self))
     
+    
+    
+    
+    def createPropRel(self):
         # Create the needed  propagation relationship objects and keep note of
         # their id.
         for ref in self.channelList:
@@ -366,12 +380,17 @@ class XCSTEvaluator:
                        list of these attributes along with their default values).     
         """    
 
+        print "compute..."
 
         for key in kwargs:
             if key in self.__dict__:
                 setattr(self, key, kwargs[key])
             else:
                 ValueError("The keyword " + str(key) + " is unknown.") 
+
+        # Create the propagation relationship related to to selected channel
+        # for this computation. 
+        self.createPropRel()
   
         events = self.dbSession.query(TransientEvent)\
                         .filter(TransientEvent.channelName.in_(self.channelList),
@@ -417,6 +436,68 @@ class XCSTEvaluator:
 
 
             
+            
+    def getWindowedSignal(self, event, deltaSampleStart, deltaSampleEnd, 
+                                  channelList, offset):
+
+        refChannel  = event.channelName
+        refFreq     = self.reader.getChannelFreq(refChannel)
+        startTime   = event.startTime -  self.beforePad  - self.artifactPad + offset 
+        duration    = event.duration + self.beforePad + self.afterPad + 2*self.artifactPad
+
+        deltaStart       = deltaSampleStart/refFreq    
+        deltaEnd         = deltaStart
+
+        """
+         The signal at startTime - delta might not be available and the 
+         reader will start reading at the next available sample following 
+         the startTime requested. In some cases, it can happen that events
+         have been specified outside the time epoch covered by the recording 
+         at hand. Given on the value of self.__RAISE_ON_OUTSIDE_EVENT__, this
+         can be considered as an error or not.
+        """
+        refStartTime = self.reader.getNextSampleStartTime(refChannel, startTime - deltaStart)
+        if refStartTime is None:
+            if self.__RAISE_ON_OUTSIDE_EVENT__:
+                raise ValueError("The event is not occurring during the recorded epoch.")
+            else:
+                return None, None, None        
+        
+        """         
+         If startTime - delta was not occuring during recording period, the next
+         available sample was taken as the beginning of the signal. When this 
+         happens, we may miss some samples in this signal. We remove these 
+         samples in both synchronous and asynchronous signals (for them to have 
+         the same size) by reducing the delta accordingly.
+        """
+        deltaStartRef = int((refStartTime - (startTime - deltaStart ))*refFreq)
+            
+        assert(deltaStartRef >=0)
+        deltaSampleStart -= deltaStartRef
+        deltaStart        = deltaSampleStart/refFreq                
+        
+        refStart      = startTime - deltaStart
+        refDuration   = duration + deltaStart + deltaEnd
+        signalsDataRef = self.reader.read(channelList, refStart, refDuration)  
+        
+        """
+         It can happen that the signal is not available for the whole refDuration
+         period. In this case, we want to remove the unaivalable portion from
+         the deltaEnd padding.
+        """
+        deltaEndRef = int(refDuration*refFreq) - len(signalsDataRef[refChannel].signal)
+
+        assert(deltaEndRef >=-1)    
+        
+        deltaSampleEnd -= deltaEndRef       
+            
+            
+        return signalsDataRef, deltaSampleStart, deltaSampleEnd
+            
+            
+            
+            
+            
          
     def __computeForEvent(self, event):       
         """
@@ -428,82 +509,58 @@ class XCSTEvaluator:
         """  
 
         refChannel        = event.channelName
-        refFreq           = self.reader.getChannelFreq(refChannel)
-        artifactPadSample = int(self.artifactPad*refFreq)          
+        fs                = self.reader.getChannelFreq(refChannel)
+        artifactPadSample = int(self.artifactPad*fs)          
+    
+        deltaSampleStart  = int(self.delta*fs)          
+        deltaSampleEnd    = deltaSampleStart    
+
+        signalsDataRef, deltaSampleStartRef, deltaSampleEndRef = \
+            self.getWindowedSignal(event, deltaSampleStart, deltaSampleEnd, 
+                                   [refChannel], 0)  
+        signalsDataCmp, deltaSampleStartCmp, deltaSampleEndCmp = \
+            self.getWindowedSignal(event, deltaSampleStart, deltaSampleEnd, 
+                                   self.channelList,  self.offset)  
         
-        #### These are reinitialized at each event because their balue
-        # can be altered during the computation og the XCST for
-        # a given event
-        deltaSampleStart = int(self.delta*refFreq)        
-        deltaStart       = deltaSampleStart/refFreq    
-        deltaSampleEnd   = deltaSampleStart    
-        deltaEnd         = deltaStart
-        #### 
-            
-        startTime = event.startTime -  self.beforePad  - self.artifactPad    
-        duration  = event.duration + self.beforePad + self.afterPad + 2*self.artifactPad
+        if signalsDataRef is None or signalsDataCmp is None:
+            return 
         
-        
-        
-        """
-         The signal at startTime - delta might not be available and the 
-         reader will start reading at the next available sample following 
-         the startTime requested. If this happens we may miss some samples 
-         in this signal. We remove these samples in both synchronous and
-         asynchronous signals (for them to have the same size) by reducing  
-         the delta accordingly.
-        """
-        refStartTime = self.reader.getNextSampleStartTime(refChannel, startTime - deltaStart)
-        deltaStartRef = int((refStartTime - (startTime - deltaStart ))*self.reader.getChannelFreq(refChannel))
-            
-        if deltaStartRef > 0 : 
-            # In case that the signal is not sufficiently long signal 
-            # before the spindle to compute delays that are at least half
-            # of the limit asked by the parameter delta, we reject this spindle
-            if deltaStartRef >  deltaSampleStart/2:      
-                # The condition of this assert should never be met if 
-                # there is no bug in spindle detection and EEG data readers.
-                assert(startTime - deltaStart <= event.startTime)
-                return
-            
-            deltaSampleStart -= deltaStartRef
-            deltaStart        = deltaSampleStart/self.reader.getChannelFreq(refChannel)                  
-        
-        
-        signalsDataRef = self.reader.read([refChannel], startTime - deltaStart, duration + deltaStart + deltaEnd)                  
-        
-        
-        """
-         The signal at startTime - delta + offset might not be 
-         available and the reader will start reading at the
-         next available sample following the startTime requested. If this
-         happens for the offset signal, just adjust the offset accordingly.
-        """
-        cmpStartTime = self.reader.getNextSampleStartTime(refChannel, startTime - deltaStart + self.offset)
-        deltaStartCmp = int((cmpStartTime - (startTime - deltaStart + self.offset))*self.reader.getChannelFreq(refChannel))
-        
-        if deltaStartCmp > 0 : 
-            signalsDataCmp = self.reader.read(self.channelList, cmpStartTime, duration + deltaStart + deltaEnd)  
-        else:
-            signalsDataCmp = self.reader.read(self.channelList, startTime - deltaStart + self.offset , duration + deltaStart + deltaEnd)  
-            
-        
+        # In case  the reference or the test signal are not sufficiently long 
+        # signal before and after the spindle to compute delays that are at 
+        # least half of the limit asked by the parameter delta, we reject 
+        # the spindle.
+        if deltaSampleStartRef < deltaSampleStart/2  or \
+           deltaSampleEndRef   < deltaSampleEnd/2    or \
+           deltaSampleStartCmp < deltaSampleStart/2  or \
+           deltaSampleEndCmp   < deltaSampleEnd/2    :      
+            return
+
+
         
         #################################################################
-        # Because of numerical approximation, the signal length between the
-        # synchronous and the asychronous comparisons can be different 
-        # of 1 sample. We need to fix them to the same size to avoid
-        # comparison problems.
-        if self.offset != 0.0:
-            if len(signalsDataCmp[refChannel].signal) > len(signalsDataRef[refChannel].signal):
-                for channel in signalsDataCmp:
-                    signalsDataCmp[channel].signal = signalsDataCmp[channel].signal[:-1]
-            elif len(signalsDataCmp[refChannel].signal) < len(signalsDataRef[refChannel].signal):
-                signalsDataRef[refChannel].signal = signalsDataRef[refChannel].signal[:-1]
-        ##############
+        # We keep the intersection of the time duration of the two signals.
+        dtStart = deltaSampleStartRef - deltaSampleStartCmp
+        if dtStart < 0 :
+            for channel in signalsDataCmp:
+                signalsDataCmp[channel].signal = signalsDataCmp[channel].signal[-dtStart:]
+                deltaSampleStart = deltaSampleStartRef                      
+        elif dtStart > 0:
+            signalsDataRef[refChannel].signal = signalsDataRef[refChannel].signal[dtStart:]
+            deltaSampleStart = deltaSampleStartCmp                         
+                
+        dtEnd = deltaSampleEndRef - deltaSampleEndCmp
+        if dtEnd < 0 :
+            for channel in signalsDataCmp:
+                signalsDataCmp[channel].signal = signalsDataCmp[channel].signal[:dtEnd]        
+                deltaSampleEnd   = deltaSampleEndRef   
+        elif dtEnd > 0:
+            signalsDataRef[refChannel].signal = signalsDataRef[refChannel].signal[:-dtEnd]        
+            deltaSampleEnd   = deltaSampleEndCmp   
+                
+        assert(len(signalsDataCmp[refChannel].signal) == len(signalsDataRef[refChannel].signal))
+
         
-        
-        fs = signalsDataCmp[refChannel].samplingRate                   
+                      
         
         # Spectra computation
         X, fXRef = computeMST(signalsDataRef[refChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)     
@@ -615,4 +672,3 @@ class XCSTEvaluator:
                                      delay=maxDeltay, offset=self.offset, 
                                     propRelNo = self.propRelNos[refChannel + testChannel]))
         self.dbSession.add_all(propagations)
-    
