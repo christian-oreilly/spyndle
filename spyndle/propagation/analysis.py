@@ -62,6 +62,19 @@ from spyndle.io import Propagation, TransientEvent, \
     DatabaseMng, PropagationRelationship, Channel, rows2df, Session
 
 
+"""
+class Nan(ColumnElement):
+    type = NULLTYPE
+
+@compiles(Nan, "postgresql")
+def pg_nan(elem, compiler, **kw):
+    return "NaN"
+
+@compiles(Nan, "sqlite")
+def sl_nan(elem, compiler, **kw):
+    return "None"
+
+"""
 
 ###############################################################################
 # Internal functions
