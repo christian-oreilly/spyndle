@@ -700,6 +700,26 @@ class EDFBaseReader(EEGDBReaderBase) :
 
 
 
+    def crop(self, timeStart, timeEnd, saveFileName=None):
+        
+        
+        """
+         Note: timeStart and timeEnd are not the exact starting and ending time.
+         The starting and ending time will be those of the page containing the
+         samples corresponding to timeStart and timeEnd. We avoid to make new
+         record divisions to obtain the exact starting and ending time since the
+         records can be discontinuous in EDF+ format.
+        """
+        
+        # Valid pages
+        noPages = [noPage for noPage, rec in enumerate(self.recordStartTime) if \
+                     rec.startTime <= timeEnd and rec.startTime + rec.timeLength >= timeStart] 
+
+        if saveFileName is None:
+            self.save(noPages=noPages)
+        else:
+            self.saveAs(saveFileName, noPages=noPages)            
+
 
 
     """
@@ -710,8 +730,13 @@ class EDFBaseReader(EEGDBReaderBase) :
              in the recorded phenomena.
          2 - The data are not loaded in kept within the object, as opposed to 
              the header and the event informations.
+             
+     noPage can either be left to known or to be set to a list of page number. 
+     In the latter case, only the page with numbers included in that list will
+     be saved.
+     
     """
-    def save(self, tempPath=None):
+    def save(self, tempPath=None, noPages = None):
 
         if tempPath is None:
             tempPath = gettempdir() 
@@ -721,7 +746,7 @@ class EDFBaseReader(EEGDBReaderBase) :
         # to create a completely new file and swap it with the original.
         tempFileName = tempPath + "temp-" + str(uuid.uuid1()) + "-" + os.path.basename(self.fileName)
                 
-        self.saveAs(tempFileName)
+        self.saveAs(tempFileName, noPages=noPages)
 
         # Try to delete the original file. This may failled because the file
         # is used by another process (e.g., when running )        
@@ -748,7 +773,7 @@ class EDFBaseReader(EEGDBReaderBase) :
         self.__init__(self.fileName)
 
 
-    def saveAs(self, saveFileName):
+    def saveAs(self, saveFileName, noPages=None):
 
         with io.open(saveFileName, 'wb') as fileWrite:
             with io.open(self.fileName, 'rb') as fileObj:
@@ -761,6 +786,10 @@ class EDFBaseReader(EEGDBReaderBase) :
                 # of the saving operation.
                 writeHeader = deepcopy(self.header)
                 
+                if not noPages is None:
+                    writeHeader.nbRecords = len(noPages)                 
+                
+                
                 # Verifying if the annotation field is large enough to record the annotations.
                 # If not, enlarge it on the writing copy.
                 if max([len(s) for s in eventStings]) >= self.header.nbSamplesPerRecord[EVENT_CHANNEL]*self.header.nbBytes:       
@@ -770,20 +799,26 @@ class EDFBaseReader(EEGDBReaderBase) :
                 # Write the header
                 writeHeader.write(fileWrite)
                 fileObj.seek(fileWrite.tell())
+
+                # If it has not been specified that only certain pages are to be
+                # save, then specify that all pages are to be saved.
+                if noPages is None: 
+                    noPages = range(len(eventStings))
         
                 # Write the body. Actually, we leave the data intact, updating only
                 # the annotation field.
-                for eventStr in eventStings:
+                for noPage, eventStr in enumerate(eventStings):
                     rawRecord = self.readRawRecord(fileObj)    
-                    for channel in self.header.channelLabels:
-                        if channel == EVENT_CHANNEL:    
-                            encodedString = eventStr.encode("utf8")                     
-                            fileWrite.write(encodedString + "\0"*(writeHeader.nbSamplesPerRecord[channel]*self.header.nbBytes - len(encodedString)) )  
-                        else: 
-                            fileWrite.write(rawRecord[channel])
-        
+                    if noPage in noPages:                    
+                        for channel in self.header.channelLabels:
+                            if channel == EVENT_CHANNEL:    
+                                encodedString = eventStr.encode("utf8")                     
+                                fileWrite.write(encodedString + "\0"*(writeHeader.nbSamplesPerRecord[channel]*self.header.nbBytes - len(encodedString)) )  
+                            else: 
+                                fileWrite.write(rawRecord[channel])
+            
                 
-                assert(fileWrite.tell() == writeHeader.headerNbBytes + sum(writeHeader.nbSamplesPerRecord.values())*writeHeader.nbBytes*self.getNbPages())
+                #assert(fileWrite.tell() == writeHeader.headerNbBytes + sum(writeHeader.nbSamplesPerRecord.values())*writeHeader.nbBytes*self.getNbPages())
 
 
 
@@ -1362,7 +1397,19 @@ class EDFReader(EEGDBReaderBase) :
   
   
   
-  
+
+
+
+    def crop(self, timeStart, timeEnd, saveFileName=None, saveAnnotationFileName=None):
+        
+        if saveAnnotationFileName is None and not saveFileName is None:
+            saveAnnotationFileName = saveFileName + "a"
+
+        if self.isSplitted:
+            self.annotationsReader.crop(timeStart, timeEnd, saveAnnotationFileName)
+        self.dataReader.crop(timeStart, timeEnd, saveFileName)
+
+
             
 
 
