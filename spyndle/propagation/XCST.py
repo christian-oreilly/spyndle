@@ -427,10 +427,7 @@ class XCSTEvaluator:
             
         # Update the data manipulation process object.            
         self.dataManipObj.reprStr = repr(self)
-
-            
-        if not self.dbMng is None:
-            self.dbMng.disconnectDatabase()
+        
                     
 
 
