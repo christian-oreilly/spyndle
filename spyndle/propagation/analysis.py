@@ -51,15 +51,16 @@
 # IMPORTS
 ###############################################################################
 from scipy import unique, where, percentile, concatenate, array
-from scipy import sqrt, nan, median, std
+from scipy import sqrt, median, std
 from sklearn.covariance import MinCovDet
 from numpy import in1d
 import sqlalchemy
 from sqlalchemy import distinct, and_
+import pandas as pd
 
 from spyndle.propagation import computeXCST
 from spyndle.io import Propagation, TransientEvent, \
-    DatabaseMng, PropagationRelationship, Channel, rows2df, Session
+    DatabaseMng, PropagationRelationship, Channel, rows2df
 
 
 """
@@ -106,6 +107,50 @@ def getOutlierThresholds(data, coef=1.5):
 
 
 
+
+
+def getAveragePropagation(applyC3=True, applyC4=True, nights=[], eventNames=[],  
+                          dbName = "sqlite:///:memory:", shards=[None]):
+    """
+    Helper function to easily ge access to the average propagation, without
+    bottering with the use of a SPFEvaluator object.
+    """    
+    
+    if not isinstance(shards, list):
+        raise TypeError("The argument shards must be a list.")
+ 
+ 
+    DFs = []
+    for shard in shards:            
+        try:
+            dbMng = DatabaseMng(dbName, shard=shard)
+        except sqlalchemy.exc.ArgumentError, error:
+             print "Error connecting to the specified database URL. "\
+                   "The format of the database path is invalid."     \
+                   "\n\nSQLAlchemy error message: " + str(error)
+
+        query = dbMng.session.query(PropagationRelationship)
+        if nights != []:
+            query = query.filter(PropagationRelationship.psgNight.in_(nights))   
+    
+        if eventNames != []:
+            query = query.filter(PropagationRelationship.eventName.in_(eventNames))  
+                   
+            
+        if applyC3:
+            query = query.filter_by(isValidC3 = True)
+        if applyC4:
+            query = query.filter_by(isValidC4 = True)
+        
+        DFs.append(rows2df(query.all()))
+    
+    return pd.concat(DFs)
+
+
+
+
+
+
 class SPFEvaluator : 
     
     def __init__(self, night, eventName, dbSession=None, dbName = "sqlite:///:memory:", 
@@ -121,9 +166,11 @@ class SPFEvaluator :
             
         else:
             if dbName == "sqlite:///:memory:":
-                print "No database session passed. Using in-memory database."
+                if self.verbose:
+                    print "No database session passed. Using in-memory database."
             else:     
-                print "No database session passed. Using the " + dbName + " database."           
+                if self.verbose:
+                    print "No database session passed. Using the " + dbName + " database."           
             try:
 
                 self.dbMng = DatabaseMng(dbName, shard=shard)
@@ -543,6 +590,7 @@ class SPFEvaluator :
     """
     def negativeDelayCorrection(self): 
         
+        #TODO: The execution of this query is much too long. It must be fixed.
         negQuery   = self.session.query(Propagation)\
                                         .join(TransientEvent, TransientEvent.ID == Propagation.transientEventID)\
                                         .filter(TransientEvent.psgNight == self.night)\
@@ -712,7 +760,6 @@ class SPFEvaluator :
                 
         return pd.DataFrame(result)
         """
-    
     
     
     
