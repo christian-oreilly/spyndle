@@ -77,6 +77,7 @@ class DatabaseMng():
                 
         self.dmm = DataModelMng(self.session)  
         
+        self.dbType = ""
             
             
     def __enter__(self):
@@ -102,9 +103,21 @@ class DatabaseMng():
 
     def createTables(self):
         """
-        Create the tables of the data model if those are not already existent.
+        Create the tables corresponding to the data model if these tables 
+        dont already exist.
         """            
+        
+        # Suppress the MySQL warning message.
+        if self.dbType == "mysql":
+            import MySQLdb 
+            import warnings 
+            warnings.filterwarnings( 
+                action="ignore", 
+                category=MySQLdb.Warning, 
+                message="Can't create database '.*'; database exists") 
+            
         Base.metadata.create_all(self.dbEngine)   
+
 
 
      
@@ -116,10 +129,11 @@ class DatabaseMng():
         URL is of the form dialect+driver://user:password@host/dbname[?key=value..]
         or is an URL.
         """         
-        if URL.split(":")[0].split("+")[0] == "sqlite": 
+        self.dbType = URL.split(":")[0].split("+")[0]
+        if self.dbType == "sqlite": 
             self.dbEngine = sa.create_engine(URL, poolclass=QueuePool, pool_size=20,  
                                              pool_timeout=180)#, isolation_level='READ UNCOMMITTED') #NullPool)
-        elif URL.split(":")[0].split("+")[0] == "mysql":
+        elif self.dbType == "mysql":
             dbName = URL.split("@")[1].split("/")[1].split("[")[0]
             connectStr = URL.split("@")[0] + "@" + URL.split("@")[1].split("/")[0]
             self.dbEngine = sa.create_engine(connectStr, poolclass=QueuePool, pool_size=20,  
