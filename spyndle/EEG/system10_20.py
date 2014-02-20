@@ -14,6 +14,7 @@
 from scipy import array
 import numpy as np
 import re
+from numpy import sqrt
 
 from spyndle import Line, Point
 from spyndle.EEG.electrodesSVG import getElectrodeCoordinates
@@ -23,6 +24,35 @@ from spyndle.EEG.mapping import getTransformedCoord
 electrodes = ['Fp1', 'Fp2', 'F7', 'F8', 'F3', 'F4', 
               'T3', 'T4', 'C3', 'C4', 'T5', 'T6', 'P3', 
                'P4', 'O1', 'O2', 'Fz', 'Cz', 'Pz', 'Oz']
+
+
+"""
+These positions are taken from Okamoto, M., Dan, H., Sakamoto, K., Takeo, K.,
+Shimizu, K., Kohno, S., . . . Dan, I. (2004). Three-dimensional probabilistic
+anatomical cranio-cerebral correlation via the international 10-20 system 
+oriented for transcranial functional brain mapping. NeuroImage, 21(1), 99-111. 
+"""
+mni_location_head_surface = {}
+mni_location_head_surface["Fp1"] =	[-26.1,	83.5,	-0.1]
+mni_location_head_surface["Fp2"] =	[32.1,	81.3,	-0.2]
+mni_location_head_surface["Fz"]  =	[-0.1,	53.3,	70.6]
+mni_location_head_surface["F3"]  =	[-42.6,	58.0,	39.6]
+mni_location_head_surface["F4"]  =	[46.9,	56.7,	40.2]
+mni_location_head_surface["F7"]  =	[-68.5,	37.9,	-5.9]
+mni_location_head_surface["F8"]  =	[71.4,	35.6,	-7.8]
+mni_location_head_surface["Cz"]  =	[0.6,	-12.7,	101.4]
+mni_location_head_surface["C3"]  =	[-62.7,	-12.7,	69.8]
+mni_location_head_surface["C4"]  =	[64.2,	-15.2,	69.9]
+mni_location_head_surface["T3"]  =	[-84.6,	-20.7,	-10.8]
+mni_location_head_surface["T4"]  =	[86.0,	-25.5,	-9.4]
+mni_location_head_surface["Pz"]  =	[-0.2,	-76.6,	88.5]
+mni_location_head_surface["P3"]  =	[-46.8,	-88.2,	58.8]
+mni_location_head_surface["P4"]  =	[44.8,	-87.9,	59.6]
+mni_location_head_surface["T5"]  =	[-72.2,	-72.4,	0.6]
+mni_location_head_surface["T6"]  =	[70.8,	-75.6,	4.1]
+mni_location_head_surface["O1"]  =	[-31.9,	-112.6,	17.3]
+mni_location_head_surface["O2"]  =	[28.1,	-112.9,	19.3]
+
 
 def get10_20AdjacentElectrodes():
     electSource = array(["F4","F4","F4","F4","F4","F4",
@@ -66,6 +96,125 @@ def get10_20AdjacentElectrodes():
                   "F7", "F3", "C3", "P3", "T5"])
     
     return electSource, electTest
+
+
+
+
+
+def get_10_20_electrode_distance(sagital=0.35, transverse=0.35, circonf= 0.55, anterior=0.22, posterior=0.24, parasagitleft=0.24, parasagitright=None):
+
+    if parasagitright is None:
+        parasagitright = parasagitleft
+        
+    distance = {}
+    
+    for ref, test in zip(("Cz","Cz","Fz", "Pz"), ("Fz","Pz", "Fpz", "Oz")):
+        distance[(ref, test)] = sagital*0.2
+    for ref, test in zip(("Nz","Iz"), ("Fpz", "Oz")):
+        distance[(ref, test)] = sagital*0.1
+
+    for ref, test in zip(("Fp1","Fp1", "T3","T3","O1","O1","T6","T6","F8","F8"), 
+                         ("Fp2","F7","F7","T5","T5","O2","O2","T4","T4","Fp2")):
+        distance[(ref, test)] = circonf*0.1
+    for ref, test in zip(("Fp1","Fp2","O1","O2"), ("Fpz","Fpz","Oz","Oz")):
+        distance[(ref, test)] = circonf*0.05    
+  
+
+    for ref, test in zip(("Cz", "Cz", "C3", "C4"), ("C3", "C4", "T3", "T4")):
+        distance[(ref, test)] = transverse*0.2    
+    for ref, test in zip(("Fz", "Fz", "F3", "F4"), ("F3", "F4", "F7", "F8")):
+        distance[(ref, test)] = anterior*0.25 
+    for ref, test in zip(("Pz", "Pz", "P3", "P4"), ("P3", "P4", "T5", "T6")):
+        distance[(ref, test)] = posterior*0.25     
+    for ref, test in zip(("C3", "C3", "F3", "P3"), ("P3", "F3", "Fp1", "O1")):
+        distance[(ref, test)] = parasagitleft*0.25    
+    for ref, test in zip(("C4", "C4", "F4", "P4"), ("P4", "F4", "Fp2", "O2")):
+        distance[(ref, test)] = parasagitright*0.25      
+
+
+    distance[("Cz", "F4")] = 0.5*sqrt((parasagitright*0.25)**2+(transverse*0.2)**2)+\
+                             0.5*sqrt((sagital*0.2)**2+(anterior*0.25)**2)
+    distance[("C4", "Fz")] = 0.5*sqrt((parasagitright*0.25)**2+(anterior*0.25)**2)+\
+                             0.5*sqrt((sagital*0.2)**2+(transverse*0.2)**2)    
+    distance[("Cz", "F3")] = 0.5*sqrt((parasagitleft*0.25)**2+(transverse*0.2)**2)+\
+                             0.5*sqrt((sagital*0.2)**2+(anterior*0.25)**2)
+    distance[("C3", "Fz")] = 0.5*sqrt((parasagitleft*0.25)**2+(anterior*0.25)**2)+\
+                             0.5*sqrt((sagital*0.2)**2+(transverse*0.2)**2)    
+
+    distance[("T3", "F3")] = 0.5*sqrt((parasagitleft*0.25)**2+(transverse*0.2)**2)+\
+                             0.5*sqrt((circonf*0.1)**2+(anterior*0.25)**2)
+
+    distance[("C3", "F7")] = 0.5*sqrt((parasagitleft*0.25)**2+(anterior*0.25)**2)+\
+                             0.5*sqrt((circonf*0.1)**2+(transverse*0.2)**2)
+
+    distance[("T4", "F4")] = 0.5*sqrt((parasagitright*0.25)**2+(transverse*0.2)**2)+\
+                             0.5*sqrt((circonf*0.1)**2+(anterior*0.25)**2)
+
+    distance[("C4", "F8")] = 0.5*sqrt((parasagitright*0.25)**2+(anterior*0.25)**2)+\
+                             0.5*sqrt((circonf*0.1)**2+(transverse*0.2)**2) 
+
+    
+    
+    
+    
+    distance[("Cz", "P4")] = 0.5*sqrt((parasagitright*0.25)**2+(transverse*0.2)**2)+\
+                             0.5*sqrt((sagital*0.2)**2+(posterior*0.25)**2)
+    distance[("C4", "Pz")] = 0.5*sqrt((parasagitright*0.25)**2+(posterior*0.25)**2)+\
+                             0.5*sqrt((sagital*0.2)**2+(transverse*0.2)**2)
+
+    distance[("Cz", "P3")] = 0.5*sqrt((parasagitleft*0.25)**2+(transverse*0.2)**2)+\
+                             0.5*sqrt((sagital*0.2)**2+(posterior*0.25)**2)
+    distance[("C3", "Pz")] = 0.5*sqrt((parasagitleft*0.25)**2+(posterior*0.25)**2)+\
+                             0.5*sqrt((sagital*0.2)**2+(transverse*0.2)**2)
+    
+    distance[("T3", "P3")] = 0.5*sqrt((parasagitleft*0.25)**2+(transverse*0.2)**2)+\
+                             0.5*sqrt((circonf*0.1)**2+(posterior*0.25)**2)
+    distance[("C3", "T5")] = 0.5*sqrt((parasagitleft*0.25)**2+(posterior*0.25)**2)+\
+                             0.5*sqrt((circonf*0.1)**2+(transverse*0.2)**2)
+    distance[("T4", "P4")] = 0.5*sqrt((parasagitright*0.25)**2+(transverse*0.2)**2)+\
+                             0.5*sqrt((circonf*0.1)**2+(posterior*0.25)**2)
+    distance[("C4", "T6")] = 0.5*sqrt((parasagitright*0.25)**2+(posterior*0.25)**2)+\
+                             0.5*sqrt((circonf*0.1)**2+(transverse*0.2)**2)
+    
+    
+    
+    
+    
+    
+    distance[("Fz", "Fp2")] = 0.5*sqrt((parasagitright*0.25)**2+(anterior*0.25)**2)+\
+                              0.5*sqrt((sagital*0.2)**2+(circonf*0.05)**2)
+    distance[("F4", "Fpz")] = 0.5*sqrt((parasagitright*0.25)**2+(circonf*0.05)**2)+\
+                              0.5*sqrt((sagital*0.2)**2+(anterior*0.25)**2)
+    
+    distance[("Fz", "Fp1")] = 0.5*sqrt((parasagitleft*0.25)**2+(anterior*0.25)**2)+\
+                              0.5*sqrt((sagital*0.2)**2+(circonf*0.05)**2)
+    distance[("F3", "Fpz")] = 0.5*sqrt((parasagitleft*0.25)**2+(circonf*0.05)**2)+\
+                              0.5*sqrt((sagital*0.2)**2+(anterior*0.25)**2)
+    
+    
+    
+    
+    distance[("Pz", "O2")] = 0.5*sqrt((parasagitright*0.25)**2+(posterior*0.25)**2)+\
+                             0.5*sqrt((sagital*0.2)**2+(circonf*0.05)**2)
+    distance[("P4", "Oz")] = 0.5*sqrt((parasagitright*0.25)**2+(circonf*0.05)**2)+\
+                             0.5*sqrt((sagital*0.2)**2+(posterior*0.25)**2)
+    distance[("Pz", "O1")] = 0.5*sqrt((parasagitleft*0.25)**2+(posterior*0.25)**2)+\
+                             0.5*sqrt((sagital*0.2)**2+(circonf*0.05)**2)
+    distance[("P3", "Oz")] = 0.5*sqrt((parasagitleft*0.25)**2+(circonf*0.05)**2)+\
+                             0.5*sqrt((sagital*0.2)**2+(posterior*0.25)**2)
+    
+    
+    for ref in ("Fp1", "Fp2"):
+        distance[(ref, "Nz")] = sqrt((sagital*0.1)**2+(circonf*0.05)**2)
+
+    for ref in ("O1", "O2"):
+        distance[(ref, "Iz")] = sqrt((sagital*0.1)**2+(circonf*0.05)**2)
+       
+    keys = distance.keys()
+    for ref, test in keys:
+        distance[(test, ref)] = distance[(ref, test)]
+    
+    return distance
 
 
 
