@@ -34,186 +34,8 @@
 
 """
 
-from scipy import concatenate, sqrt
-from operator import attrgetter
-
-
-class BadTransitionSequence(Exception): 
-    
-    def __init__(self, transition, state):
-        if transition.type == "A":
-            self.transition = "beginStage"
-        elif transition.type == "B":
-            self.transition = "endStage"
-        elif transition.type == "C":
-            self.transition = "beginSpindleGold"
-        elif transition.type == "D":
-            self.transition = "endSpindleGold"
-        elif transition.type == "E":
-            self.transition = "beginSpindleTest"
-        elif transition.type == "F":
-            self.transition = "endSpindleTest"
-        
-        self.state = state
-        self.time  = transition.time        
-        
-    def __str__(self):
-        return ("Encountered invalid transition sequence. Trying to make the transition "
-                            + self.transition + " while in state " + self.state + 
-                            " at time " + str(self.time) + ".")
-
-
-
-
-class transition:
-    def __init__(self, time, type):
-        self.time = time
-        
-        """
-        Type legend:
-            A: beginStage
-            B: endStage
-            C: beginSpindleGold
-            D: endSpindleGold
-            E: beginSpindleTest
-            F: endSpindleTest    
-        """
-        self.type = type
-
-    def __str__(self):
-        return str(self.time) + ":" + self.type
-
-
-
-class State:
-    pass
-
-class StateITN(State):
-    def applyTransition(self, transition, machine):
-        if transition.type == "A":
-            machine.lastTime = transition.time
-            return StateTN()
-        elif transition.type == "E":
-            return StateIFP()
-        elif transition.type == "C":
-            return StateIFN()
-        else:
-            raise BadTransitionSequence(transition, "ITN")
-                
-class StateIFN(State):
-    def applyTransition(self, transition, machine):
-        if transition.type == "A":
-            machine.lastTime = transition.time
-            return StateFN()
-        elif transition.type == "E":
-            return StateITP()
-        elif transition.type == "D":
-            return StateITN()
-        else:
-            raise BadTransitionSequence(transition, "IFN")
-                
-                
-class StateITP(State):
-    def applyTransition(self, transition, machine):
-        
-        if transition.type == "A":
-            machine.lastTime = transition.time
-            return StateTP()
-        elif transition.type == "F":
-            return StateIFN()
-        elif transition.type == "D":
-            return StateIFP()
-        else:
-            raise BadTransitionSequence(transition, "ITP")
-                
-                
-class StateIFP(State):
-    def applyTransition(self, transition, machine):
-
-        if transition.type == "A":
-            machine.lastTime = transition.time
-            return StateFP()
-        elif transition.type == "C":
-            return StateITP()
-        elif transition.type == "F":
-            return StateITN()
-        else:
-            raise BadTransitionSequence(transition, "IFP")
-                
-
-                
-class StateTN(State):
-    def applyTransition(self, transition, machine):
-        
-        if transition.type   == "B":  state = StateITN()
-        elif transition.type == "E":  state = StateFP()
-        elif transition.type == "C":  state = StateFN()
-        else:
-            raise BadTransitionSequence(transition, "TN")
-                
-        machine.TN += transition.time - machine.lastTime
-        machine.lastTime = transition.time
-        return state    
-
-            
-class StateFN(State):
-    def applyTransition(self, transition, machine):
-        
-        if transition.type   == "B":  state = StateIFN()
-        elif transition.type == "D":  state = StateTN()
-        elif transition.type == "E":  state = StateTP()
-        else:
-            raise BadTransitionSequence(transition, "FN")
-                
-        machine.FN += transition.time - machine.lastTime
-        machine.lastTime = transition.time
-        return state
-
-            
-class StateTP(State):
-    def applyTransition(self, transition, machine):
-        
-        if transition.type   == "B":  state = StateITP()
-        elif transition.type == "F":  state = StateFN()
-        elif transition.type == "D":  state = StateFP()
-        else:
-            raise BadTransitionSequence(transition, "TP")
-                
-        machine.TP += transition.time - machine.lastTime
-        machine.lastTime = transition.time
-        return state
-
-            
-class StateFP(State):
-    def applyTransition(self, transition, machine):
-        
-        if transition.type   == "B":  state = StateIFP()
-        elif transition.type == "F":  state = StateTN()
-        elif transition.type == "C":  state = StateTP()
-        else:
-            raise BadTransitionSequence(transition, "FP")
-                
-        machine.FP += transition.time - machine.lastTime
-        machine.lastTime = transition.time
-        return state
-
-
-
-
-class StateMachine:
-    def __init__(self):
-        self.TN         = 0.0
-        self.FN         = 0.0
-        self.TP         = 0.0
-        self.FP         = 0.0
-        self.lastTime   = None
-    
-    def run(self, transitionList):
-        
-        state = StateITN()
-        for transition in transitionList:
-            state = state.applyTransition(transition, self)
-            
+from scipy import sqrt
+import numpy as np
 
 
 # Compare two detections. Can be either used to compare two detector objects
@@ -233,7 +55,7 @@ class DetectorEvaluator:
     
     
     def detectSpindlesAndDetectStatistics(self, goldStandardDetector, testedDetector, 
-                                          listChannels, listSleepStages, 
+                                          channelList, listSleepStages, 
                                           goldSpindleName = "goldSpindle", 
                                           testedSpindleName = "testedSpindle"):
         # goldStandardDetector ans testedDetector are two detectors correctly
@@ -247,114 +69,61 @@ class DetectorEvaluator:
         ########### PERFORM SPINDLE DETECTION
         print "Detecting spindles using the gold standard..."
         self.goldStandard.setDetectionStages(listSleepStages)
-        self.goldStandard.detectSpindles(listChannels) 
+        self.goldStandard.detectSpindles(channelList) 
         self.goldStandard.saveSpindle(self.goldStandard.reader, goldSpindleName, "Spindle")
 
 
         print "Detecting spindles using the tested detector..."
         self.tested.setDetectionStages(listSleepStages)
-        self.tested.detectSpindles(listChannels) 
+        self.tested.detectSpindles(channelList) 
         self.tested.saveSpindle(self.tested.reader, testedSpindleName, "Spindle")
 
         self.computeStatistics(self, listSleepStages, goldSpindleName, testedSpindleName,
-                               self.goldStandard.reader, self.tested.reader, listChannels)
+                               self.goldStandard.reader, self.tested.reader, channelList)
         
         
         
         
 
     def computeStatistics(self, listDetectionStages, nameEventGold, 
-                          nameEventTested,  readerGold, readerTested=None, listChannels=None):
+                          nameEventTested,  readerGold, readerTested=None, channelList=None):
 
         # If no tested reader is specified, we consider the that reader passed as
-        # readerGold contains the events for for both the gold and the tested detection
+        # readerGold contains the events for both the gold and the tested detection
         if readerTested is None:
             readerTested = readerGold
+
+        if isinstance(channelList, (str, unicode)):
+            channelList = [channelList]
          
-        # If listChannels is not specified, we consider every channel present
+        # If channelList is not specified, we consider every channel present
         # in the gold reader.
-        if listChannels is None:
-            listChannels = readerGold.getChannelLabels()
-         
-        def getSpindleTransitions(reader, eventName, channel, isGold):
-            channelSpindles = filter(lambda s: s.channel == channel and s.name == eventName, reader.events)     
-            if len(channelSpindles) :
-                if isGold :
-                    #for s in channelSpindles:
-                    #    print "Gold:", s                    
-                    return concatenate([[transition(spindle.timeStart(), "C"), 
-                                              transition(spindle.timeEnd(), "D")]  for spindle in channelSpindles])   
-                else:
-                    #for s in channelSpindles:
-                    #    print "Test:", s
-                    return concatenate([[transition(spindle.timeStart(), "E"), 
-                                              transition(spindle.timeEnd(), "F")]  for spindle in channelSpindles])          
-            return []
+        if channelList is None:
+            channelList = readerGold.getChannelLabels()
+
+
+        for channel in channelList:
+            indStages    = readerGold.getEventIndicator(listDetectionStages, channel, globalEvent=True)            
+            indEventGold = readerGold.getEventIndicator(nameEventGold, channel)
+            indEventTest = readerGold.getEventIndicator(nameEventTested, channel)
             
+            TP = np.logical_and(indEventGold, indEventTest)
+            TN = np.logical_and(np.logical_not(indEventGold), np.logical_not(indEventTest)) 
+            FP = np.logical_and(np.logical_not(indEventGold), indEventTest)
+            FN = np.logical_and(indEventGold, np.logical_not(indEventTest))
+            
+            self.TP[channel] = np.sum(np.logical_and(indStages, TP))
+            self.TN[channel] = np.sum(np.logical_and(indStages, TN))
+            self.FP[channel] = np.sum(np.logical_and(indStages, FP))
+            self.FN[channel] = np.sum(np.logical_and(indStages, FN))         
        
-        # COMPUTING THE TRANSITIONS ASSOCIATED TO SLEEP STAGES    
-        # computing arrays of sample index associated to every sleep stages for
-        # which we want to evaluate the spindle detection. We only use the changes
-        # of stage for this computation since we do not want to have, for example,
-        # a serie of endStage2, beginStage2, endStage2, beginStage2 creating artigicial
-        # discontinuities at each change of page
-        stageEventNames =  [e for e in readerGold.events if e.groupName == "Stage"]  
         
-        if stageEventNames[0].name in listDetectionStages:
-            self.stageTransitions = [transition(stageEventNames[0].timeStart(), "A")]
-        else:             
-            self.stageTransitions = []
-            
-        for e1, e2 in zip(stageEventNames[:-1], stageEventNames[1:]):
-            if e1 != e2:
-                if e1.name in listDetectionStages and not(e2.name in listDetectionStages) :
-                    self.stageTransitions.append(transition(e1.timeEnd(), "B"))
-                if not(e1.name in listDetectionStages) and e2.name in listDetectionStages :
-                    self.stageTransitions.append(transition(e2.timeStart(), "A"))
-                
-        if stageEventNames[-1].name in listDetectionStages:
-            self.stageTransitions.append(transition(stageEventNames[-1].timeEnd(), "B"))                      
-
-        #goldStageEvents = filter(lambda e: e.name in listSleepStages, readerGold.events)  
-        #if len(goldStageEvents) :                
-        #    self.stageTransitions = concatenate([[transition(event.timeStart(), "A"), 
-        #                                          transition(event.timeEnd(), "B")]  for event in goldStageEvents])  
-        #else:
-        #    self.stageTransitions = []
-            
-        for channel in listChannels:
-            
-            goldSpindleTransitions   = getSpindleTransitions(readerGold, nameEventGold, channel, True)
-            testedSpindleTransitions = getSpindleTransitions(readerTested, nameEventTested, channel, False)
-            transitions = concatenate([self.stageTransitions, goldSpindleTransitions, testedSpindleTransitions])
-
-            if len(goldSpindleTransitions) != 0 or len(testedSpindleTransitions) != 0 :
-
-                msa = StateMachine()
-                                           
-                # Sort transitions by time of occurence and apply finite state 
-                # machine to compute TP, TN, FP, FN
-                try:
-                    msa.run(sorted(transitions, key=attrgetter('time')))
-                except BadTransitionSequence:
-                    print "channel:", channel
-                    for trans in sorted(transitions, key=attrgetter('time')) :
-                        print trans
-                    raise                    
-                    
-                
-    
-                self.TP[channel] = msa.TP
-                self.TN[channel] = msa.TN
-                self.FP[channel] = msa.FP
-                self.FN[channel] = msa.FN
-                  
                   
     def printEvaluation(self, listSleepStages, nameEventGold, 
-                          nameEventTested, readerGold, readerTested=None, listChannels=None):
+                          nameEventTested, readerGold, readerTested=None, channelList=None):
 
         self.computeStatistics(listSleepStages, nameEventGold, 
-                               nameEventTested, readerGold, readerTested, listChannels)
+                               nameEventTested, readerGold, readerTested, channelList)
         for channel in self.FP:            
             print ("Channel:%s, sensitivity=%f, specificity=%f, PPV=%f, NPV=%f\n"
                    "            TP=%f, TN=%f, FP=%f, FN=%f" % (channel, 
