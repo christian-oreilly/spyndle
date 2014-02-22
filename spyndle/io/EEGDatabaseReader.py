@@ -112,7 +112,16 @@ class EEGDBReaderBase(object) :
                             
         
 
+            
 
+    def addEvent(self, event):
+        self.events.add(event)   
+
+    def removeEvent(self, event):
+        self.events.remove(event)
+        
+    def removeEventType(self, eventType):
+        self.events.removeType(eventType)        
 
 
 
@@ -237,14 +246,72 @@ class EEGDBReaderBase(object) :
         event.properties["meanFreq"] = sum(freqs*FFT)/sum(FFT)
 
 
+
+    def getEventIndicator(self, eventName, channel, checkUniqueness=False, globalEvent=False):
+        """
+         Return an array containing the same number of items than the number
+         of sample in the channel signal, with ones for samples falling in a 
+         window of event eventName and zeros elsewhere.
+         
+         globalEvent must be false for events that have no specific channel
+         such as stage events. However, a channel must nevertheless be passed
+         to get the right number of stamples for a given channel.
+        """
+        t = self.getChannelTime(channel)  
+          
+        if globalEvent:
+            if isinstance(eventName, list):
+               events = [e for e in self.events if e.name in eventName]                
+            elif isinstance(eventName, str):
+               events = [e for e in self.events if e.name == eventName]
+            else:
+               raise ValueError("The eventName arguement must be a list or a str object.")
+        else:
+            if isinstance(eventName, list):
+               events = [e for e in self.events if e.name in eventName and e.channel == channel]                
+            elif isinstance(eventName, str):
+               events = [e for e in self.events if e.name == eventName and e.channel == channel]
+            else:
+               raise ValueError("The eventName arguement must be a list or a str object.")
+         
+
+        """
+        The following code is equivalent to :
+            eventInd = np.concatenate([np.where((t >= e.timeStart())*(t < e.timeEnd()))[0] for e in events]) 
+        but it runs much faster by benifiting from the fact that t is an ordered
+        vector.
+        """
+        eventInd = []
+        indMin = 0
+        for event in events:
+            start  = bisect.bisect_left(t[indMin:], event.timeStart())
+            stop   = bisect.bisect_left(t[indMin:], event.timeEnd())
+            eventInd.extend(range(start+indMin, stop+indMin))
+            indMin += stop
+        eventInd = np.array(eventInd)
+
+
+        
+        if checkUniqueness:
+            assert(len(eventInd) == len(np.unique(eventInd)))
+        
+        eventIndicator = zeros(self.getNbSample(channel))
+        if len(eventInd):
+            eventIndicator[eventInd] = 1            
+        return eventIndicator
+        
+
+
+
+
     def setStagesToEventTypes(self, eventName):
         for event in filter(lambda e: e.name == eventName, self.events) :
             self.setStagesToEvent(event)
 
     def setStagesToEvent(self, event):
 
-        # Select the stage where the spindle begin as the sleep stage
-        # of the spindle.
+        # Select the stage where the event begin as the sleep stage
+        # of the event.
 
         indMin = self.events.getIndexMinStartTime(event.startTime-self.getPageDuration())
         indMax = self.events.getIndexMaxStartTime(event.startTime)
@@ -289,6 +356,10 @@ class EventList:
             retStr += eventName + ":" + str(np.sum(np.in1d(eventNames, [eventName]))) + "\n"
         return retStr
 
+
+    def removeType(self, eventType):
+        self.__events = [e for e in self.__events if e.name != eventType]
+
     def remove(self, events):
         if isinstance(events, list):
             for event in events :
@@ -302,6 +373,11 @@ class EventList:
   
 
     def getIndexMinStartTime(self, timeMin, inclusive=True):
+        """
+        Return the index of the self.__events list that correspond to the
+        first event with a starting time larger (inclusive == False) or
+        larger or equal (include == True) than timeMin.
+        """         
          
         def find_ind_gt(a, x):
             # Find the index of the leftmost value greater than x
@@ -321,7 +397,11 @@ class EventList:
   
 
     def getIndexMaxStartTime(self, timeMax, inclusive=True):
-         
+        """
+        Return the index of the self.__events list that correspond to the
+        last event with a starting time smaller (inclusive == False) or
+        smaller or equal (include == True) than timeMin.
+        """                
 
         def find_ind_lt(a, x):
             # Find the index of the rightmost value less than x
@@ -526,8 +606,10 @@ class Event:
 
             
     def __str__(self):
-        return(str(self.groupName) + " " + str(self.channel)
-                + " " + str(self.name) + " " + str(self.startTime) + " " + str(self.timeLength))
+        return("groups:" +str(self.groupName) + " channel:" + str(self.channel)
+                + " name:" + str(self.name) + " startTime:" + str(self.startTime) 
+                + " duration:"  
+                + str(self.timeLength) + " properties:" + str(self.properties))
 
 
     #def __eq__(self, other): 
