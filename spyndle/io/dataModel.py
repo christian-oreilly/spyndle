@@ -102,10 +102,12 @@ class DataModelMng:
 
 class TransientEvent(Base): 
     """
-    Implement the ORM class for the representation of transient events such as 
-    sleep spindles, K-complexes, slow waves, etc.
-    
-    TODO: The definition should depend on the type of transient event analyzed.
+    Implementation of an ORM class for the representation of 
+    transient events such as sleep spindles, K-complexes, slow waves, etc. This 
+    class only implements the properties that are common to all transient events.
+    Specific features of particular events have to be implemented in specific
+    classes (e.g. SpindleEvent, SlowWaveEvent) and linked throught a a foreign
+    key to a TransientEvent entry.
     """
 
     __tablename__   = "transientEvent"
@@ -123,13 +125,8 @@ class TransientEvent(Base):
     startTime       = sa.Column(sa.Float)
     duration        = sa.Column(sa.Float)
     
-    RMSamp          = sa.Column(sa.Float)
-    meanFreq        = sa.Column(sa.Float)
     stage           = sa.Column(sa.String(30))
     cycle           = sa.Column(sa.Integer)
-    slopeOrigin     = sa.Column(sa.Float)
-    slope           = sa.Column(sa.Float)
-    filteredRMSamp  = sa.Column(sa.Float)
 
 
     """
@@ -145,23 +142,125 @@ class TransientEvent(Base):
         startTime       = event.startTime
         duration        = event.duration()
         channelName     = event.channel
-        eventName       = event.name
-        
-        RMSamp          = getProperty(float, "RMSamp")
-        meanFreq        = getProperty(float, "meanFreq")
+        eventName       = event.name        
         stage           = getProperty(str,   "stage")
         cycle           = getProperty(int,   "cycle")
+ 
+        return TransientEvent(ID = event.ID, psgNight = psgNight, 
+                              startTime = startTime, duration = duration, 
+                              channelName = channelName, stage = stage, cycle = cycle,
+                              eventName=eventName, dataManipNo=dataManipNo)
+
+
+
+class SpindleEvent(Base): 
+    """
+    Implement the ORM class for the representation of a sleep spindle event.
+    """
+
+    __tablename__   = "spindleEvent"
+    __table_args__  = {'mysql_engine':'InnoDB'}
+
+
+    """
+    Every SpindleEvent record should be matched to one and only one TransientEvent
+    record. There is therefore no reason to use a different ID than the TransientEvent
+    ID.
+    """
+    ID              = sa.Column(sa.String(36), sa.ForeignKey("transientEvent.ID"), primary_key=True)
+    
+    slopeOrigin     = sa.Column(sa.Float)
+    slope           = sa.Column(sa.Float)
+    filteredRMSamp  = sa.Column(sa.Float)
+    RMSamp          = sa.Column(sa.Float)
+    meanFreq        = sa.Column(sa.Float)
+
+
+    """
+     Factory static method used to get a TransientEvent and a SpindleEvent 
+     object from a spyndle.io.Event object, a psgNight string and a dataManipNo.
+    """
+    @staticmethod
+    def fromEvent(event, psgNight, dataManipNo):
+        
+        def getProperty(cls, label):
+            return cls(event.properties[label]) if label in event.properties else None
+                         
+        RMSamp          = getProperty(float, "RMSamp")
+        meanFreq        = getProperty(float, "meanFreq")
         slopeOrigin     = getProperty(float, "slopeOrigin")
         slope           = getProperty(float, "slope")
         filteredRMSamp  = getProperty(float, "filteredRMSamp")   
  
-        return TransientEvent(ID = event.ID, psgNight = psgNight, 
-                              startTime = startTime, duration = duration, 
-                              channelName = channelName, RMSamp = RMSamp, 
-                              meanFreq = meanFreq, stage = stage, cycle = cycle, 
-                              slopeOrigin = slopeOrigin, slope = slope, 
-                              filteredRMSamp= filteredRMSamp, eventName=eventName,
-                              dataManipNo=dataManipNo)
+ 
+        return TransientEvent.fromEvent(event, psgNight, dataManipNo), \
+               SpindleEvent(ID = event.ID, RMSamp = RMSamp, 
+                              meanFreq = meanFreq, slopeOrigin = slopeOrigin, 
+                              slope = slope, filteredRMSamp= filteredRMSamp)
+
+
+
+
+
+
+class SlowWaveEvent(Base): 
+    """
+    Implement the ORM class for the representation a slow waves event.
+    """
+
+    __tablename__   = "slowWaveEvent"
+    __table_args__  = {'mysql_engine':'InnoDB'}
+
+
+    """
+    Every SlowWaveEvent record should be matched to one and only one TransientEvent
+    record. There is therefore no reason to use a different ID than the TransientEvent
+    ID.
+    """
+    ID                  = sa.Column(sa.String(36), 
+                                    sa.ForeignKey("transientEvent.ID"), 
+                                    primary_key=True)
+    
+    negatveDuration     = sa.Column(sa.Float)
+    positiveDuration    = sa.Column(sa.Float)
+    RMSamp              = sa.Column(sa.Float)
+    frequency           = sa.Column(sa.Float)
+    ZNSlope             = sa.Column(sa.Float)
+    NPslope             = sa.Column(sa.Float)
+    PZSlope             = sa.Column(sa.Float)
+    timeMin             = sa.Column(sa.Float)
+
+
+
+    """
+     Factory static method used to get a TransientEvent and a SpindleEvent 
+     object from a spyndle.io.Event object, a psgNight string and a dataManipNo.
+    """
+    @staticmethod
+    def fromEvent(event, psgNight, dataManipNo):
+        
+        def getProperty(cls, label):
+            try:
+                return cls(event.properties[label]) if label in event.properties else None
+            except ValueError:
+                return None
+                    
+                         
+        negatveDuration     = getProperty(float, "negatveDuration")
+        positiveDuration    = getProperty(float, "positiveDuration")
+        RMSamp              = getProperty(float, "RMSamp")
+        frequency           = getProperty(float, "frequency")
+        ZNSlope             = getProperty(float, "ZNSlope")   
+        NPslope             = getProperty(float, "NPslope")   
+        PZSlope             = getProperty(float, "PZSlope")  
+        timeMin             = getProperty(float, "timeMin") 
+
+        return TransientEvent.fromEvent(event, psgNight, dataManipNo), \
+               SlowWaveEvent(ID = event.ID, negatveDuration = negatveDuration, 
+                            positiveDuration = positiveDuration, RMSamp = RMSamp, 
+                            frequency = frequency, ZNSlope = ZNSlope, 
+                            NPslope = NPslope, PZSlope = PZSlope,
+                            timeMin = timeMin)
 
 
 
