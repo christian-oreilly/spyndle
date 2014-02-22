@@ -51,6 +51,7 @@
 
 from scipy import zeros, arange
 import sys, os
+import numpy as np
 
 def setUnbufferedPrint():
     sys.stdout=Unbuffered(sys.stdout)
@@ -77,6 +78,31 @@ def terminate_process(pid):
         os.kill(pid, signal.SIGTERM)
 
 
+
+
+def findMaxima(y) :
+    #  Find location of local maxima
+
+    # Identify whether signal is rising or falling
+    upordown = np.sign(np.diff(y))
+    if len(upordown) == 0 :
+        return []
+    
+    # Find points where signal is rising before, falling after
+    maxflags = np.concatenate(([upordown[0]<0], np.diff(upordown)<0, [upordown[-1]>0]))
+    
+    return np.where(maxflags)[0]
+    
+    
+def findMinima(y) :
+    #  Find location of local minima
+
+    return findmaxima(-1.0*np.array(y))    
+    
+    
+    
+def findZeroCrossings(y):
+    return np.where(y[:-1] * y[1:] < 0)[0]
 
 
 def diff2(x, y) :
