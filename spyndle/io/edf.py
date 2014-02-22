@@ -617,12 +617,6 @@ class EDFBaseReader(EEGDBReaderBase) :
                     
 
             
-            
-
-    def addEvent(self, event):
-        self.events.add(event)   
-
-
 
 
 
@@ -770,6 +764,8 @@ class EDFBaseReader(EEGDBReaderBase) :
             break          
         
         # Reinit the object with the new file.
+        # TODO: Reinitializing the event is inefficient. The object should be
+        # updated by the saving procedure such that it don't need full reinitialization.
         self.__init__(self.fileName)
 
 
@@ -859,15 +855,27 @@ class EDFBaseReader(EEGDBReaderBase) :
         for nopage, startTimeEvent in enumerate(self.recordStartTime):
             startTime = startTimeEvent.startTime
                     
+            # TODO: Optimize using the bisect module (self.events is ordered
+            # accordinf to startTime).
             if nopage == 0:                                      # first page 
-                filteredEvents = filter(lambda e: e.startTime < self.recordStartTime[1].startTime, self.events)     
+                indLim = self.events.getIndexMinStartTime(self.recordStartTime[1].startTime, inclusive=True)           
+                filteredEvents = self.events[:indLim]
+                # Equivalent to but faster than
+                # filteredEvents = filter(lambda e: e.startTime < self.recordStartTime[1].startTime, self.events)     
                 
             elif nopage == len(self.recordStartTime) - 1:       # last page
-                filteredEvents = filter(lambda e: e.startTime >= startTime, self.events)  
+                indLim = self.events.getIndexMaxStartTime(startTime, inclusive=False)           
+                filteredEvents = self.events[(indLim+1):]            
+                # Equivalent to but faster than            
+                #filteredEvents = filter(lambda e: e.startTime >= startTime, self.events)  
                 
             else:                                               # other pages
-                filteredEvents = filter(lambda e: e.startTime <  self.recordStartTime[nopage+1].startTime and 
-                                                  e.startTime >= startTime, self.events)     
+                indLimMin = self.events.getIndexMinStartTime(startTime, inclusive=True)           
+                indLimMax = self.events.getIndexMaxStartTime(self.recordStartTime[nopage+1].startTime, inclusive=False)           
+                filteredEvents = self.events[indLimMin:(indLimMax+1)]              
+                # Equivalent to but faster than                  
+                #filteredEvents = filter(lambda e: e.startTime <  self.recordStartTime[nopage+1].startTime and 
+                #                                  e.startTime >= startTime, self.events)     
                 
             eventStings.extend([prepareEventStr(startTime, filteredEvents)])         
 
@@ -1121,6 +1129,9 @@ class EDFBaseReader(EEGDBReaderBase) :
     def readPage(self, channelList, pageId):
         # PageId are numbered starting from 1, not from 0.
 
+        if isinstance(channelList, str):
+            channelList = [channelList]
+
         # Position the file cursor to the begin of the page no. pageId :
         pagePosition = self.header.headerNbBytes  + (pageId-1)*self.header.recordSize
         with io.open(self.fileName, 'rb') as fileObj:
@@ -1145,8 +1156,9 @@ class EDFBaseReader(EEGDBReaderBase) :
         if channel is None:
             return max(self.header.nbSamplesPerRecord.values())*self.header.nbRecords
         
-        if not isinstance(channel, str):
-            raise TypeError
+        if not isinstance(channel, (str, unicode)):
+            raise TypeError("The channel parameter must be a string. (value: type) received : (" 
+                                        + str(channel) + " : " + str(type(channel)) + ")")
                     
         assert(channel in self.getChannelLabels())
                                 
