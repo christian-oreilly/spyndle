@@ -33,7 +33,11 @@
 
 """
 
-from PySide import QtCore, QtGui
+try:
+    from PySide import QtCore, QtGui    
+except ImportError:
+    from PyQt4 import QtCore, QtGui    
+    
 from numpy import sqrt
 
 
@@ -123,7 +127,6 @@ class Point(object):
 
 class Line(object):
     def __init__(self, p1=Point(), p2=Point()):
-        print "Line"
         
         self._p1 = p1
         self._p2 = p2
