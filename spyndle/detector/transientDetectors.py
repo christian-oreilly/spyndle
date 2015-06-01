@@ -44,7 +44,7 @@ from datetime import timedelta
 import bisect
 
 from spyndle import __version__
-from spyndle import cycleDefinitions
+from spyndle import CycleDefinitions
 from spyndle.EEG import getEEGChannels
 from spyndle import computeDreamCycles
 from spyndle.io import EEGDBReaderBase, Event, DataManipulationProcess, \
@@ -63,14 +63,16 @@ class DetectedEvent(object):
         # Channel on which event has been detected
         self.channel = channel
         
-        # Event starting sample
+        # Event starting time
         self.__startTime = startTime
         
-        # Event ending sample
+        # Event ending time
         self.__endTime   = endTime
 
         self.timeDuration   = endTime - startTime        
 
+    def duration(self):
+        return self.timeDuration
 
     def startTime(self):
         return self.__startTime
@@ -83,24 +85,23 @@ class DetectedEvent(object):
 
         # Select the stage where the event begin as the sleep stage
         # of the event.
-        stageEvent23 = filter(lambda e: e.groupName == "Stage" and
+        stageEvent = [e for e in reader.events if e.groupName == "Stage" and
                                             e.timeStart() <=  self.startTime and 
-                                            e.timeEnd() >= self.startTime, reader.events)                                 
-        if len(stageEvent23) > 0 :
-            self.sleepStage = stageEvent23[0].name.lower()
+                                            e.timeEnd() >= self.startTime]                                 
+        if len(stageEvent) > 0 :
+            self.sleepStage = stageEvent[0].name.lower()
                 
         else:
-            print "No stage", self.startTime
+            print(("No stage", self.startTime))
             
 
 
 # Generic transient detector.
-class TransientDetector:
-    __metaclass__ = ABCMeta    
-    
-    def __init__(self, reader=None, usePickled=False):
+class TransientDetector(metaclass=ABCMeta):
+    def __init__(self, reader=None, usePickled=False, verbose=False):
 
         self.__spyndle_version = __version__
+        self.verbose = verbose
 
         ###############################################################################
         # Detection patameters
@@ -112,7 +113,7 @@ class TransientDetector:
         
         # Sleep cycle definition used to compute the quantile distribution
         # of amplitude per stage/cycles
-        self.aeschbachCycleDef = cycleDefinitions()
+        self.aeschbachCycleDef = CycleDefinitions()
         self.aeschbachCycleDef.setAeschbach()
 
         # List of detected events
@@ -146,12 +147,12 @@ class TransientDetector:
         # which would create a much too large representation. Moreover, 
         # the detected events are stored as an attribute only for 
         # convenience. They do not define the detector per se. 
-        return str({key: value for (key, value) in self.__dict__.iteritems() if key != 'detectedEvents'})
+        return str({key: value for (key, value) in list(self.__dict__.items()) if key != 'detectedEvents'})
 
 
        
     def computeTimeDuration(self):
-        for event in self.detectedEventss:        
+        for event in self.detectedEvents:        
             event.computeTimeDuration(self.reader)
 
 
@@ -182,29 +183,34 @@ class TransientDetector:
         if reader is None:
             reader = self.reader
 
-        self.cycleDef = cycleDefinitions()
+        self.cycleDef = CycleDefinitions()
         self.cycleDef.setAeschbach()
         cycles = computeDreamCycles([e for e in reader.events if e.groupName.lower() == "stage"], self.cycleDef)
         
+        nbEvents = 0
         for event in self.detectedEvents:
-            if cycles[0].timeStart() > event.startTime:
+            if cycles[0].timeStart() > event.startTime():
                 event.cycle = 1
+                nbEvents += 1       
+                
                 
         for i, cycle in enumerate(cycles) :
+            nbEvents = 0
             for event in self.detectedEvents:
-                if cycle.timeStart() <= event.startTime and cycle.timeEnd() > event.startTime:
+                if cycle.timeStart() <= event.startTime() and cycle.timeEnd() > event.startTime():
                     event.cycle = i+1
+                    nbEvents += 1
 
+        nbEvents = 0
         for event in self.detectedEvents:
-            if cycles[-1].timeEnd() <= event.startTime:
+            if cycles[-1].timeEnd() <= event.startTime():
                 event.cycle = len(cycles)
-
-
+                nbEvents += 1
 
 
     def computeStageIndicator(self, reader, channel):
 
-        stages = filter(lambda e: e.groupName.lower() == "stage" , reader.events)   
+        stages = [e for e in reader.events if e.groupName.lower() == "stage"]   
         lstStage = list(concatenate((unique([str(stage.name) for stage in stages]), ["No stage"])))    
         stageIndicator = ones(reader.getNbSample(channel))*(len(lstStage)-1)
             
@@ -227,7 +233,11 @@ class TransientDetector:
       but such an implementation is 40 times slower at execution than the 
       proposed version.
     """
-    def computeRMS(self, fmin, fmax):
+    def computeRMS(self, fmin, fmax, reader=None):
+        
+        if reader is None:
+            reader = self.reader        
+        
         channelList = unique([s.channel for s in self.detectedEvents])        
         
         # Pickle data for each channel separatelly to simplify and accelerate
@@ -253,23 +263,28 @@ class TransientDetector:
             gc.collect()                     
             signal = bandPassFilter.applyFilter(signal)             
 
-            channelEvents = filter(lambda s: s.channel == channel, self.detectedEvents)     
+            channelEvents = [s for s in self.detectedEvents if s.channel == channel]     
             for event in channelEvents:    
                 indStart = bisect.bisect_left(t, event.startTime()) 
                 indEnd   = indStart + int(event.timeDuration*fs)
-                event.RMSamp = np.sqrt(np.mean(signal[indStart:(indEnd+1)]**2))                
+                event.RMSAmp = np.sqrt(np.mean(signal[indStart:(indEnd+1)]**2))                
         
 
 
         
 
 
-    def averaging(self, signal, windowNbSample):
+    def averaging(self, signal, windowNbSample, weightingFct=None):
      
-        result = copy.copy(signal[:(len(signal)-windowNbSample+1)])
+        N = len(signal)-windowNbSample+1
+        result = np.zeros(N)
         
-        for i in range(1, windowNbSample) : 
-            result += signal[i:(i+len(signal)-windowNbSample+1)]
+        if weightingFct is None:        
+            for i in range(windowNbSample) : 
+                result += signal[i:i+N]
+        else:
+            for i, w in enumerate(weightingFct(windowNbSample)) :
+                result += w*signal[i:i+N]
 
         # TODO: This line causes MemoryError in some case. THis need to be fixed.
         return concatenate((ones(windowNbSample/2)*result[0], result, 
@@ -282,7 +297,11 @@ class TransientDetector:
      by the reader.
     """
     @abstractmethod
-    def detectEvents(self, channelList=None, reader=None, verbose=True) : 
+    def detectEvents(self, channelList=None, reader=None, verbose=None) : 
+        
+        if verbose is None:
+            verbose = self.verbose
+        
         if isinstance(channelList, str) :
             channelList = [channelList]
 
@@ -297,7 +316,6 @@ class TransientDetector:
                                  " None and not reader object has been passed "
                                  "as argument to the detectEvents() method.")
             
-
         if channelList is None:
             self.channelList = getEEGChannels(self.reader.getChannelLabels())            
         else:
@@ -308,17 +326,15 @@ class TransientDetector:
                                             if channel in self.reader.getChannelLabels()]                                
             else:
                 raise TypeError            
-            
+           
         # List of detected events
         self.detectedEvents = []
-
-        
-        
-        
+                        
 
     # Used to save detected events in EEG data file. 
     def saveEvents(self, reader, eventName, 
-                    eventGroupName, fileName = None, dbSession=None):
+                    eventGroupName, fileName = None, dbSession=None, removeExisting=True):
+              
               
         if dbSession :
             
@@ -328,11 +344,11 @@ class TransientDetector:
 
             # Create the event class record if none corresponding to this event class exist.                                       
             if dbSession.query(EventClass).filter_by(name=eventName).count() == 0:
-                dbSession.add(EventClass(name=eventName))     
+                dbSession.add(EventClass(name=eventName))                           
 
             # Create the PSG night record if none corresponding to this night exist. 
             if dbSession.query(PSGNight).filter_by(fileName=reader.fileName).count() == 0:
-                dbSession.add(PSGNight(fileName=reader.fileName))                            
+                dbSession.add(PSGNight(fileName=reader.fileName))                       
 
             # Create the channel record if none corresponding to this channel exist.                    
             for channel in unique([e.channel for e in self.detectedEvents]):
@@ -344,6 +360,9 @@ class TransientDetector:
 
         if dbSession :
             transientEvents = []
+          
+        if removeExisting:   
+            reader.events.removeType(eventName)
           
         for detectedEvent in self.detectedEvents:    
             event = Event(name          = eventName, 
@@ -367,8 +386,6 @@ class TransientDetector:
             reader.save()
         else:      
             reader.saveAs(fileName)  
-            
-        
   
     # Set the sleep stages in which we want to detect events. stages should
     # be a list of valid stages.
@@ -392,16 +409,24 @@ class TransientDetector:
  framework. This class implement this general framework. Threshold-based 
  detector can be implemented by subclassing this classe.
 """
-class ThresholdDetector(TransientDetector):
-    __metaclass__ = ABCMeta    
-        
-    def __init__(self, reader=None, usePickled=False):
-        super(ThresholdDetector, self).__init__(reader, usePickled)
+class ThresholdDetector(TransientDetector, metaclass=ABCMeta):
+    def __init__(self, *args, **kwargs):
+
+        if "excludedEventNames" in kwargs:
+            self.excludedEventNames = kwargs["excludedEventNames"]
+            del kwargs["excludedEventNames"]
+        else:
+            self.excludedEventNames = []
+    
+        super(ThresholdDetector, self).__init__(*args, **kwargs)
         
         ###############################################################################
         # Detection patameters
         ###############################################################################
     
+
+        self.detectClass = DetectedEvent
+
         # We allow for a activity region to contain samples having an
         # amplitude going bellow the threshold for a 
         # maximum of maxAllowableGapBellowThreshold seconds.
@@ -419,7 +444,7 @@ class ThresholdDetector(TransientDetector):
     # Function performing any processing steps on the data to compute and return
     # the transformed signal that is an index of transient event presence.
     @abstractmethod   
-    def preprocessing(self, data):
+    def preprocessing(self, signal, time=None, samplingRate=None, channel=None):
         raise NotImplementedError("This method must be implemented in derived classes.")  
         
    
@@ -438,7 +463,7 @@ class ThresholdDetector(TransientDetector):
     # the effective threshold takes the same value as the base threshold.
     # subclasses most redefine the getEffectiveThreshold(...) method to 
     # implement a more complexe behavior.
-    def getEffectiveThreshold(self, samplesIndexes, signal):
+    def getEffectiveThreshold(self, signal):
         return self.threshold
     
     @property
@@ -450,181 +475,192 @@ class ThresholdDetector(TransientDetector):
         self.__threshold = value        
         
         
-  
-  
-    # Detect every event in the channels channelList of the file opened by the reader.
-    def detectEvents(self, channelList=None, reader=None, verbose=True) :
- 
-        TransientDetector.detectEvents(self, channelList, reader, verbose)
 
-        # Computing sleep cycles
+    # Detect every event in the channels channelList of the file opened by the reader.
+    def detectEvents(self, channelList=None, reader=None, verbose=None, retDetectStruc=False) :
+        
+        if verbose is None:
+            verbose = self.verbose        
+        
+        TransientDetector.detectEvents(self, channelList, reader, verbose)
+        
+        detectStruct = []
         if self.perCycle :
             cycles = computeDreamCycles([e for e in self.reader.events if e.groupName.lower() == "stage"], self.aeschbachCycleDef)
+            for i, cycle in enumerate(cycles) :
+                if verbose: print(("Sleep cycle ", i+1))
+                events = self.reader.getEventsByTime(cycle.timeStart(), cycle.timeEnd())               
+                stageEvents = [e for e in events if e.groupName.lower() == "stage"]              
+                excludedEvents = [e for e in events if e.name in self.excludedEventNames]       
+                
+                
+                if self.perStage :
+                    for stage in self.detectionStages :
+                        if verbose: print(("Stage ", stage))
+                        currentStageEvents = [e for e in stageEvents if e.name.lower() == stage.lower()]     
+                        detecInfo = self._detectMain_(currentStageEvents, stage=stage, verbose=verbose, 
+                                                                  excludedEvents=excludedEvents, retDetectStruc=retDetectStruc)
+                        detectStruct.append([detecInfo, stage, i])
+                else:
+                    stageEvents = [e for e in stageEvents if np.in1d(e.name.lower(),  [s.lower() for s in self.detectionStages])]       
+                    detecInfo = self._detectMain_(stageEvents, verbose=verbose, 
+                                                              excludedEvents=excludedEvents, retDetectStruc=retDetectStruc) 
+                    detectStruct.append([detecInfo, None, i])     
+                    
+        else:         
+            stageEvents = [e for e in self.reader.events if e.groupName.lower() == "stage"]        
+            excludedEvents = [e for e in self.reader.events if e.name in self.excludedEventNames]      
+            if self.perStage :
+                for stage in self.detectionStages :
+                    if verbose: print(("Stage ", stage))                    
+                    currentStageEvents = [e for e in stageEvents if e.name.lower() == stage.lower()]   
+                    detecInfo = self._detectMain_(currentStageEvents, stage=stage, verbose=verbose, 
+                                                              excludedEvents=excludedEvents, retDetectStruc=retDetectStruc)
+                                                              
+                    detectStruct.append([detecInfo, stage, None])
+            else:
+                stageEvents = [e for e in stageEvents if np.in1d(e.name.lower(),  [s.lower() for s in self.detectionStages])]                             
+                detecInfo = self._detectMain_(stageEvents, verbose=verbose, 
+                                              excludedEvents=excludedEvents, retDetectStruc=retDetectStruc)                       
+            
+                detectStruct.append([detecInfo, None, None])
+          
+
+        if retDetectStruc:
+            return detectStruct
+
+
+
+    # Performs the main processing steps involved in  detection.
+    def _detectMain_(self, stageEvents, stage=None, DetectedClass=None, 
+                     verbose=None, excludedEvents=[], retDetectStruc=False):
+
+        if DetectedClass is None:
+            DetectedClass = self.detectClass
+
+        if verbose is None:
+            verbose = self.verbose
+
+        if len(stageEvents) == 0:  return 
 
         #################################### READING ##########################
-        if verbose:   print "Start reading datafile..."
+        if verbose:   print("Start reading datafile...")
 
         # Pickle data for each channel separatelly to simplify and accelerate
         # the reading of large files.    
         if self.usePickled :
             self.reader.pickleCompleteRecord(self.channelList)   
    
+        detecInfo = {"channel":[], "detectFct":[], "effectThresh":[]}
         for channel in self.channelList:    
-            if verbose:   print "Channel " + channel + "..."           
+            if verbose:   print(("Channel " + channel + "..."))      
+
+
+            startTime = min([event.timeStart() for event in stageEvents])
+            endTime   = max([event.timeEnd() for event in stageEvents])
+            timeDuration = endTime-startTime
+
+            #data            = self.reader.readChannel(channel, usePickled=self.usePickled)  
+            data            = self.reader.read([channel], startTime, timeDuration)[channel]  
+            channelTime     = self.reader.getChannelTime(channel, 
+                                                      startTime=startTime, timeDuration=timeDuration)   
+            assert(len(channelTime) == len(data.signal))
+
+            samplesIndicators = self.reader.getEventIndicator(stageEvents, time=channelTime)  
+            excludedIndicators = self.reader.getEventIndicator([e for e in excludedEvents if e.channel == channel], time=channelTime)  
+            samplesIndicators *= np.logical_not(excludedIndicators) 
             
-            data            = self.reader.readChannel(channel, usePickled=self.usePickled)
-            data.channel    = channel
-            
+            if np.sum(samplesIndicators) == 0:  return
+
             # We are working with two kind of signals, the raw EEG signal and
             # the transformed signal indexing the presence of the event to be detected.
-            EEGsignal       = data.signal
-            indexSignal     = self.preprocessing(data)
+            EEGsignal       = data.signal[samplesIndicators]
+            channelTime     = channelTime[samplesIndicators]
+            fs              = data.samplingRate
+            indexSignal     = self.preprocessing(EEGsignal, channelTime, fs, channel)
+            del data, samplesIndicators
+            
+            assert(len(EEGsignal) == len(indexSignal))
 
             ############################### DETECTION #####################  
-            if verbose:  print "Detection..."
+            if verbose:  print("Detection...")
 
             # Thereshold are computed for each sleep cycles and each sleep stage
             # since the average amplitude of EEG signal can vary accoss night
-            # and stages.
-
-            channelTime = self.reader.getChannelTime(channel)   
-            assert(len(channelTime) == len(indexSignal))
+            # and stages.       
+            
+            eventMarkers = concatenate(([0], diff((indexSignal > self.getEffectiveThreshold(indexSignal)).astype(int))))
+    
+            startInd = where(eventMarkers == 1)[0]
+            stopInd  = where(eventMarkers == -1)[0]
+                  
+            if len(stopInd) == 0 or len(startInd) == 0:  return
+        
+            #The first marker should be a start marker.                
+            if stopInd[0] < startInd[0]:
+                stopInd = stopInd[1:]
+    
+            indEnd = min(len(startInd), len(stopInd))
+            
+            startInd = startInd[:indEnd]
+            stopInd  = stopInd[:indEnd] 
+    
+            if len(stopInd) == 0 or len(startInd) == 0:  return
+    
+            
+            try:
+                assert(all(stopInd - startInd > 0))
+                assert(all(startInd[1:] - stopInd[:-1] > 0))
+            except AssertionError:
+                print((startInd, stopInd, startInd[1:] - stopInd[:-1]))
+                raise
+    
+            # We remove gaps that are smaller than the threshold (self.maxAllowableGapBellowThreshold)
+            gapToKeepInd = where(channelTime[startInd[1:]] - channelTime[stopInd[:-1]] > self.maxAllowableGapBellowThreshold)[0]
+            startInd = startInd[concatenate(([0], gapToKeepInd+1))]
+            stopInd  = stopInd[concatenate((gapToKeepInd, [len(stopInd)-1]))]
             
             
-            if self.perCycle :
-                for cycle in cycles :
-                    stageEvents = self.reader.getEventsByTime(cycle.timeStart(), cycle.timeEnd())               
-                    stageEvents = filter(lambda e: e.groupName.lower() == "stage", stageEvents)     
-                    
-                    if self.perStage :
-                        for stage in self.detectionStages :
-                            currentStageEvents = filter(lambda e: e.name.lower() == stage.lower(), stageEvents)
-                            self._detectMain_(currentStageEvents, channelTime, data.samplingRate, 
-                                                channel, indexSignal, EEGsignal, stage=stage)
-                    else:
-                        stageEvents = filter(lambda e: np.in1d(e.name.lower(),  [s.lower() for s in self.detectionStages]), stageEvents)
-                        self._detectMain_(stageEvents, channelTime, data.samplingRate, channel, indexSignal, EEGsignal)      
-                        
-                        
-            else:         
-                stageEvents = filter(lambda e: e.groupName.lower() == "stage", self.reader.events)                     
-                if self.perStage :
-                    for stage in self.detectionStages :
-                        currentStageEvents = filter(lambda e: e.name.lower() == stage.lower(), stageEvents)
-                        self._detectMain_(currentStageEvents, channelTime, data.samplingRate, 
-                                            channel, indexSignal, EEGsignal, stage=stage)
-                else:
-                    stageEvents = filter(lambda e: np.in1d(e.name.lower(),  [s.lower() for s in self.detectionStages]), stageEvents)
-                    self._detectMain_(stageEvents, channelTime, data.samplingRate, channel, indexSignal, EEGsignal)                       
-                
-                
-                    
-
     
-
-
-    # Performs the main processing steps involved in  detection.
-    def _detectMain_(self, stageEvents, channelTime, fs, 
-                       channel, indexSignal, EEGsignal, stage=None, DetectedClass=DetectedEvent):
-
-        if len(stageEvents) == 0:  return 
-        
-        #######################################################################
-        ## This code....
-        samplesIndexes = []
-        indMin = 0
-        for event in stageEvents:
-            start  = bisect.bisect_left( channelTime[indMin:], event.timeStart())
-            stop   = bisect.bisect_right(channelTime[indMin:], event.timeEnd())
-            samplesIndexes.extend(range(start+indMin, stop+indMin))
-            indMin += stop
-        samplesIndexes = np.array(samplesIndexes)
-        
-        # ... replaced this one... 
-        #samplesIndexes = concatenate([where((channelTime >= event.timeStart())*
-        #                                    (channelTime <= event.timeEnd()))[0] 
-        #                                                    for event in stageEvents])
-        #sort(samplesIndexes) ...
-        
-        # ... to avoid trigerring this assert when events overlap ....
-        assert(all(diff(samplesIndexes) >0))
-        # ... but also to take benefits from the fact that channelTime is an
-        # odered list. However, it have the down side to reallocating the 
-        # samplesIndexes list many times. This shouldn't be too bad according
-        # to http://stackoverflow.com/questions/5833907/repeatedly-appending-to-a-large-list-python-2-6-6
-        # but a time benchmark between both approaches should be ran. 
-        #######################################################################
-
-
-        if len(samplesIndexes) == 0:  return
-        
-        eventMarkers = concatenate(([0], diff((indexSignal[samplesIndexes] > self.getEffectiveThreshold(samplesIndexes, indexSignal)).astype(int))))
-
-        # The signal indexes corresponding to spinMarkers are kept in samplesIndexes                
-        startInd = samplesIndexes[where(eventMarkers == 1)[0]]
-        stopInd  = samplesIndexes[where(eventMarkers == -1)[0]]
-              
-              
-        if len(stopInd) == 0 or len(startInd) == 0:  return
+            duration = channelTime[stopInd] - channelTime[startInd]
+            ##Accept discontinuity of up to 3 time samples.
+            continuous = [(max(diff(channelTime[start:stop])) <= 3.0/fs if stop - start > 10 else False) 
+                                                            for start, stop in zip(startInd, stopInd)]    
+            
+            valid        = (duration >= self.minimalDuration)*\
+                           (duration <= self.maximalDuration)*(continuous)      
+            startInd     = startInd[valid]
+            stopInd      = stopInd[valid]
+            duration     = duration[valid]               
+            
+            newEvents = [DetectedClass(channel, start, end) for start, end in 
+                                zip(channelTime[startInd], channelTime[stopInd])]   
+          
+            
+            #######################################################################
+            # As the detected events are localized and the signal is extracted and 
+            # filtred, it is efficient to compute events characteristics directly 
+            # here. Such computation can be implemented by reimplementing the    
+            # __postDetectionComputation__(...) method in subclasses.
+            self.postDetectionComputation(EEGsignal, channelTime, startInd, 
+                                                          stopInd, newEvents, fs)  
+            
     
-        #The first marker should be a start marker.                
-        if stopInd[0] < startInd[0]:
-            stopInd = stopInd[1:]
+            if not stage is None:
+                for spindle in newEvents:
+                    spindle.sleepStage = stage        
+            
+            self.detectedEvents.extend(newEvents)    
+            
+            if retDetectStruc:
+                detecInfo["channel"].append(channel)
+                detecInfo["detectFct"].append(indexSignal)
+                detecInfo["effectThresh"].append(self.getEffectiveThreshold(indexSignal))
 
-        indEnd = min(len(startInd), len(stopInd))
-        
-        startInd = startInd[:indEnd]
-        stopInd  = stopInd[:indEnd] 
-
-        if len(stopInd) == 0 or len(startInd) == 0:  return
-
-        
-        try:
-            assert(all(stopInd - startInd > 0))
-            assert(all(startInd[1:] - stopInd[:-1] > 0))
-        except AssertionError:
-            print startInd, stopInd, startInd[1:] - stopInd[:-1]
-            raise
-
-        gapToKeepInd = where(channelTime[startInd[1:]] - channelTime[stopInd[:-1]] > self.maxAllowableGapBellowThreshold)[0]
-        
-        startInd = startInd[concatenate(([0], gapToKeepInd+1))]
-        stopInd  = stopInd[concatenate((gapToKeepInd, [len(stopInd)-1]))]
-        
-        
-
-        duration = channelTime[stopInd] - channelTime[startInd]
-        ##Accept discontinuity of up to 3 time samples.
-        continuous = [(max(diff(channelTime[start:stop])) <= 3.0/fs if stop - start > 10 else False ) 
-                                                        for start, stop in zip(startInd, stopInd)]    
-        
-        valid        = (duration >= self.minimalDuration)*\
-                       (duration <= self.maximalDuration)*(continuous)      
-        startInd     = startInd[valid]
-        stopInd      = stopInd[valid]
-        duration     = duration[valid]               
-        
-        newEvents = [DetectedClass(channel, start, end) for start, end in 
-                            zip(channelTime[startInd], channelTime[stopInd])]   
-      
-        
-        #######################################################################
-        # As the detected events are localized and the signal is extracted and 
-        # filtred, it is efficient to compute events characteristics directly 
-        # here. Such computation can be implemented by reimplementing the    
-        # __postDetectionComputation__(...) method in subclasses.
-        self.postDetectionComputation(EEGsignal, channelTime, startInd, 
-                                                      stopInd, newEvents, fs)  
-        
-
-        if not stage is None:
-            for spindle in newEvents:
-                spindle.sleepStage = stage        
-        
-        self.detectedSpindles.extend(newEvents)        
+        if retDetectStruc:
+            return detecInfo
 
 
-
-    def postDetectionComputation(self, startInd, stopInd, newEvents, fs):
+    def postDetectionComputation(self, EEGsignal, channelTime, startInd, stopInd, newEvents, fs):
         pass
 

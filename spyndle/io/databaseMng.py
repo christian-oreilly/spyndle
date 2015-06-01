@@ -48,7 +48,7 @@ def clearDatabase(dbName):
 
 
 
-
+MAX_DATABASE_NAME_LENGHT = 64
 
 class DatabaseMng():
     """
@@ -69,8 +69,21 @@ class DatabaseMng():
             if shard is None:
                 self.connectDatabase(dbName)
             else:
-                shard = shard.replace(":", "_").replace("/", "_").replace("\\", "_").replace(".", "_")
-                self.connectDatabase(dbName + "___shard_" + shard)
+                # Remove unacceptable characters
+                shard = shard.replace(":",  "_")\
+                             .replace("/",  "_")\
+                             .replace("\\", "_")\
+                             .replace(".",  "_")\
+                             .replace("-",  "_")\
+                             .replace(" ",  "_")
+                dbName += "___shard_" + shard
+                
+                # Ensure that the database name is not too long.
+                nbCaractNotRelatedToDbName = len("".join(dbName.split("/")[:-1]))+3
+                if len(dbName)-nbCaractNotRelatedToDbName > MAX_DATABASE_NAME_LENGHT:
+                    dbName = dbName[:MAX_DATABASE_NAME_LENGHT]
+                    
+                self.connectDatabase(dbName)
             self.createTables()
             if not self.isConnected():
                 raise IOError("Error connecting to the database.")   
@@ -154,8 +167,8 @@ class DatabaseMng():
         """            
         if not self.session is None:
 
-            for name, table in Base.metadata.tables.items(): 
-                print table.delete() 
+            for name, table in list(Base.metadata.tables.items()): 
+                print((table.delete())) 
                 self.session.execute(table.delete()) 
     
             self.session.commit() 
@@ -173,7 +186,8 @@ class DatabaseMng():
         Disconnect from the currently connected database.
         """           
         if not self.session is None:        
-            self.session.close()
+            #self.session.close()
+            Session.remove()
             self.session = None
             
      

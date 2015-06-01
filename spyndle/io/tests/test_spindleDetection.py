@@ -9,28 +9,28 @@ from scipy import zeros, where
 
 from spyndle.io import HarmonieReader
 from spyndle.io import EDFReader
-from spyndle.detector import SpindleDectectorRMS
+from spyndle.detector import SpindleDetectorRMS
 from spyndle.detector import DetectorEvaluator
 
-print "Reading the .sig file..."
+print("Reading the .sig file...")
 readerSIG =  HarmonieReader(parentdir + "/test.SIG")
 
-print "Conversion: .sig -> .bdf..."
+print("Conversion: .sig -> .bdf...")
 readerSIG.saveAsEDF(parentdir + "/test.BDF", "BDF")
 
-print "Reading the .bdf file..."
+print("Reading the .bdf file...")
 readerEDF = EDFReader(parentdir + "/test.BDF")
 
 
-listChannels = readerEDF.getChannelLabels()[0:2]
+channelList = readerEDF.getChannelLabels()[0:2]
 
 
-detectorEDF = SpindleDectectorRMS(readerEDF, usePickled=False)
-detectorSIG = SpindleDectectorRMS(readerSIG, usePickled=True)
+detectorEDF = SpindleDetectorRMS(readerEDF, usePickled=False)
+detectorSIG = SpindleDetectorRMS(readerSIG, usePickled=True)
 
 
 evaluator = DetectorEvaluator(detectorSIG, detectorEDF)
-evaluator.printEvaluation(listChannels, ["Sleep stage N2", "Sleep stage 2"])
+evaluator.printEvaluation(channelList, ["Sleep stage N2", "Sleep stage 2"])
 
 
 # For each pages, verify that the signals in reader and readerEDF
@@ -42,19 +42,19 @@ for noPage in range(readerSIG.getNbPages()) :
     # at the end of the page to make complete records.
     if readerSIG.getInfoPages(noPage+1).isComplete:
         
-        sigPage   = readerSIG.readPage(listChannels, noPage+1)
-        edfPage   = readerEDF.readPage(listChannels, noPage+1)  
+        sigPage   = readerSIG.readPage(channelList, noPage+1)
+        edfPage   = readerEDF.readPage(channelList, noPage+1)  
         timeStart = sigPage.getStartTime() 
         duration  = sigPage.getDuration()  
         
-        for channel in listChannels:
+        for channel in channelList:
 
-            print "noPage=", noPage+1, "(of ", readerSIG.getNbPages(),")" , "channel=", channel    
+            print(("noPage=", noPage+1, "(of ", readerSIG.getNbPages(),")" , "channel=", channel))    
             
-            sigSpins = filter(lambda s: (s.startTime() >= timeStart and s.startTime() <= timeStart + duration) or
-                                        (s.endTime()   >= timeStart and s.endTime()   <= timeStart + duration), detectorSIG.detectedSpindles)       
-            edfSpins = filter(lambda s: (s.startTime() >= timeStart and s.startTime() <= timeStart + duration) or
-                                        (s.endTime()   >= timeStart and s.endTime()   <= timeStart + duration), detectorEDF.detectedSpindles)              
+            sigSpins = [s for s in detectorSIG.detectedSpindles if (s.startTime() >= timeStart and s.startTime() <= timeStart + duration) or
+                                        (s.endTime()   >= timeStart and s.endTime()   <= timeStart + duration)]       
+            edfSpins = [s for s in detectorEDF.detectedSpindles if (s.startTime() >= timeStart and s.startTime() <= timeStart + duration) or
+                                        (s.endTime()   >= timeStart and s.endTime()   <= timeStart + duration)]              
                         
             YSIG = sigPage.getSignal(channel)
             YEDF = edfPage.getSignal(channel)
@@ -71,9 +71,9 @@ for noPage in range(readerSIG.getNbPages()) :
             
             if sum(abs(spindleIndSIG  - spindleIndEDF)) >  max(YSIG)*10 :
                 for spin in sigSpins:
-                    print "sig spin : ", spin.startTime(), spin.endTime()
+                    print(("sig spin : ", spin.startTime(), spin.endTime()))
                 for spin in edfSpins:
-                    print "edf spin : ", spin.startTime(), spin.endTime()
+                    print(("edf spin : ", spin.startTime(), spin.endTime()))
 
                 
                 pylab.plot(TSIG, YSIG)
@@ -82,7 +82,7 @@ for noPage in range(readerSIG.getNbPages()) :
                 pylab.plot(TEDF, spindleIndEDF)
                 pylab.show()
     else:
-        print "Skiping incomplete page " + str(noPage+1)
+        print(("Skiping incomplete page " + str(noPage+1)))
 
 
 

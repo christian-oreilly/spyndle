@@ -3,11 +3,7 @@
 
 
 """
-    Code assessing transient event propogation through an array of sensors
-    using cross-correlation of S-transform of the signal captured by
-    the different sensors.
-
-    Copyright (C) 2012-2013  Christian O'Reilly
+    Copyright (C) 2012-2015  Christian O'Reilly
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -51,16 +47,137 @@
 
 from scipy.signal import firwin
 from scipy.signal._arraytools import odd_ext, even_ext, const_ext      
+#from scipy.weave.build_tools import CompileError
 
-from scipy import signal, zeros, angle
+from scipy import signal, angle
 import numpy, random
-
-from scipy.weave import converters
-import scipy.weave as weave
 import numpy as np
+#from scipy.weave import converters
+#import scipy.weave as weave
 
+#import pyximport
+#pyximport.install(setup_args={"include_dirs": numpy.get_include()},
+#                  reload_support=True)
+from .xFilter import convolve_cython, convolve_cythonFiltFilt
+#import cython
+
+
+
+'''
+# https://gist.github.com/astrofrog/837209
+
+# b must be odd, lena > lenb
+def convolve_cython(a,b):            
+
+    code = """
+                int pad = (lenb-1)/2;
+                int i, j;
+             
+                for (i=pad; i<pad+lena; i++)
+                {
+                    int kmin, kmax, k;
+                    j = i-pad;
+
+                    convol(j)  = 0;
+                
+                    kmin = (i >= lenb - 1) ? i - (lenb - 1) : 0;
+                    kmax = (i <  lena - 1) ? i : lena - 1;
+                
+                    for (k = kmin; k <= kmax; k++)
+                    {
+                      convol(j)  += a(k)*b(i - k);
+                    }                       
+                }
+                return_val = 1;
+           """
+
+    cython.inline(code, a=a, b=b, lena = len(a), lenb = len(b), convol = np.zeros(a.shape))
+    
+    return convol
+
+
+# b must be odd, lena > lenb
+def convolve_cythonFiltFilt(a,b):
+    
+    code = """
+                int pad = (lenb-1)/2;
+                int i, j;
+             
+                for (i=pad; i<pad+lena; i++)
+                {
+                    int kmin, kmax, k;
+                    // Reverse indexing for the next pass
+                    j = lena-1-i+pad;
+
+                    convol(j)  = 0;
+                
+                    kmin = (i >= lenb - 1) ? i - (lenb - 1) : 0;
+                    kmax = (i <  lena - 1) ? i : lena - 1;
+                
+                    for (k = kmin; k <= kmax; k++)
+                    {
+                      convol(j)  += a(k)*b(i - k);
+                    }                       
+                }
+                
+                
+                // Backward convolution (the signal in convol has been
+                // reversed using reversed indexes)            
+                for (i=pad; i<pad+lena; i++)
+                {
+                    int kmin, kmax, k;
+                    // Reverse indexing for reordering the output vector
+                    j = lena-1-i+pad;
+
+                    a(j)  = 0;
+                
+                    kmin = (i >= lenb - 1) ? i - (lenb - 1) : 0;
+                    kmax = (i <  lena - 1) ? i : lena - 1;
+                
+                    for (k = kmin; k <= kmax; k++)
+                    {
+                      a(j)  += convol(k)*b(i - k);
+                    }                       
+                }                
+                
+                return_val = 1;
+         """  
+
+    cython.inline(code, a=a, b=b, lena = len(a), lenb = len(b), convol = np.zeros(a.shape))
+    
+    return a
+            
+'''
+
+
+#import warnings
 
 channelType = {"EEG": 1, "EMG": 3, "EOG": 7, "ECG": 8, "MIC": 10, "RSP": 23}
+
+
+#import pickle as pickle
+
+"""
+class FiltConf:
+    __useWeave = False
+    
+    @property
+    def useWeave(self):
+        return self.__useWeave
+
+    @useWeave.setter        
+    def useWeave(self, useWeave):
+        self.__useWeave = useWeave
+        
+
+try:
+    with open('filtConf.pkl', 'rb') as pkl_file:
+        filtConf = pickle.load(pkl_file)
+        if not hasattr(filtConf, "useWeave"):
+            raise ValueError
+except:
+    filtConf = FiltConf()    
+"""
 
 
 class Filter:
@@ -128,11 +245,13 @@ class Filter:
             
             try:
                 if self.useFiltFilt:
-                    sig2filt = filtfilt_FFTWEAVE(self.b, sig2filt, padtype=padtype)
+                    #sig2filt = filtfilt_FFTWEAVE(self.b, sig2filt, padtype=padtype)
+                    sig2filt = filtfilt_FFT_Cython(self.b, sig2filt, padtype=padtype)
                 else:
-                    sig2filt = filt_FFTWEAVE(self.b, sig2filt, padtype=padtype)       
+                    #sig2filt = filt_FFTWEAVE(self.b, sig2filt, padtype=padtype)   
+                    sig2filt = filt_FFT_Cython(self.b, sig2filt, padtype=padtype)       
             except ValueError:
-                print "order:", self.order
+                print(("order:", self.order))
                 raise
 
         else:
@@ -166,8 +285,8 @@ class Filter:
         for i in range(N) :
             noise[i] = random.random()-0.5
             
-        fftN = numpy.fft.fft(noise)[range(N/2)]          
-        fftS = numpy.fft.fft(self.applyFilter(noise))[range(N/2)]    
+        fftN = numpy.fft.fft(noise)[list(range(N/2))]          
+        fftS = numpy.fft.fft(self.applyFilter(noise))[list(range(N/2))]    
         fftNA  = abs(fftN)            
         fftSA  = abs(fftS)    
         fftP  = angle(fftS) - angle(fftN)    
@@ -177,121 +296,191 @@ class Filter:
             for i in range(N) :
                 noise[i] = random.random()-0.5
 
-            fftN = numpy.fft.fft(noise)[range(N/2)]          
-            fftS = numpy.fft.fft(self.applyFilter(noise))[range(N/2)]    
+            fftN = numpy.fft.fft(noise)[list(range(N/2))]          
+            fftS = numpy.fft.fft(self.applyFilter(noise))[list(range(N/2))]    
             fftNA  += abs(fftN)            
             fftSA  += abs(fftS)    
             fftP  += (angle(fftS) - angle(fftN))                
 
-        return freq[range(N/2)], fftSA/Niter, fftNA/Niter, fftP/Niter        
+        return freq[list(range(N/2))], fftSA/Niter, fftNA/Niter, fftP/Niter        
 
         
-        
-        
-        
-        
-        
 
-# https://gist.github.com/astrofrog/837209
+def convolve_noCython(a,b):
 
-# b must be odd, lena > lenb
-def convolve_weave(a,b):
-
+    """
     lena = len(a)
     lenb = len(b)
     convol = zeros(a.shape)               
 
-    code = """
-                int pad = (lenb-1)/2;
-                int i, j;
-             
-                for (i=pad; i<pad+lena; i++)
-                {
-                    int kmin, kmax, k;
-                    j = i-pad;
+    pad = (lenb-1)/2
+ 
+    for i in range(pad, pad+lena):
+        j = i-pad
 
-                    convol(j)  = 0;
-                
-                    kmin = (i >= lenb - 1) ? i - (lenb - 1) : 0;
-                    kmax = (i <  lena - 1) ? i : lena - 1;
-                
-                    for (k = kmin; k <= kmax; k++)
-                    {
-                      convol(j)  += a(k)*b(i - k);
-                    }                       
-                }
-                return_val = 1;
-           """
-
-    weave.inline(code, [ 'a', 'b', 'lena', 'lenb', 'convol'],
-    type_converters=converters.blitz, compiler = 'gcc')
+        kmin = i - (lenb - 1) if (i >= lenb - 1) else 0;
+        kmax = i if (i <  lena - 1) else lena - 1;
+    
+        k = np.arange(kmin, kmax+1)
+        convol[j]  = np.sum(a[k]*b[i - k])
 
     return convol
+    """
 
+    return np.convolve(a, b, mode="same")      
 
-
-
-
-
-
-
-# b must be odd, lena > lenb
-def convolve_weaveFiltFilt(a,b):
-
-    lena = len(a)
-    lenb = len(b)
-    convol = zeros(a.shape)
-
-    code = """
-                // Forward convolution
-                int pad = (lenb-1)/2;
-                int i, j;
-             
-                for (i=pad; i<pad+lena; i++)
-                {
-                    int kmin, kmax, k;
-                    // Reverse indexing for the next pass
-                    j = lena-1-i+pad;
-
-                    convol(j)  = 0;
-                
-                    kmin = (i >= lenb - 1) ? i - (lenb - 1) : 0;
-                    kmax = (i <  lena - 1) ? i : lena - 1;
-                
-                    for (k = kmin; k <= kmax; k++)
-                    {
-                      convol(j)  += a(k)*b(i - k);
-                    }                       
-                }
-                
-                
-                // Backward convolution (the signal in convol has been
-                // reversed using reversed indexes)            
-                for (i=pad; i<pad+lena; i++)
-                {
-                    int kmin, kmax, k;
-                    // Reverse indexing for reordering the output vector
-                    j = lena-1-i+pad;
-
-                    a(j)  = 0;
-                
-                    kmin = (i >= lenb - 1) ? i - (lenb - 1) : 0;
-                    kmax = (i <  lena - 1) ? i : lena - 1;
-                
-                    for (k = kmin; k <= kmax; k++)
-                    {
-                      a(j)  += convol(k)*b(i - k);
-                    }                       
-                }                
-                
-                return_val = 1;
-         """  
-
-    weave.inline(code, [ 'a', 'b', 'lena', 'lenb', 'convol'],
-    type_converters=converters.blitz, compiler = 'gcc')
-
+        
+        
+        
+        
+        
 
             
+
+def filtfilt_FFT_Cython(b, x, #axis=-1, 
+                         padtype='odd', padlen=None):
+    """A forward-backward filter.
+
+This function applies a linear filter twice, once forward
+and once backwards. The combined filter has linear phase.
+
+Before applying the filter, the function can pad the data along the
+given axis in one of three ways: odd, even or constant. The odd
+and even extensions have the corresponding symmetry about the end point
+of the data. The constant extension extends the data with the values
+at end points. On both the forward and backwards passes, the
+initial condition of the filter is found by using lfilter_zi and
+scaling it by the end point of the extended data.
+
+Parameters
+----------
+b : array_like, 1-D
+The numerator coefficient vector of the filter.
+a : array_like, 1-D
+The denominator coefficient vector of the filter. If a[0]
+is not 1, then both a and b are normalized by a[0].
+x : array_like
+The array of data to be filtered.
+axis : int, optional
+The axis of `x` to which the filter is applied.
+Default is -1.
+padtype : str or None, optional
+Must be 'odd', 'even', 'constant', or None. This determines the
+type of extension to use for the padded signal to which the filter
+is applied. If `padtype` is None, no padding is used. The default
+is 'odd'.
+padlen : int or None, optional
+The number of elements by which to extend `x` at both ends of
+`axis` before applying the filter. This value must be less than
+`x.shape[axis]-1`. `padlen=0` implies no padding.
+The default value is 3*max(len(a),len(b)).
+
+Returns
+-------
+y : ndarray
+The filtered output, an array of type numpy.float64 with the same
+shape as `x`.
+
+See Also
+--------
+lfilter_zi
+lfilter
+
+Examples
+--------
+First we create a one second signal that is the sum of two pure sine
+waves, with frequencies 5 Hz and 250 Hz, sampled at 2000 Hz.
+
+>>> t = np.linspace(0, 1.0, 2001)
+>>> xlow = np.sin(2 * np.pi * 5 * t)
+>>> xhigh = np.sin(2 * np.pi * 250 * t)
+>>> x = xlow + xhigh
+
+Now create a lowpass Butterworth filter with a cutoff of 0.125 times
+the Nyquist rate, or 125 Hz, and apply it to x with filtfilt. The
+result should be approximately xlow, with no phase shift.
+
+>>> from scipy.signal import butter
+>>> b, a = butter(8, 0.125)
+>>> y = filtfilt(b, a, x, padlen=150)
+>>> np.abs(y - xlow).max()
+9.1086182074789912e-06
+
+We get a fairly clean result for this artificial example because
+the odd extension is exact, and with the moderately long padding,
+the filter's transients have dissipated by the time the actual data
+is reached. In general, transient effects at the edges are
+unavoidable.
+"""
+
+    if padtype not in ['even', 'odd', 'constant', None]:
+        raise ValueError(("Unknown value '%s' given to padtype. padtype must "
+                         "be 'even', 'odd', 'constant', or None.") %
+                            padtype)
+
+    b = np.asarray(b)
+    x = np.asarray(x)
+
+    ntaps = len(b)
+
+    if padtype is None:
+        padlen = 0
+
+    if padlen is None:
+        # Original padding; preserved for backwards compatibility.
+        edge = ntaps * 3
+    else:
+        edge = padlen
+
+    # x's 'axis' dimension must be bigger than edge.
+    #if x.shape[axis] <= edge:
+    if len(x) <= edge:
+        raise ValueError("The length of the input vector x must be larger than "
+                         "padlen, which is %d." % edge)
+
+    if padtype is not None and edge > 0:
+        # Make an extension of length `edge` at each
+        # end of the input array.
+        if padtype == 'even':
+            ext = even_ext(x, edge)#, axis=axis)
+        elif padtype == 'odd':
+            ext = odd_ext(x, edge)#, axis=axis)
+        else:
+            ext = const_ext(x, edge)#, axis=axis)
+    else:
+        ext = x
+
+
+
+    ext = convolve_cythonFiltFilt(ext, b)
+    """
+    if filtConf.useWeave:
+        try :
+            ext = convolve_weaveFiltFilt(ext, b)
+        except (CompileError, WindowsError) as e:
+            ext = convolve_noWeaveFiltFilt(ext, b)  
+            warnings.warn("Weave failed at runtime. Setting useWeave to False. This will results in slower filtering.", RuntimeWarning)
+            filtConf.useWeave = False
+    else:
+        ext = convolve_noWeaveFiltFilt(ext, b)       
+    """
+
+
+
+
+    if edge > 0:
+        # Slice the actual signal from the extended signal. Reverse and return y.
+        return ext[edge:-edge] 
+    else:
+        # Reverse and return y.
+        return ext
+
+
+
+
+
+
+
 
 ## COPIED FROM scipy filtfilt but changing the call to lfilter to
 ## fftconvolve because it is much faster.
@@ -417,9 +606,19 @@ unavoidable.
     #x0 = axis_slice(ext, stop=1, axis=axis)
 
     # Forward filter.
-    ext = convolve_weave(ext, b)
-
-
+    ext = convolve_cython(ext, b)
+    """
+    if filtConf.useWeave:
+        try :
+            ext = convolve_weave(ext, b)
+        except (CompileError, WindowsError) as e:
+            ext = convolve_noWeave(ext, b)  
+            warnings.warn("Weave failed at runtime. Setting useWeave to False. This will results in slower filtering.", RuntimeWarning)
+            filtConf.useWeave = False
+    else:
+        ext = convolve_noWeave(ext, b)        
+    """
+    
     if edge > 0:
         # Slice the actual signal from the extended signal. Reverse and return y.
         return ext[edge:-edge]
@@ -428,127 +627,4 @@ unavoidable.
         return ext
             
             
-            
-
-def filtfilt_FFTWEAVE(b, x, #axis=-1, 
-                         padtype='odd', padlen=None):
-    """A forward-backward filter.
-
-This function applies a linear filter twice, once forward
-and once backwards. The combined filter has linear phase.
-
-Before applying the filter, the function can pad the data along the
-given axis in one of three ways: odd, even or constant. The odd
-and even extensions have the corresponding symmetry about the end point
-of the data. The constant extension extends the data with the values
-at end points. On both the forward and backwards passes, the
-initial condition of the filter is found by using lfilter_zi and
-scaling it by the end point of the extended data.
-
-Parameters
-----------
-b : array_like, 1-D
-The numerator coefficient vector of the filter.
-a : array_like, 1-D
-The denominator coefficient vector of the filter. If a[0]
-is not 1, then both a and b are normalized by a[0].
-x : array_like
-The array of data to be filtered.
-axis : int, optional
-The axis of `x` to which the filter is applied.
-Default is -1.
-padtype : str or None, optional
-Must be 'odd', 'even', 'constant', or None. This determines the
-type of extension to use for the padded signal to which the filter
-is applied. If `padtype` is None, no padding is used. The default
-is 'odd'.
-padlen : int or None, optional
-The number of elements by which to extend `x` at both ends of
-`axis` before applying the filter. This value must be less than
-`x.shape[axis]-1`. `padlen=0` implies no padding.
-The default value is 3*max(len(a),len(b)).
-
-Returns
--------
-y : ndarray
-The filtered output, an array of type numpy.float64 with the same
-shape as `x`.
-
-See Also
---------
-lfilter_zi
-lfilter
-
-Examples
---------
-First we create a one second signal that is the sum of two pure sine
-waves, with frequencies 5 Hz and 250 Hz, sampled at 2000 Hz.
-
->>> t = np.linspace(0, 1.0, 2001)
->>> xlow = np.sin(2 * np.pi * 5 * t)
->>> xhigh = np.sin(2 * np.pi * 250 * t)
->>> x = xlow + xhigh
-
-Now create a lowpass Butterworth filter with a cutoff of 0.125 times
-the Nyquist rate, or 125 Hz, and apply it to x with filtfilt. The
-result should be approximately xlow, with no phase shift.
-
->>> from scipy.signal import butter
->>> b, a = butter(8, 0.125)
->>> y = filtfilt(b, a, x, padlen=150)
->>> np.abs(y - xlow).max()
-9.1086182074789912e-06
-
-We get a fairly clean result for this artificial example because
-the odd extension is exact, and with the moderately long padding,
-the filter's transients have dissipated by the time the actual data
-is reached. In general, transient effects at the edges are
-unavoidable.
-"""
-
-    if padtype not in ['even', 'odd', 'constant', None]:
-        raise ValueError(("Unknown value '%s' given to padtype. padtype must "
-                         "be 'even', 'odd', 'constant', or None.") %
-                            padtype)
-
-    b = np.asarray(b)
-    x = np.asarray(x)
-
-    ntaps = len(b)
-
-    if padtype is None:
-        padlen = 0
-
-    if padlen is None:
-        # Original padding; preserved for backwards compatibility.
-        edge = ntaps * 3
-    else:
-        edge = padlen
-
-    # x's 'axis' dimension must be bigger than edge.
-    #if x.shape[axis] <= edge:
-    if len(x) <= edge:
-        raise ValueError("The length of the input vector x must be larger than "
-                         "padlen, which is %d." % edge)
-
-    if padtype is not None and edge > 0:
-        # Make an extension of length `edge` at each
-        # end of the input array.
-        if padtype == 'even':
-            ext = even_ext(x, edge)#, axis=axis)
-        elif padtype == 'odd':
-            ext = odd_ext(x, edge)#, axis=axis)
-        else:
-            ext = const_ext(x, edge)#, axis=axis)
-    else:
-        ext = x
-
-    convolve_weaveFiltFilt(ext, b)
-
-    if edge > 0:
-        # Slice the actual signal from the extended signal. Reverse and return y.
-        return ext[edge:-edge] 
-    else:
-        # Reverse and return y.
-        return ext
-                                    
+        

@@ -38,7 +38,7 @@ import sqlalchemy.ext.declarative as sad
 Base    = sad.declarative_base()
 
 # Getting an SQLAchemy session factory
-Session = sa.orm.sessionmaker() #sa.orm.scoped_session(sa.orm.sessionmaker())#expire_on_commit=False))
+Session = sa.orm.scoped_session(sa.orm.sessionmaker()) #sa.orm.scoped_session(sa.orm.sessionmaker())#expire_on_commit=False))
 
 
 # Reader base
@@ -46,7 +46,7 @@ from spyndle.io.EEGDatabaseReader import Event, RecordedChannel, \
     EEGDBReaderBase, EventList
     
 # Readers
-from spyndle.io.edf import EDFReader
+from spyndle.io.edf import EDFReader, EDFMultiReader
 from spyndle.io.harmonie import HarmonieReader
 from spyndle.io.devuyst import DevuystReader
 
@@ -54,7 +54,7 @@ from spyndle.io.devuyst import DevuystReader
 from spyndle.io.dbutils import rows2df
 from spyndle.io.dataModel import DataModelMng, TransientEvent, PSGNight, \
     Channel, SPF, Propagation, EventClass, DataManipulationProcess, \
-    PropagationRelationship
+    PropagationRelationship, SlowWaveEvent, SpindleEvent
 from spyndle.io.databaseMng import DatabaseMng, clearDatabase
 
     

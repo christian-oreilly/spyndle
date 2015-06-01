@@ -1,2 +1,2 @@
 
-from timeFrequencyPlot import stPlot
+from .timeFrequencyPlot import stPlot

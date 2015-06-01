@@ -39,7 +39,10 @@ import re
 import math
 
 
-from matplotlib.colors import hsv_to_rgb    
+from matplotlib.colors import hsv_to_rgb   
+from matplotlib.figure import Figure
+from matplotlib.pyplot import figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas 
 import matplotlib.image as mpimg
 import matplotlib.gridspec as gridspec
 import matplotlib            
@@ -52,7 +55,7 @@ from spyndle.EEG import electrodesSVG
 
 
 def getTransformedCoord(cx, cy, transform):
-    coord = array(map(float, [cx, cy, 1.0]))
+    coord = array(list(map(float, [cx, cy, 1.0])))
     
     mat = transforToMatrix(transform)
     
@@ -60,7 +63,7 @@ def getTransformedCoord(cx, cy, transform):
 
 
 def transforToMatrix(transform):
-    mat = map(float, re.split(r'\(|\)|,', transform)[1:-1])
+    mat = list(map(float, re.split(r'\(|\)|,', transform)[1:-1]))
     mat = reshape(mat, (2, 3), order='F')
     mat = reshape(mat, (6))
     mat = concatenate((mat, [0, 0, 1]))
@@ -80,7 +83,7 @@ def transformEllipticalCoordinates(r, cx, cy, rx, ry, transform):
     mat = transforToMatrix(transform)
     
     res = zeros((len(xl), 2))
-    for x, y, i in zip(xl, yl, range(len(xl))):
+    for x, y, i in zip(xl, yl, list(range(len(xl)))):
          #print mat.shape, array([x, y, 1.0]).shape
          res[i, :] = dot(mat, array([x, y, 1.0]))[:-1]
 
@@ -97,8 +100,9 @@ def getHeadCircle():
 
 
 
-def transformCircle((cx, cy, rx, ry, transform)):
+def transformCircle(xxx_todo_changeme):
 
+    (cx, cy, rx, ry, transform) = xxx_todo_changeme
     r = array([0.0, 0.5])*pi
     res = transformEllipticalCoordinates(r, cx, cy, rx, ry, transform)
          
@@ -276,7 +280,7 @@ class HeadDrawing:
         
         if electrodeList is None:
             cx, cy, transform = electrodesSVG.getElectrodeCoordinates()
-            self.__electrodeList = cx.keys()  
+            self.__electrodeList = list(cx.keys())  
         else:
             self.__electrodeList = electrodeList  
             
@@ -444,32 +448,54 @@ class HeadDrawing:
         return self.colorbarDict
 
 
-    def plot(self, save=False, filename="fig.svg", showColorBar=False):
+    def plot(self, save=False, filename="fig.svg", 
+             showColorBar=False, show=True, mainAxes=None, colorBarAxes=None):
             
         if save:
-            matplotlib.use('Agg')
-        import pylab    
-    
+            matplotlib.use('Agg')  
     
         cx, cy, rx, ry = transformCircle(electrodesSVG.getHeadCircleProp())
         
-        fig = pylab.figure(figsize=(10, 10.5))   
+        #fig = Figure(figsize=(10, 10.5))
+        fig = figure(figsize=(10, 10.5))
+              
+        #canvas = FigureCanvas(fig)           
         
         if showColorBar and not self.colorbarDict is None:    
-            gs = gridspec.GridSpec(1, 2, width_ratios=[10, 0.5]) 
-            ax = pylab.subplot(gs[0])            
+            if mainAxes is None and colorBarAxes is None:
+                gs = gridspec.GridSpec(1, 2, width_ratios=[10, 0.5]) 
+                ax = fig.add_subplot(gs[0]) 
+                axCol = fig.add_subplot(gs[1])                
+            elif not mainAxes is None and not colorBarAxes is None:
+                gs = None
+                ax = mainAxes
+                axCol = colorBarAxes
+            else:
+                raise ValueError("If showColorBar is True, either no axes" 
+                                 " should be passed to the function or both "
+                                 "mainAxes and colorBarAxes should be passed.")
+                
+            #ax = pylab.subplot(gs[0]) 
+                       
         else:
-            ax = pylab.gca()        
+            if mainAxes is None:            
+                ax = fig.gca()    
+            else:
+                ax = mainAxes
+            #ax = pylab.gca()        
         
         if not self.ColorMap is None:
-            pylab.imshow(self.ColorMap, origin="upper", extent=[cx-rx, cx+rx, cy+ry, cy-ry])  
+            #pylab.imshow(self.ColorMap, origin="upper", extent=[cx-rx, cx+rx, cy+ry, cy-ry])  
+            ax.imshow(self.ColorMap, origin="upper", extent=[cx-rx, cx+rx, cy+ry, cy-ry])  
             if not self.s is None:
-                pylab.contour(self.s, [-1, 0.95], colors='k',  origin="upper", linestyles="dashed", 
+                #pylab.contour(self.s, [-1, 0.95], colors='k',  origin="upper", linestyles="dashed", 
+                ax.contour(self.s, [-1, 0.95], colors='k',  origin="upper", linestyles="dashed", 
                               linewidths=3.0, extent=[cx-rx, cx+rx, cy+ry, cy-ry])
              
     
         img=mpimg.imread(os.path.dirname(os.path.realpath(__file__))  + "\\eeg_electrodes_10-20_small_clear.png")  
-        pylab.imshow(img, extent=[cx-rx-59, cx+rx+59, cy+ry+17, cy-ry-72])  
+        #pylab.imshow(img, extent=[cx-rx-59, cx+rx+59, cy+ry+17, cy-ry-72])    
+        ax.imshow(img, extent=[cx-rx-59, cx+rx+59, cy+ry+17, cy-ry-72])  
     
     
         for elect in self.__electrodeList : 
@@ -487,30 +513,31 @@ class HeadDrawing:
         for arrow in self.arrowPatch:
             ax.add_patch(arrow)
                 
-        pylab.axis('off')
+        #pylab.axis('off')
+        ax.axis('off')
         
         if showColorBar and not self.colorbarDict is None:
-            ax = pylab.subplot(gs[1])
+            #ax = pylab.subplot(gs[1])
             my_cmap = matplotlib.colors.LinearSegmentedColormap('my_colormap',self.colorbarDict, 256)
             data = np.outer(np.arange(101),np.ones(5)) 
-            pylab.imshow(data, cmap=my_cmap, origin="lower")
-            ax.get_xaxis().set_visible(False)
-            ax.get_yaxis().tick_right()
+            #pylab.imshow(data, cmap=my_cmap, origin="lower")
+            axCol.imshow(data, cmap=my_cmap, origin="lower")
+            axCol.get_xaxis().set_visible(False)
+            axCol.get_yaxis().tick_right()
             ticks = np.arange(0, 101, 25)
-            ax.set_yticks(ticks)
-            ax.set_yticklabels(np.round(ticks/100.0*(self.colorbarDict["max"]-
+            axCol.set_yticks(ticks)
+            axCol.set_yticklabels(np.round(ticks/100.0*(self.colorbarDict["max"]-
                         self.colorbarDict["min"])+self.colorbarDict["min"], 4))
-            gs.tight_layout(fig)
+            if not gs is None:
+                gs.tight_layout(fig)
 
 
 
         if save:
-            pylab.savefig(filename,dpi=100, transparent=False, bbox_inches='tight', pad_inches=0)
-        else:
-            pylab.show()
-
-
-
+            #pylab.savefig(filename,dpi=100, transparent=False, bbox_inches='tight', pad_inches=0)
+            fig.canvas.print_figure(filename,dpi=100, transparent=False, bbox_inches='tight', pad_inches=0)
+        if show:
+            fig.show()
 
 
 
@@ -604,7 +631,9 @@ def plotArrowDiagram(listVal, pairs, minDelay=None, maxDelay=None,
 
 
 
-def plotColorMap(electrodes, var, filename=None, addColorbar=True, minVal=None, maxVal=None):
+def plotColorMap(electrodes, var, filename=None, addColorbar=True, 
+                 minVal=None, maxVal=None, show=True, mainAxes=None, 
+                 colorBarAxes=None):
     if not filename is None:
         matplotlib.use('Agg')
         
@@ -613,7 +642,9 @@ def plotColorMap(electrodes, var, filename=None, addColorbar=True, minVal=None, 
     drawing.addColorMap(electrodes, var, minZZ=minVal, maxZZ=maxVal)
 
     if filename is None:
-        drawing.plot(False, showColorBar=addColorbar)
+        drawing.plot(False, showColorBar=addColorbar, 
+                     show=show, mainAxes=mainAxes, colorBarAxes=colorBarAxes)
     else:
-        drawing.plot(True, filename, showColorBar=addColorbar)
+        drawing.plot(True, filename, showColorBar=addColorbar, 
+                     show=show, mainAxes=mainAxes, colorBarAxes=colorBarAxes)
 

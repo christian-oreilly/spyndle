@@ -67,13 +67,13 @@ class DetectorEvaluator:
         #    listSleepStages[i] = listSleepStages[i].lower()
     
         ########### PERFORM SPINDLE DETECTION
-        print "Detecting spindles using the gold standard..."
+        print("Detecting spindles using the gold standard...")
         self.goldStandard.setDetectionStages(listSleepStages)
         self.goldStandard.detectSpindles(channelList) 
         self.goldStandard.saveSpindle(self.goldStandard.reader, goldSpindleName, "Spindle")
 
 
-        print "Detecting spindles using the tested detector..."
+        print("Detecting spindles using the tested detector...")
         self.tested.setDetectionStages(listSleepStages)
         self.tested.detectSpindles(channelList) 
         self.tested.saveSpindle(self.tested.reader, testedSpindleName, "Spindle")
@@ -93,7 +93,7 @@ class DetectorEvaluator:
         if readerTested is None:
             readerTested = readerGold
 
-        if isinstance(channelList, (str, unicode)):
+        if isinstance(channelList, str):
             channelList = [channelList]
          
         # If channelList is not specified, we consider every channel present
@@ -103,19 +103,22 @@ class DetectorEvaluator:
 
 
         for channel in channelList:
-            indStages    = readerGold.getEventIndicator(listDetectionStages, channel, globalEvent=True)            
-            indEventGold = readerGold.getEventIndicator(nameEventGold, channel)
-            indEventTest = readerGold.getEventIndicator(nameEventTested, channel)
+            indStages    = readerGold.getEventNameIndicator(listDetectionStages, channel, globalEvent=True)            
+            indEventGold = readerGold.getEventNameIndicator(nameEventGold, channel)
+            indEventTest = readerTested.getEventNameIndicator(nameEventTested, channel)
             
             TP = np.logical_and(indEventGold, indEventTest)
             TN = np.logical_and(np.logical_not(indEventGold), np.logical_not(indEventTest)) 
             FP = np.logical_and(np.logical_not(indEventGold), indEventTest)
             FN = np.logical_and(indEventGold, np.logical_not(indEventTest))
             
-            self.TP[channel] = np.sum(np.logical_and(indStages, TP))
-            self.TN[channel] = np.sum(np.logical_and(indStages, TN))
-            self.FP[channel] = np.sum(np.logical_and(indStages, FP))
-            self.FN[channel] = np.sum(np.logical_and(indStages, FN))         
+            # NB: We cast these sums as int64 because these statistics are 
+            # involved in computation which can cause overflow of int32.
+            self.TP[channel] = np.sum(np.logical_and(indStages, TP), dtype=np.int64)
+            self.TN[channel] = np.sum(np.logical_and(indStages, TN), dtype=np.int64)
+            self.FP[channel] = np.sum(np.logical_and(indStages, FP), dtype=np.int64)
+            self.FN[channel] = np.sum(np.logical_and(indStages, FN), dtype=np.int64)         
+            del TP, TN, FP, FN, indStages, indEventGold, indEventTest
        
         
                   
@@ -125,11 +128,11 @@ class DetectorEvaluator:
         self.computeStatistics(listSleepStages, nameEventGold, 
                                nameEventTested, readerGold, readerTested, channelList)
         for channel in self.FP:            
-            print ("Channel:%s, sensitivity=%f, specificity=%f, PPV=%f, NPV=%f\n"
+            print(("Channel:%s, sensitivity=%f, specificity=%f, PPV=%f, NPV=%f, MCC=%f, CohenK=%f\n"
                    "            TP=%f, TN=%f, FP=%f, FN=%f" % (channel, 
                    self.sensitivity(channel), self.specificity(channel),
-                   self.PPV(channel), self.NPV(channel), self.TP[channel], 
-                   self.TN[channel], self.FP[channel], self.FN[channel]))
+                   self.PPV(channel), self.NPV(channel), self.MCC(channel), self.cohenk(channel), self.TP[channel], 
+                   self.TN[channel], self.FP[channel], self.FN[channel])))
 
           
     def sensitivity(self, channel):  
@@ -149,7 +152,7 @@ class DetectorEvaluator:
     def accuracy(self, channel):  
         if self.TN[channel] > 0 :
             N = self.FN[channel] + self.TN[channel] +  self.FP[channel] + self.TP[channel]
-            return (self.TN[channel] + self.TP[channel])/N
+            return (self.TN[channel] + self.TP[channel])/float(N)
         else:
             return 0.0                
         
@@ -168,14 +171,20 @@ class DetectorEvaluator:
             return 0.0 
         
                           
-    def MCC(self, channel):    # Negative predictive value                        
+    def MCC(self, channel):    # Matthew's correlation coefficient                        
         if self.TN[channel] > 0 :
             num = float(self.TP[channel]*self.TN[channel] - self.FP[channel]*self.FN[channel])
-            P   = self.TP[channel] + self.FN[channel]
-            P2  = self.TP[channel] + self.FP[channel]
-            N   = self.FP[channel] + self.TN[channel]
-            N2  = self.FN[channel] + self.TN[channel]
-            den = sqrt(P*P2*N*N2)
+            
+            # NB: Casting as integers since Python integers has no maximal 
+            # value wheras numpy.int64 does. Without these casts, when analyzing
+            # whole nights, the operation P*P2*N*N2 can overflow.
+            P   = int(self.TP[channel] + self.FN[channel])
+            P2  = int(self.TP[channel] + self.FP[channel])
+            N   = int(self.FP[channel] + self.TN[channel])
+            N2  = int(self.FN[channel] + self.TN[channel])
+            den = (P*P2*N*N2)**0.5
+            if den == 0:
+                return 0.0
             return num/den
         else:
             return 0.0 
@@ -190,10 +199,10 @@ class DetectorEvaluator:
             P2  = self.TP[channel] + self.FP[channel]
             N   = self.FP[channel] + self.TN[channel]
             N2  = self.FN[channel] + self.TN[channel]
-            return float((P2*P + N2*N))/float((P+N)**2)
+            return float(P2*P + N2*N)/float((P+N)**2)
         else:
             return 0.0 
-        
+         
         
     def cohenk(self, channel):    # Negative predictive value                        
         if self.TN[channel] > 0 :
@@ -201,11 +210,11 @@ class DetectorEvaluator:
             acc = self.accuracy(channel) 
             return (acc - Pe)/(1-Pe)
         else:
+            return 0.0     
+        
+    def F1(self, channel):    # Negative predictive value                        
+        if self.TN[channel] > 0 :
+            return (2.0*self.TP[channel])/(2.0*self.TP[channel] + self.FP[channel]+self.FN[channel])
+        else:
             return 0.0 
                         
-        
-
-            
-            
-            
-            

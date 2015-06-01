@@ -53,11 +53,12 @@
 from scipy import unique, where, percentile, concatenate, array
 from scipy import sqrt, median, std
 from sklearn.covariance import MinCovDet
-from numpy import in1d
+from numpy import in1d, nan
 import sqlalchemy
 from sqlalchemy import distinct, and_
 import pandas as pd
-
+import numpy as np
+        
 from spyndle.propagation import computeXCST
 from spyndle.io import Propagation, TransientEvent, \
     DatabaseMng, PropagationRelationship, Channel, rows2df
@@ -124,10 +125,10 @@ def getAveragePropagation(applyC3=True, applyC4=True, nights=[], eventNames=[],
     for shard in shards:            
         try:
             dbMng = DatabaseMng(dbName, shard=shard)
-        except sqlalchemy.exc.ArgumentError, error:
-             print "Error connecting to the specified database URL. "\
+        except sqlalchemy.exc.ArgumentError as error:
+             print(("Error connecting to the specified database URL. "\
                    "The format of the database path is invalid."     \
-                   "\n\nSQLAlchemy error message: " + str(error)
+                   "\n\nSQLAlchemy error message: " + str(error)))
 
         query = dbMng.session.query(PropagationRelationship)
         if nights != []:
@@ -167,18 +168,18 @@ class SPFEvaluator :
         else:
             if dbName == "sqlite:///:memory:":
                 if self.verbose:
-                    print "No database session passed. Using in-memory database."
+                    print("No database session passed. Using in-memory database.")
             else:     
                 if self.verbose:
-                    print "No database session passed. Using the " + dbName + " database."           
+                    print(("No database session passed. Using the " + dbName + " database."))           
             try:
 
                 self.dbMng = DatabaseMng(dbName, shard=shard)
                 self.session = self.dbMng.session
-            except sqlalchemy.exc.ArgumentError, error:
-                 print "Error connecting to the specified database URL. "\
+            except sqlalchemy.exc.ArgumentError as error:
+                 print(("Error connecting to the specified database URL. "\
                        "The format of the database path is invalid."     \
-                       "\n\nSQLAlchemy error message: " + str(error)
+                       "\n\nSQLAlchemy error message: " + str(error)))
             
         
 
@@ -237,22 +238,22 @@ class SPFEvaluator :
         # Computing cutoff threshold from asychronized comparisons and
         # rejecting false detection and outliers
         if self.verbose:
-            print "Computing cutoff and rejecting outliers"
+            print("Computing cutoff and rejecting outliers")
         self.propagationRejection(channelList, alpha)
     
         # CORRECTING DELAYS TO HAVE ONLY PROPAGATION WITH POSITIVE TIME DELAYS 
         if self.verbose: 
-            print "Correcting negative delays"   
+            print("Correcting negative delays")   
         self.negativeDelayCorrection()    
 
         # COMPUTING SPINDLE PROPAGATION FIELD      
         if self.verbose: 
-            print "Identifying SPF" 
+            print("Identifying SPF") 
         self.identifySPF()            
     
         # REMOVING DUPLICATE PROPAGATION DUE TO BIDIRECTIONNALITY
         if self.verbose: 
-            print "Removing duplicates"        
+            print("Removing duplicates")        
         self.removeBidirectionnalDuplicates()  
                 
     
@@ -267,7 +268,7 @@ class SPFEvaluator :
         for testChannel in channelList :  
             
             if self.verbose :
-                print "test:", testChannel                
+                print(("test:", testChannel))                
                 
             for refChannel in channelList:
                 if testChannel == refChannel:
@@ -580,6 +581,7 @@ class SPFEvaluator :
         baseQuery.update({Propagation.bidirect: -(Propagation.bidirect +1)},
                                                synchronize_session=False)
 
+        self.session.flush()
         
 
     
@@ -591,6 +593,7 @@ class SPFEvaluator :
     def negativeDelayCorrection(self): 
         
         #TODO: The execution of this query is much too long. It must be fixed.
+        """
         negQuery   = self.session.query(Propagation)\
                                         .join(TransientEvent, TransientEvent.ID == Propagation.transientEventID)\
                                         .filter(TransientEvent.psgNight == self.night)\
@@ -601,8 +604,31 @@ class SPFEvaluator :
                          Propagation.sourceChannelName  : Propagation.sinkChannelName,
                          Propagation.sinkChannelName    : Propagation.sourceChannelName},
                          synchronize_session=False)
+        """
 
+            
+        from datetime import datetime
+        print(("1:", self.night,  datetime.now()))
+        teQuery   = self.session.query(TransientEvent.ID)\
+                            .filter(TransientEvent.psgNight == self.night)\
+                            .filter(TransientEvent.eventName == self.eventName)
 
+        print(("2:", self.night,  datetime.now()))
+        baseQuery = self.session.query(Propagation)\
+                            .filter(Propagation.transientEventID.in_(teQuery.subquery()))\
+                            .filter(Propagation.delay < 0.0 ) 
+                            
+        print(("3:", self.night,  datetime.now()))        
+        baseQuery.update({Propagation.inverted           : True, 
+                          Propagation.delay              : -Propagation.delay,
+                          Propagation.sourceChannelName  : Propagation.sinkChannelName,
+                          Propagation.sinkChannelName    : Propagation.sourceChannelName},
+                          synchronize_session=False)
+
+        print(("4:", self.night,  datetime.now()))  
+        self.session.flush()
+        
+        print(("5:", self.night,  datetime.now()))
 
 
 
@@ -704,16 +730,29 @@ class SPFEvaluator :
     """            
     def computeAveragePropagation(self, deltaWindow = 0.5, alphaSD = 0.2, minNbValid=40):
     
+        def variableFilter(var):
+            if var is None:
+                return None
+            if np.isnan(var):
+                return None
+            else:
+                return var
+    
         propRels = self.session.query(PropagationRelationship)\
                                         .filter_by(psgNight  = self.night,
                                                    eventName = self.eventName).all() 
+
 
         for propRel in propRels:
             
             if propRel.nbValid >= 2 :
                 try:
-                    props   = propRel.getValidPropagations(self.session)
-                    delays  = [prop.delay for prop in props]
+                    delays  = self.session.query(Propagation.delay).\
+                                    filter_by(propRelNo  = propRel.no,
+                                              isFP       = False,
+                                              isOutlier  = False).all()
+                    #props   = propRel.getValidPropagations(self.session)
+                    #delays  = [prop.delay for prop in props]
                     covX    = MinCovDet().fit(array(delays))
                     meanX   = covX.location_[0]
                     sdX     = sqrt(covX.covariance_[0, 0])
@@ -728,14 +767,14 @@ class SPFEvaluator :
             else:
                 meanX   = None #nan
                 sdX     = None #nan     
-            
-            propRel.delay_mean = meanX
-            propRel.delay_sd   = sdX
-            
+
+            propRel.delay_mean = variableFilter(meanX)
+            propRel.delay_sd   = variableFilter(sdX)
+
             propRel.testRejectionC3(deltaWindow, alphaSD)
             propRel.testRejectionC4(minNbValid)
 
-
+            self.session.flush()    
 
 
 

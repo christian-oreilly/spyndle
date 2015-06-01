@@ -23,20 +23,20 @@ class conversionSaveSpindleTest(unittest.TestCase) :
 
     def testSaving1(self):
         
-        print "Converting .sig file to .bdf file..."
+        print("Converting .sig file to .bdf file...")
         readerSIG =  HarmonieReader(parentdir + "/test.SIG")
         readerSIG.saveAsEDF(parentdir + "/test.BDF", "BDF", verbose=False)
         
         
-        print "Reading the .bdf file..."
+        print("Reading the .bdf file...")
         reader = EDFReader(parentdir + "/test.BDF")
         
         detectionStages = ["Sleep stage N2", "Sleep stage 2"]
-        listChannels    = ['F3-A1', 'F4-A1']
+        channelList    = ['F3-A1', 'F4-A1']
         
         detector = SpindleDectectorAmp(reader, usePickled=False)
         detector.setDetectionStages(detectionStages)
-        detector.detectSpindles(listChannels=listChannels)
+        detector.detectSpindles(channelList=channelList)
         
         nbEvents =  len(reader.events) + len(detector.detectedSpindles)
         
@@ -49,18 +49,18 @@ class conversionSaveSpindleTest(unittest.TestCase) :
         evaluator = DetectorEvaluator()
         
         evaluator.computeStatistics(detectionStages, "SpindleRMS", 
-                          "SpindleRMS",  reader, reader2, listChannels)    
+                          "SpindleRMS",  reader, reader2, channelList)    
         
-        for channel in listChannels:
+        for channel in channelList:
             try:
                 self.assertEqual(evaluator.sensitivity(channel), 1.0)
                 self.assertEqual(evaluator.specificity(channel),  1.0)
                 self.assertEqual(evaluator.PPV(channel), 1.0)
                 self.assertEqual(evaluator.NPV(channel), 1.0)
             except AssertionError:
-                print "channel=", channel, "; sensitivity=", evaluator.sensitivity(channel), 
-                print "; specificity=", evaluator.specificity(channel), "; PPV=", 
-                print evaluator.PPV(channel), "; NPV=", evaluator.NPV(channel)
+                print("channel=", channel, "; sensitivity=", evaluator.sensitivity(channel), end=' ') 
+                print("; specificity=", evaluator.specificity(channel), "; PPV=", end=' ') 
+                print(evaluator.PPV(channel), "; NPV=", evaluator.NPV(channel))
                 raise
 
 
@@ -81,7 +81,7 @@ class conversionSaveSpindleTest(unittest.TestCase) :
         reader1.events = [e for e in reader1.events if e.name != AmpEventName]
         detector   =  SpindleDectectorAmp(reader1, usePickled=False)  
         detector.setDetectionStages(detectionStages)
-        detector.detectSpindles(listChannels=[channel])
+        detector.detectSpindles(channelList=[channel])
         detector.saveSpindle(reader1, AmpEventName, "Spindle")
         
         reader2 = EDFReader(fpath + fileName)
@@ -102,7 +102,7 @@ class conversionSaveSpindleTest(unittest.TestCase) :
     
         channels = ["C4-A1"]
 
-        print "Converting .sig file to .bdf file..."
+        print("Converting .sig file to .bdf file...")
         readerSIG =  HarmonieReader(fpath + fileName[:-3] + 'SIG')
         readerSIG.saveAsEDF(fpath + fileName, "BDF", verbose=False)
     
@@ -110,11 +110,11 @@ class conversionSaveSpindleTest(unittest.TestCase) :
 
         data        = reader.readChannel(channels[0], usePickled=False)
         signal      = data.signal
-        print signal[[1, 100, 200, 300, 400, 500]]       
+        print(signal[[1, 100, 200, 300, 400, 500]])       
        
         data        = reader.readChannel(channels[0], usePickled=False)
         signal      = data.signal
-        print signal[[1, 100, 200, 300, 400, 500]]       
+        print(signal[[1, 100, 200, 300, 400, 500]])       
 
 
 
@@ -130,7 +130,7 @@ class conversionSaveSpindleTest(unittest.TestCase) :
                 
         channels = ["C4-A1"]
 
-        print "Converting .sig file to .bdf file..."
+        print("Converting .sig file to .bdf file...")
         readerSIG =  HarmonieReader(fpath + fileName[:-3] + 'SIG')
         readerSIG.saveAsEDF(fpath + fileName, "BDF", verbose=False)
     
@@ -146,23 +146,23 @@ class conversionSaveSpindleTest(unittest.TestCase) :
         detector.computeRMS       = False
         detector.computeFreq      = False       
         detector.computeSlopeFreq = False          
-        detector.detectSpindles(listChannels=channels)
+        detector.detectSpindles(channelList=channels)
         nbSpins1 = len(detector.detectedSpindles)
         detector.saveSpindle(reader, AmpEventName, "Spindle")      
          
-        detector.detectSpindles(listChannels=channels)
+        detector.detectSpindles(channelList=channels)
         nbSpins2 = len(detector.detectedSpindles)       
         detector.saveSpindle(reader, RMSEventName, "Spindle")  
        
         try:
             self.assertEqual(nbSpins1, nbSpins2)
         except AssertionError:
-            print nbSpins1, nbSpins2
+            print(nbSpins1, nbSpins2)
             raise
 
         evaluatorAmp = DetectorEvaluator()   
         evaluatorAmp.computeStatistics(detectionStages, RMSEventName, 
-                                  AmpEventName, reader, listChannels=channels) 
+                                  AmpEventName, reader, channelList=channels) 
 
         for channel in channels:   
             if channel in evaluatorAmp.TP:
@@ -179,7 +179,7 @@ class conversionSaveSpindleTest(unittest.TestCase) :
         fileName        = "/test.bdf" #'PETCHn1.bdf'        
 
         
-        print "Converting .sig file to .bdf file..."
+        print("Converting .sig file to .bdf file...")
         readerSIG =  HarmonieReader(fpath + fileName[:-3] + 'SIG')
         readerSIG.saveAsEDF(fpath + fileName, "BDF", verbose=False)
     
@@ -208,7 +208,7 @@ class conversionSaveSpindleTest(unittest.TestCase) :
         fileName        = "/test.bdf" #'PETCHn1.bdf'        
 
         
-        print "Converting .sig file to .bdf file..."
+        print("Converting .sig file to .bdf file...")
         readerSIG =  HarmonieReader(fpath + fileName[:-3] + 'SIG')
         readerSIG.saveAsEDF(fpath + fileName, "BDF", verbose=False)
     
@@ -247,7 +247,7 @@ class conversionSaveSpindleTest(unittest.TestCase) :
                 
         channels = ["C4-A1"]
 
-        print "Converting .sig file to .bdf file..."
+        print("Converting .sig file to .bdf file...")
         readerSIG =  HarmonieReader(fpath + fileName[:-3] + 'SIG')
         readerSIG.saveAsEDF(fpath + fileName, "BDF", verbose=False)
         
@@ -263,7 +263,7 @@ class conversionSaveSpindleTest(unittest.TestCase) :
         detector.computeRMS       = False
         detector.computeFreq      = False       
         detector.computeSlopeFreq = False          
-        detector.detectSpindles(listChannels=channels)
+        detector.detectSpindles(channelList=channels)
         detector.saveSpindle(reader, AmpEventName, "Spindle")      
 
         copyfile(fpath + fileName, fpath + "temp.bdf")         
@@ -281,7 +281,7 @@ class conversionSaveSpindleTest(unittest.TestCase) :
         detector.computeRMS       = False
         detector.computeFreq      = False       
         detector.computeSlopeFreq = False          
-        detector.detectSpindles(listChannels=channels)
+        detector.detectSpindles(channelList=channels)
         detector.saveSpindle(reader, AmpEventName, "Spindle")    
         
 

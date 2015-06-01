@@ -62,15 +62,18 @@ class DetectedSpindle(DetectedEvent):
     def __init__(self, channel, startTime, endTime):
         super(DetectedSpindle, self).__init__(channel, startTime, endTime)
 
-        self.RMSamp         = 0.0
+        self.RMSAmp         = 0.0
         self.meanFreq       = 0.0
+        self.modeFreq       = 0.0
         self.sleepStage     = ""
         self.slopeOrigin    = 0.0
         self.slope          = 0.0
-        self.filteredRMSamp = 0.0
 
-    def computeRMS(self, reader, fmin=10, fmax=16):
+    def computeRMS(self, fmin=11, fmax=16, reader=None):
         raise UserWarning("The code of this function need to be recoded to use time rather than sample.")        
+        
+        if reader is None:
+            reader = self.reader
         
         # The filters need the signal to be at least 3*nbTaps
         nbTaps = 1001        
@@ -85,12 +88,15 @@ class DetectedSpindle(DetectedEvent):
             
         # Defining EEG filters
         bandPassFilter = Filter(fs)
-        bandPassFilter.create(low_crit_freq=fmin, high_crit_freq=fmax, order=nbTaps, btype="bandpass", ftype="FIR", useFiltFilt=True)          
+        bandPassFilter.create(low_crit_freq=fmin, high_crit_freq=fmax, 
+                              order=nbTaps, btype="bandpass", ftype="FIR", 
+                              useFiltFilt=True)          
              
         signal = bandPassFilter.applyFilter(signal)[0:(self.endSample-self.startSample)]                                
     
-        self.RMSamp = sqrt(mean(signal**2))
+        self.RMSAmp = sqrt(mean(signal**2))
         
+
     
                 
         
@@ -129,11 +135,12 @@ class DetectedSpindle(DetectedEvent):
  implement this general framework. Threshold-based detector can be implemented
  by subclassing this classe.
 """
-class ThresholdSpindleDetector(ThresholdDetector):
-    __metaclass__ = ABCMeta    
-        
-    def __init__(self, reader=None, usePickled=False):
-        super(ThresholdSpindleDetector, self).__init__(reader, usePickled)
+class ThresholdSpindleDetector(ThresholdDetector, metaclass=ABCMeta):
+    def __init__(self, *args, **kwargs):
+        super(ThresholdSpindleDetector, self).__init__(*args, **kwargs)
+         
+
+        self.detectClass = DetectedSpindle         
          
         ###############################################################################
         # Detection patameters
@@ -153,13 +160,12 @@ class ThresholdSpindleDetector(ThresholdDetector):
         # that spindles are taken as being of short duration (e.g. a script
         # stoping crashing because it has exhausted all the memory making
         # a S-transform of a spindle of 30 seconds).
-        self.maximalDuration = 3.0 # in seconds
+        self.maximalDuration = 2.0 # in seconds
         
         self.computeRMS         = False
-        self.computeRMSFiltered = False
         self.computeFreq        = False       
         self.computeSlopeFreq   = False
-        
+        self.computeFreqMode    = False 
 
 
 
@@ -181,10 +187,9 @@ class ThresholdSpindleDetector(ThresholdDetector):
 
     # Used to save detected events in EEG data file. 
     def saveEvents(self, reader, eventName, 
-                    eventGroupName="Spindle", fileName = None, dbSession=None):
+                    eventGroupName="Spindle", fileName = None, dbSession=None, removeExisting=True):
               
         # TODO: This code should not repeat the code of TransientDetector.saveEvents(...)              
-              
         if dbSession :
             
             # Create the data manipulation process record.
@@ -211,6 +216,9 @@ class ThresholdSpindleDetector(ThresholdDetector):
             transientEvents = []
             spindleEvents   = []
           
+        if removeExisting:   
+            reader.events.removeType(eventName)
+            
         for detectedEvent in self.detectedEvents:    
             event = Event(name          = eventName, 
                           groupName     = eventGroupName, 
@@ -218,9 +226,9 @@ class ThresholdSpindleDetector(ThresholdDetector):
                           startTime     = detectedEvent.startTime(),
                           timeLength    = detectedEvent.timeDuration , 
                           dateTime      = reader.getRecordingStartTime() + timedelta(seconds=detectedEvent.startTime()),
-                          properties = {"RMSamp"            :detectedEvent.RMSamp,
-                                        "filteredRMSamp"    :detectedEvent.filteredRMSamp,
+                          properties = {"RMSAmp"            :detectedEvent.RMSAmp,
                                         "meanFreq"          :detectedEvent.meanFreq,
+                                        "modeFreq"          :detectedEvent.modeFreq,
                                         "slopeOrigin"       :detectedEvent.slopeOrigin,
                                         "slope"             :detectedEvent.slope,
                                         "stage"             :detectedEvent.sleepStage})     
@@ -303,12 +311,12 @@ class ThresholdSpindleDetector(ThresholdDetector):
         try:
             f = open(fileName, "w")    
         except IOError:     
-            print "Error: The selected file could not be open."
+            print("Error: The selected file could not be open.")
             exit()
         
         for spindle in self.detectedSpindles:            
             f.write(spindle.channel + ";" + str(spindle.startTime()) + ";" +  
-                    str(spindle.endTime()) + ";" + str(spindle.RMSamp) + ";" + str(spindle.meanFreq )
+                    str(spindle.endTime()) + ";" + str(spindle.RMSAmp) + ";" + str(spindle.meanFreq )
                       + ";" + str(spindle.timeDuration) + ";" + str(spindle.sleepStage) + "\n")             
 
 
@@ -319,7 +327,7 @@ class ThresholdSpindleDetector(ThresholdDetector):
         try:
             cr = csv.reader(open(fileName, "rb"), delimiter=';')   
         except IOError:     
-            print "Error: The selected file could not be open."
+            print("Error: The selected file could not be open.")
             exit()
         
         self.detectedSpindles = []
@@ -333,49 +341,53 @@ class ThresholdSpindleDetector(ThresholdDetector):
          for startInd, stopInd, spindle in zip(startSpinInds, stopSpinInds, newSpindles):
             sig       = signal[startInd:stopInd]
    
+            nbMinSamples = fs
+            N            = len(sig)
+            if N < nbMinSamples:
+                sig = np.concatenate((sig, np.zeros(nbMinSamples - N)))   
+   
+   
             X, fX = computeST(sig, fs, fmin=self.lowFreq-1, fmax=self.highFreq+1)  
             
             Y = abs(np.transpose(X))
                             
-            regx = arange(len(sig))/fs
+            regx = arange(N)/fs
             regy = []
             try:
-                for i in range(len(regx)):
+                for i in range(N):
                     regy.append(trapz(fX*Y[:, i], fX)/trapz(Y[:, i], fX))  
             except: 
-                print fX.shape, X.shape, Y.shape, regx.shape, sig.shape
-                print fs, self.lowFreq-1, self.highFreq+1, sig
-                print channelTime[startInd:stopInd]
+                print((fX.shape, X.shape, Y.shape, regx.shape, sig.shape))
+                print((fs, self.lowFreq-1, self.highFreq+1, sig))
+                print((channelTime[startInd:stopInd]))
                 raise
 
             z = np.polyfit(regx, regy, deg=1)     
 
             spindle.slopeOrigin = z[1]
             spindle.slope       = z[0]
- 
+
+
+
+
 
 
 
     def postDetectionComputation(self, EEGsignal, channelTime, 
                                               startInds, stopInds, newEvents, fs):
 
-        # The RMS amplitude computed here is the raw RMS amplitude, that is the
-        # amplitude computed on the unfiltered signal. It may be different than
-        # the amplitude in the spindle band.
+        # The RMS amplitude computed here is the RMS amplitude of the
+        # signal filtered in the spindle band.
         if self.computeRMS :
-            for startInd, stopInd, spindle in zip(startInds, stopInds, newEvents):
-                spindle.RMSamp = sqrt(mean(EEGsignal[startInd:stopInd]**2))
-    
-        if self.computeRMSFiltered :
-   
+            order = int(min(3003, len(EEGsignal)-3)/3)
             bandPassFilter = Filter(fs)
             bandPassFilter.create(low_crit_freq=self.lowFreq, 
-                              high_crit_freq=self.highFreq, order=1001, 
+                              high_crit_freq=self.highFreq, order=order, 
                               btype="bandpass", ftype="FIR", useFiltFilt=True)     
             filteredEEGSignal = bandPassFilter.applyFilter(EEGsignal)
 
             for startInd, stopInd, spindle in zip(startInds, stopInds, newEvents):
-                spindle.filteredRMSamp= sqrt(mean(filteredEEGSignal[startInd:stopInd]**2))            
+                spindle.RMSAmp= sqrt(mean(filteredEEGSignal[startInd:stopInd]**2))            
     
     
         if self.computeFreq :
@@ -392,7 +404,23 @@ class ThresholdSpindleDetector(ThresholdDetector):
                 freqs = freqs[(freqs >= self.lowFreq)*(freqs <= self.highFreq)]
                 
                 spindle.meanFreq = sum(freqs*FFT)/sum(FFT)
-                                    
+                    
+    
+        if self.computeFreqMode :
+            for startInd, stopInd, spindle in zip(startInds, stopInds, newEvents):
+                sig       = EEGsignal[startInd:stopInd]
+
+                if sig.size < fs*10:
+                    sig = concatenate((sig, zeros(int(fs)*10 - sig.size)))
+                
+                FFT = abs(fft(sig))
+                freqs = fftfreq(sig.size, 1.0/fs)        
+                
+                FFT   = FFT[(freqs >= self.lowFreq)*(freqs <= self.highFreq)]
+                freqs = freqs[(freqs >= self.lowFreq)*(freqs <= self.highFreq)]
+                
+                spindle.modeFreq = freqs[np.argmax(FFT)]
+                
         
         if self.computeSlopeFreq :
             self.computeFreqSlope_atDetection(EEGsignal, fs, startInds, 
@@ -403,18 +431,16 @@ class ThresholdSpindleDetector(ThresholdDetector):
 
 
 
-    def _detectMain_(self, stageEvents, channelTime, fs, 
-                       channel, indexSignal, EEGsignal, stage=None, DetectedClass=DetectedSpindle):
-        super(ThresholdSpindleDetector, self)._detectMain_(stageEvents, channelTime, fs, 
-                       channel, indexSignal, EEGsignal, stage, DetectedClass)
+    def _detectMain_(self, *args, **kwargs):
+        return super(ThresholdSpindleDetector, self)._detectMain_(*args, **kwargs)
         
         
 
 class SpindleDetectorRMS(ThresholdSpindleDetector):
     
     
-    def __init__(self, reader=None, usePickled=False):
-        super(SpindleDetectorRMS, self).__init__(reader, usePickled)
+    def __init__(self, *args, **kwargs):
+        super(SpindleDetectorRMS, self).__init__(*args, **kwargs)
         
         ###############################################################################
         # Detection patameters
@@ -430,41 +456,115 @@ class SpindleDetectorRMS(ThresholdSpindleDetector):
 
         ###############################################################################
 
+        # We allow for a spindle activity region to contain samples having an
+        # amplitude going bellow the quantileThreshold for a 
+        # maximum of maxAllowableGapBellowThreshold seconds.
+        self.maxAllowableGapBellowThreshold = 0.0 # in seconds
+        ###############################################################################
+        
 
     # Function performing any processing steps on the data to compute and return
     # the transformed signal that is an index of spindle presence.
-    def preprocessing(self, data):
+    def preprocessing(self, signal, time=None, samplingRate=None, channel=None):
 
         # Defining EEG filters
-        bandPassFilter = Filter(data.samplingRate)
+        order = int(min(3003, len(signal)-3)/3)
+        bandPassFilter = Filter(samplingRate)
         bandPassFilter.create(low_crit_freq=self.lowFreq, 
-                              high_crit_freq=self.highFreq, order=1001, 
+                              high_crit_freq=self.highFreq, order=order, 
                               btype="bandpass", ftype="FIR", useFiltFilt=True)          
 
         # filtering can take a lot of memory. By making sure that the 
         # garbage collector as passed just before the filtering, we
         # increase our chances to avoid a MemoryError  
         gc.collect()                      
-        signal = bandPassFilter.applyFilter(data.signal)     
+        signal = bandPassFilter.applyFilter(signal)     
 
         ################################# RMS COMPUTATION #####################
-        windowNbSample = int(round(self.averagingWindowSize*data.samplingRate))
+        windowNbSample = int(round(self.averagingWindowSize*samplingRate))
         if mod(windowNbSample, 2) == 0 : # We need an odd number.
             windowNbSample += 1
 
         # For selecting samples using a quantile-based thresholds, using abs(X)
         # or X**2 to rectify the X signal will give exactly the same result
-        # since X**2 eqauls abs(X)**2 (for real numbers) and and the transformation
+        # since X**2 eqauls abs(X)**2 (for real numbers) and  the transformation
         # from abs(X) to abs(X)**2 is monotonically increasing, meaning that 
         # rank based statistics (such as quatiles) will give exactly the same
         # result. We use the numpy implementation of abs() because it is the
         # faster alternative.
+        return np.sqrt(self.averaging(signal**2.0, windowNbSample))
+        #return self.averaging(np.abs(signal), windowNbSample)
+    
+    
+    
+    def getEffectiveThreshold(self, signal):
+        return mquantiles(signal, self.threshold)[0]
+
+
+
+
+
+
+
+
+# Mean absolute
+class SpindleDetectorMA(ThresholdSpindleDetector):
+    
+    
+    def __init__(self, *args, **kwargs):
+        super(SpindleDetectorMA, self).__init__(*args, **kwargs)
+        
+        ###############################################################################
+        # Detection patameters
+        ###############################################################################
+    
+        # Quantile of spindle amplitude used to determine spindle activity
+        self.threshold = 0.92
+
+        # Width of the window used to computer the RMS amplitude.
+        ### Choosing such that it always encompass at least two cycles of the 
+        ### smaller frequency. We have a tradeoff between stability and accuracy...
+        self.averagingWindowSize = 0.20  #0.508361 #2.0/lowFreq # In seconds
+
+        ###############################################################################
+
+        # We allow for a spindle activity region to contain samples having an
+        # amplitude going bellow the quantileThreshold for a 
+        # maximum of maxAllowableGapBellowThreshold seconds.
+        self.maxAllowableGapBellowThreshold = 0.0 # in seconds
+        ###############################################################################
+        
+
+    # Function performing any processing steps on the data to compute and return
+    # the transformed signal that is an index of spindle presence.
+    def preprocessing(self, signal, time=None, samplingRate=None, channel=None):
+
+        # Defining EEG filters
+        order = int(min(3003, len(signal)-3)/3)
+        bandPassFilter = Filter(samplingRate)
+        bandPassFilter.create(low_crit_freq=self.lowFreq, 
+                              high_crit_freq=self.highFreq, order=order, 
+                              btype="bandpass", ftype="FIR", useFiltFilt=True)          
+
+        # filtering can take a lot of memory. By making sure that the 
+        # garbage collector as passed just before the filtering, we
+        # increase our chances to avoid a MemoryError  
+        gc.collect()                      
+        signal = bandPassFilter.applyFilter(signal)     
+
+        ################################# RMS COMPUTATION #####################
+        windowNbSample = int(round(self.averagingWindowSize*samplingRate))
+        if mod(windowNbSample, 2) == 0 : # We need an odd number.
+            windowNbSample += 1
+
+
         return self.averaging(np.abs(signal), windowNbSample)
     
     
     
-    def getEffectiveThreshold(self, samplesIndexes, signal):
-        return mquantiles(signal[samplesIndexes], self.threshold)[0]
+    def getEffectiveThreshold(self, signal):
+        return mquantiles(signal, self.threshold)[0]
+
 
 
 
@@ -479,8 +579,8 @@ SpindleDetectorAmp = SpindleDetectorRMS
 class SpindleDetectorTeager(ThresholdSpindleDetector):
     
     
-    def __init__(self, reader=None, usePickled=False):
-        super(SpindleDetectorTeager, self).__init__(reader, usePickled)
+    def __init__(self, *args, **kwargs):
+        super(SpindleDetectorTeager, self).__init__(*args, **kwargs)
         
         ###############################################################################
         # Detection patameters
@@ -496,26 +596,34 @@ class SpindleDetectorTeager(ThresholdSpindleDetector):
 
     # Function performing any processing steps on the data to compute and return
     # the transformed signal that is an index of spindle presence.
-    def preprocessing(self, data):
+    def preprocessing(self, signal, time=None, samplingRate=None, channel=None):
 
         # Defining EEG filters
-        bandPassFilter = Filter(data.samplingRate)
+        order = int(min(3003, len(signal)-3)/3)
+        bandPassFilter = Filter(samplingRate)
         bandPassFilter.create(low_crit_freq=self.lowFreq, high_crit_freq=self.highFreq, 
-                              order=1001, btype="bandpass", ftype="FIR", useFiltFilt=True)          
+                              order=order, btype="bandpass", ftype="FIR", useFiltFilt=True)          
     
-        # filtering can take a lot of memory. By making sure that the 
-        # garbage collector as passed just before the filtering, we
-        # increase our chances to avoid a MemoryError  
-        gc.collect()                     
-        signal = bandPassFilter.applyFilter(data.signal)                      
+        """
+         Splitting the process in chuck of 1M elements to avoid memory errors.
+        """
+        NMAX = 1000000.0
+        N = len(signal)
+        output = [[0]]
+        for i in range(int(N/NMAX)+1):
+            block = signal[int(max(i*NMAX-1, 0)):int(min(N, (i+1)*NMAX+1))]
+                   
+            block = bandPassFilter.applyFilter(block)                      
     
-    
-        ########################## Computing Teager operator ######################
-        return concatenate(([0], signal[1:-1]**2 - signal[:-2]*signal[2:], [0]))
+            ########################## Computing Teager operator ######################
+            output.append(block[1:-1]**2 - block[:-2]*block[2:])
+        
+        output.append([0])
+        return  concatenate(output)  
     
       
-    def getEffectiveThreshold(self, samplesIndexes, signal):
-        return mean(signal[samplesIndexes])*self.threshold
+    def getEffectiveThreshold(self, signal):
+        return mean(signal)*self.threshold
 
 
  
@@ -523,8 +631,8 @@ class SpindleDetectorTeager(ThresholdSpindleDetector):
 class SpindleDetectorSigma(ThresholdSpindleDetector):
     
     
-    def __init__(self, reader=None, usePickled=False):
-        super(SpindleDetectorSigma, self).__init__(reader, usePickled)        
+    def __init__(self, *args, **kwargs):
+        super(SpindleDetectorSigma, self).__init__(*args, **kwargs)        
 
         ###############################################################################
         # Detection patameters
@@ -550,53 +658,57 @@ class SpindleDetectorSigma(ThresholdSpindleDetector):
 
     # Function performing any processing steps on the data to compute and return
     # the transformed signal that is an index of spindle presence.
-    def preprocessing(self, data):
+    def preprocessing(self, signal, time=None, samplingRate=None, channel=None):
     
-        fileName = self.reader.fileName + "_sigmaIndex_" + data.channel   + ".mat"
+        #fileName = self.reader.fileName + "_sigmaIndex_" + channel + "_" + str(time[0])  + ".mat"
     
+        N = len(signal)
+        """
         if os.path.exists(fileName):
             print "Using saved sigma index..."    
             self.sigmaIndex = loadmat(fileName)["sigma"]
             self.sigmaIndex = self.sigmaIndex.reshape(self.sigmaIndex.size)
-        else:     
-            self.sigmaIndex = zeros(self.reader.getNbSample(data.channel)) 
-                    
+            assert(len(signal) == len(self.sigmaIndex))
+        else:
+        """
+        self.sigmaIndex = zeros(N) 
+        
+        nbPad = int(self.windowOverlapping/2.0*samplingRate)
+        nbWin = int(self.computationWindow*samplingRate) - 2*nbPad
+
+        nbIter = int(N/nbWin)
+        for i in range(nbIter):
+            if mod(i, 1000) == 0: print((i, nbIter))
             
-            nbPad = int(self.windowOverlapping/2.0*data.samplingRate)
-            nbWin = int(self.computationWindow*data.samplingRate) - 2*nbPad
-    
-            nbIter = int(self.reader.getNbSample(data.channel)/nbWin)
-            for i in range(nbIter):
-                if mod(i, 1000) == 0: print i, nbIter
-                
-                if i == 0 :            # First iteration
-                    indexes = arange(nbPad + nbWin) 
-                elif i == nbIter-1 :   # Last iteration
-                    indexes = arange(i*nbWin-nbPad, self.reader.getNbSample(data.channel  ))
-                else:                       # Other iterations
-                    indexes = arange(i*nbWin-nbPad, i*nbWin + nbWin+nbPad)
-    
-                X, fX = computeST(data.signal[indexes], data.samplingRate, fmin=4.0, fmax=40.0)  
-                
-                if i == 0 :            # First iteration
-                    indexesNoPad = arange(nbWin) 
-                elif i == nbIter-1 :   # Last iteration
-                    indexesNoPad = arange(nbPad, nbPad + self.reader.getNbSample(data.channel)-i*nbWin)
-                else:                       # Other iterations
-                    indexesNoPad = arange(nbPad, nbPad + nbWin)
-                    
-                X       = abs(X[indexesNoPad])
-                indexes = indexes[indexesNoPad]
-    
-                maxalpha  = X[:, (fX >= 7.5)*(fX <= 10.0)].max(axis=1)
-                maxsigma  = X[:, (fX >= self.lowFreq)*(fX <= self.highFreq)].max(axis=1)
-                meanlow   = X[:, (fX >= 4.0)*(fX <= 10.0)].mean(axis=1) 
-                meanhigh  = X[:, (fX >= 20.0)*(fX <= 40.0)].mean(axis=1) 
-    
-                sigmaTMP = array(2*maxsigma/(meanlow + meanhigh))
-                self.sigmaIndex[indexes[where(maxalpha <= maxsigma)[0]]] = sigmaTMP[where(maxalpha <= maxsigma)[0]]
+            if i == 0 :            # First iteration
+                indexes = arange(nbPad + nbWin) 
+            elif i == nbIter-1 :   # Last iteration
+                indexes = arange(i*nbWin-nbPad, N)
+            else:                       # Other iterations
+                indexes = arange(i*nbWin-nbPad, i*nbWin + nbWin+nbPad)
+
+            X, fX = computeST(signal[indexes], samplingRate, fmin=4.0, fmax=40.0)  
             
-            savemat(fileName, {"sigma":self.sigmaIndex})
+            if i == 0 :            # First iteration
+                indexesNoPad = arange(nbWin) 
+            elif i == nbIter-1 :   # Last iteration
+                indexesNoPad = arange(nbPad, nbPad + N-i*nbWin)
+            else:                       # Other iterations
+                indexesNoPad = arange(nbPad, nbPad + nbWin)
+                
+            X       = abs(X[indexesNoPad])
+            indexes = indexes[indexesNoPad]
+
+            maxalpha  = X[:, (fX >= 7.5)*(fX <= 10.0)].max(axis=1)
+            maxsigma  = X[:, (fX >= self.lowFreq)*(fX <= self.highFreq)].max(axis=1)
+            meanlow   = X[:, (fX >= 4.0)*(fX <= 10.0)].mean(axis=1) 
+            meanhigh  = X[:, (fX >= 20.0)*(fX <= 40.0)].mean(axis=1) 
+
+            sigmaTMP = array(2*maxsigma/(meanlow + meanhigh))
+            self.sigmaIndex[indexes[where(maxalpha <= maxsigma)[0]]] = sigmaTMP[where(maxalpha <= maxsigma)[0]]
+        
+        #    savemat(fileName, {"sigma":self.sigmaIndex})
+        #    assert(len(signal) == len(self.sigmaIndex))
         return self.sigmaIndex
               
 
@@ -606,8 +718,8 @@ class SpindleDetectorRSP(ThresholdSpindleDetector):
     
     
     
-    def __init__(self, reader=None, usePickled=False):
-        super(SpindleDetectorRSP, self).__init__(reader, usePickled)        
+    def __init__(self, *args, **kwargs):
+        super(SpindleDetectorRSP, self).__init__(*args, **kwargs)        
         
         ###############################################################################
         # Detection patameters
@@ -623,50 +735,55 @@ class SpindleDetectorRSP(ThresholdSpindleDetector):
 
 
     # Detect every spindle in the channels channelList of the file opened by the reader.
-    def preprocessing(self, data):
+    def preprocessing(self, signal, time=None, samplingRate=None, channel=None):
 
-        fileName = self.reader.getFileName() + "_RSP_" + data.channel + ".mat"
+        #fileName = self.reader.getFileName() + "_RSP_" + channel + "_" + str(time[0])  + ".mat"
 
+        N = len(signal)
+        """
         if os.path.exists(fileName):
             print "Using saved RSP..."    
             self.RSP = loadmat(fileName)["RSP"]
-            self.RSP = self.RSP.reshape(self.RSP.size)
-        else:     
-            self.RSP = zeros(self.reader.getNbSample(data.channel)) 
+            self.RSP = self.RSP.reshape(self.RSP.size)            
+            assert(len(signal) == len(self.RSP))
+        else: 
+        """
+        self.RSP = zeros(N) 
 
-            nbPad = int(0.1*data.samplingRate)
-            nbWin = int(4.0*data.samplingRate)
+        nbPad = int(0.1*samplingRate)
+        nbWin = int(4.0*samplingRate)
 
-            nbIter = int(self.reader.getNbSample(data.channel)/nbWin)
-            for i in range(nbIter):
-                if mod(i, 1000) == 0: print i, nbIter
+        nbIter = int(N/nbWin)
+        for i in range(nbIter):
+            if mod(i, 1000) == 0: print((i, nbIter))
+            
+            if i == 0 :            # First iteration
+                indexes = arange(nbPad + nbWin) 
+            elif i == nbIter-1 :   # Last iteration
+                indexes = arange(i*nbWin-nbPad, N)
+            else:                       # Other iterations
+                indexes = arange(i*nbWin-nbPad, i*nbWin + nbWin+nbPad)
+
+
+            #if any(stageIndicator[indexes]):    
+            X, fX = computeST(signal[indexes], samplingRate, fmin=0.5, fmax=40.0)  
+            
+            if i == 0 :            # First iteration
+                indexesNoPad = arange(nbWin) 
+            elif i == nbIter-1 :   # Last iteration
+                indexesNoPad = arange(nbPad, nbPad + N-i*nbWin)
+            else:                       # Other iterations
+                indexesNoPad = arange(nbPad, nbPad + nbWin)
                 
-                if i == 0 :            # First iteration
-                    indexes = arange(nbPad + nbWin) 
-                elif i == nbIter-1 :   # Last iteration
-                    indexes = arange(i*nbWin-nbPad, self.reader.getNbSample(data.channel))
-                else:                       # Other iterations
-                    indexes = arange(i*nbWin-nbPad, i*nbWin + nbWin+nbPad)
+            X       = abs(X[indexesNoPad])
+            indexes = indexes[indexesNoPad]
 
 
-                #if any(stageIndicator[indexes]):    
-                X, fX = computeST(data.signal[indexes], data.samplingRate, fmin=0.5, fmax=40.0)  
-                
-                if i == 0 :            # First iteration
-                    indexesNoPad = arange(nbWin) 
-                elif i == nbIter-1 :   # Last iteration
-                    indexesNoPad = arange(nbPad, nbPad + self.reader.getNbSample(data.channel)-i*nbWin)
-                else:                       # Other iterations
-                    indexesNoPad = arange(nbPad, nbPad + nbWin)
-                    
-                X       = abs(X[indexesNoPad])
-                indexes = indexes[indexesNoPad]
+            spindleBand = (fX >= self.lowFreq)*(fX <= self.highFreq)
+            self.RSP[indexes] = trapz(X[:, spindleBand], fX[spindleBand], axis=1)/trapz(X, fX, axis=1)
+            #else:
+            #    self.RSP[indexes] = 0.0
     
-    
-                spindleBand = (fX >= self.lowFreq)*(fX <= self.highFreq)
-                self.RSP[indexes] = trapz(X[:, spindleBand], fX[:, spindleBand], axis=1)/trapz(X, fX, axis=1)
-                #else:
-                #    self.RSP[indexes] = 0.0
- 
-            savemat(fileName, {"RSP":self.RSP})
+        #    assert(len(signal) == len(self.RSP))
+        #    savemat(fileName, {"RSP":self.RSP})
         return self.RSP

@@ -48,9 +48,10 @@
 
 """
 
+import numpy as np
 from copy import deepcopy
 
-class cycleDefinitions():
+class CycleDefinitions():
      def __init__(self):
         self.setMinimal()
 
@@ -117,8 +118,10 @@ class cycleDefinitions():
         self.type                   = "Minimal"
     
     
-    
-    
+
+# For backward-compatibility only. Don't use cycleDefinitions since class
+# names should start by an uper-case letter.
+cycleDefinitions = CycleDefinitions    
     
     
     
@@ -153,7 +156,11 @@ class DreamCycle :
 
 
 def computeDreamCycles(events, cyclesDefinition):
-    lastingEvents = deepcopy(events)
+
+    if len(events) == 0:
+        raise ValueError
+    
+    lastingEvents = events #deepcopy(events)
     cycles = []
     sleeping = False
     while(len(lastingEvents)):
@@ -174,8 +181,8 @@ def computeDreamCycles(events, cyclesDefinition):
                 cycles[i].durationREM    =  cycles[i+1].timeStartNREM  - cycles[i].timeStartREM 
     
         for cycle in cycles:
-            cycle.REMpages = filter(lambda e: e.startTime >= cycle.timeStartREM and e.startTime < cycle.timeStartREM + cycle.durationREM, events) 
-            cycle.NREMpages = filter(lambda e: e.startTime >= cycle.timeStartNREM and e.startTime < cycle.timeStartNREM + cycle.durationNREM, events) 
+            cycle.REMpages = [e for e in events if e.startTime >= cycle.timeStartREM and e.startTime < cycle.timeStartREM + cycle.durationREM] 
+            cycle.NREMpages = [e for e in events if e.startTime >= cycle.timeStartNREM and e.startTime < cycle.timeStartNREM + cycle.durationNREM] 
 
     # If no cycle has been found, make a single cycle of the whole recording.
     # This is useful to avoid breaking functions relying in cycles when
@@ -186,7 +193,7 @@ def computeDreamCycles(events, cyclesDefinition):
         cycle = DreamCycle()
 
         startTimes = [e.startTime for e in events]
-        endEvent     = filter(lambda e: e.startTime == max(startTimes), events)[0] 
+        endEvent     = events[np.argmax(startTimes)]
 
         cycle.timeStartNREM    = min(startTimes)
         cycle.durationNREM = endEvent.startTime + endEvent.timeLength - cycle.timeStartNREM 
@@ -212,7 +219,7 @@ def computeNREM(cycle, events, cycleDefinition, sleeping, noCycle):
     
     possibleStartTime = None
     startStage1       = None
-    for i, event in zip(range(len(events)), events):
+    for i, event in zip(list(range(len(events))), events):
         #print sleeping, possibleStartTime, event.name, cycleDefinition.sleepDeterminingStages     
         if not sleeping:        
             if event.name in cycleDefinition.sleepDeterminingStages:
@@ -301,7 +308,7 @@ def computeREM(cycle, events, cycleDefinition, sleeping, noCycle):
     startTime   = events[0].startTime       
         
 
-    for event, i in zip(events, range(len(events))):
+    for event, i in zip(events, list(range(len(events)))):
         if  event.name == "Sleep stage R":
             finPossibleTime     = None
             finI                = None

@@ -19,7 +19,9 @@ Created on Wed Sep 11 16:50:26 2013
 
 import numpy as np
 import unittest
+import time
 from spyndle import Filter
+from spyndle.miscellaneous import filters
 
 class FilterTests(unittest.TestCase) :
     
@@ -41,15 +43,13 @@ class FilterTests(unittest.TestCase) :
                 
         filtSig = lowPassFilter.applyFilter(self.sig)   
 
-        import matplotlib.pyplot as plt 
-        plt.plot(range(len(filtSig)), abs(filtSig - self.low))
-        plt.plot(range(len(filtSig)), self.low)
-        plt.plot(range(len(filtSig)), filtSig)
-        plt.show()
-
-        
-        print abs(filtSig - self.low)
-        self.assertTrue(np.allclose(filtSig, self.low))
+        #import matplotlib.pyplot as plt 
+        #plt.plot(range(len(filtSig)), abs(filtSig - self.low))
+        #plt.plot(range(len(filtSig)), self.low)
+        #plt.plot(range(len(filtSig)), filtSig)
+        #plt.show()
+        #print abs(filtSig - self.low)
+        self.assertTrue(np.allclose(filtSig[1000:5000], self.low[1000:5000]))
         
 
     def testHighPass(self):
@@ -59,9 +59,9 @@ class FilterTests(unittest.TestCase) :
                               high_crit_freq=None, order=1001, 
                               btype="highpass", ftype="FIR", useFiltFilt=True)               
         
-        filtSig = highPassFilter.applyFilter(self.high)   
+        filtSig = highPassFilter.applyFilter(self.sig)   
         
-        self.assertTrue(np.allclose(filtSig, self.sig))
+        self.assertTrue(np.allclose(filtSig[1000:5000], self.high[1000:5000]))
 
 
     def testBandPass(self):
@@ -69,12 +69,97 @@ class FilterTests(unittest.TestCase) :
         bandPassFilter = Filter(self.fs)
         bandPassFilter.create(low_crit_freq=11.0, 
                               high_crit_freq=16.0, order=1001, 
-                              btype="highpass", ftype="FIR", useFiltFilt=True)               
+                              btype="bandpass", ftype="FIR", useFiltFilt=True)               
         
-        filtSig = bandPassFilter.applyFilter(self.middle)   
+        filtSig = bandPassFilter.applyFilter(self.sig)   
         
-        self.assertTrue(np.allclose(filtSig, self.sig))
 
+        #import matplotlib.pyplot as plt 
+        #plt.plot(range(len(filtSig[1000:5000])), abs(filtSig[1000:5000] - self.middle[1000:5000]))
+        #plt.plot(range(len(filtSig[1000:5000])), self.middle[1000:5000])
+        #plt.plot(range(len(filtSig[1000:5000])), filtSig[1000:5000])
+        #plt.show()    
+        #print max(np.abs(filtSig[1000:5000] - self.middle[1000:5000]))
+        
+        self.assertTrue(np.allclose(filtSig[1000:5000], self.middle[1000:5000], rtol=1e-04, atol=1e-05))
+
+
+
+
+    def testNoWeave_filtfilt(self):
+        # Defining EEG filters
+        bck = filters.filtConf   
+        filters.filtConf.useWeave = True 
+        
+        t1 = time.time()        
+        bandPassFilter = Filter(self.fs)
+        bandPassFilter.create(low_crit_freq=11.0, 
+                              high_crit_freq=16.0, order=1001, 
+                              btype="bandpass", ftype="FIR", useFiltFilt=True)               
+        
+        filtSigWeave = bandPassFilter.applyFilter(self.sig)   
+        t2 = time.time()
+        
+        
+        filters.filtConf.useWeave = False        
+
+        t3 = time.time()
+        bandPassFilter = Filter(self.fs)
+        bandPassFilter.create(low_crit_freq=11.0, 
+                              high_crit_freq=16.0, order=1001, 
+                              btype="bandpass", ftype="FIR", useFiltFilt=True)               
+        
+        filtSigNoWeave = bandPassFilter.applyFilter(self.sig)   
+        t4 = time.time()
+        
+        filters.filtConf = bck        
+
+
+        print(("Time sweave: %f" % (t2 - t1)))   
+        print(("Time no sweave: %f" % (t4 - t3)))   
+
+        
+        self.assertTrue(np.allclose(filtSigWeave, filtSigNoWeave))
+
+
+
+
+
+
+    def testNoWeave(self):
+        # Defining EEG filters
+        bck = filters.filtConf   
+        filters.filtConf.useWeave = True 
+        
+        t1 = time.time()        
+        bandPassFilter = Filter(self.fs)
+        bandPassFilter.create(low_crit_freq=11.0, 
+                              high_crit_freq=16.0, order=1001, 
+                              btype="bandpass", ftype="FIR", useFiltFilt=False)               
+        
+        filtSigWeave = bandPassFilter.applyFilter(self.sig)   
+        t2 = time.time()
+        
+        
+        filters.filtConf.useWeave = False        
+
+        t3 = time.time()
+        bandPassFilter = Filter(self.fs)
+        bandPassFilter.create(low_crit_freq=11.0, 
+                              high_crit_freq=16.0, order=1001, 
+                              btype="bandpass", ftype="FIR", useFiltFilt=False)               
+        
+        filtSigNoWeave = bandPassFilter.applyFilter(self.sig)   
+        t4 = time.time()
+        
+        filters.filtConf = bck        
+
+
+        print(("Time sweave: %f" % (t2 - t1)))   
+        print(("Time no sweave: %f" % (t4 - t3)))   
+
+        
+        self.assertTrue(np.allclose(filtSigWeave, filtSigNoWeave))
 
 
 

@@ -105,12 +105,10 @@ def computeXCST(readerClass, fileName, eventName, dbSession=None,  dbPath=None, 
 
 
 
-class XCSTEvaluator:
+class PropagationEvaluator:
     """
-    Class providing evaluator objects that can be used to compute
-    the 2D cross-corellation of S-Transform spectra described in [1, 2]. For 
-    performing this computation with a one-liner, please refer to the
-    spyndle.propagation.computeXCST(...) function.
+    Base class for subclasses providing evaluator objects that can be used to 
+    compute transient event propagation
     
     Default values of the parameters of the algorithm are specified in the 
     constructor. These are as follow: 
@@ -252,12 +250,12 @@ class XCSTEvaluator:
             
         try:
             if self.verbose:
-                print 'Loading data of the file ',
-                print os.path.basename(fileName) + '...'
+                print('Loading data of the file ', end=' ')
+                print(os.path.basename(fileName) + '...')
                 
             self.reader = readerClass(fileName)    
             
-        except IOError, e:     
+        except IOError as e:     
             errMsg = "Error : computeXCST : " + fileName + "could not be opened.\n"
             IOError(errMsg + str(e))
             
@@ -325,14 +323,14 @@ class XCSTEvaluator:
             try:
                 if dbPath is None:
                     if self.verbose:
-                        print "No database session or path has been passed. "\
-                              "Using in-memory database."
+                        print("No database session or path has been passed. "\
+                              "Using in-memory database.")
                     dbPath = "sqlite://"
                         
                 self.dbMng      = DatabaseMng(dbPath, shard=shard)
                 self.dbSession  = self.dbMng.session
 
-            except sa.exc.ArgumentError, error:
+            except sa.exc.ArgumentError as error:
                 errMsg = "Error connecting to the specified database URL. "\
                          "The format of the database path is invalid."     \
                          "\n\nSQLAlchemy error message: " + str(error)
@@ -380,7 +378,7 @@ class XCSTEvaluator:
                        list of these attributes along with their default values).     
         """    
 
-        print "compute..."
+        print("compute...")
 
         for key in kwargs:
             if key in self.__dict__:
@@ -388,47 +386,58 @@ class XCSTEvaluator:
             else:
                 ValueError("The keyword " + str(key) + " is unknown.") 
 
-        # Create the propagation relationship related to to selected channel
+        # Create the propagation relationship related to the selected channel
         # for this computation. 
         self.createPropRel()
   
-        events = self.dbSession.query(TransientEvent)\
+        # Using the LIMIT approach has cons (see http://stackoverflow.com/
+        # questions/7389759/memory-efficient-built-in-sqlalchemy-iterator-generator)
+        # However, using the windows approach proposed in that link does not
+        # works with all DB engine, include MySQL.  
+  
+  
+        eventQuery = self.dbSession.query(TransientEvent)\
                         .filter(TransientEvent.channelName.in_(self.channelList),
                                 TransientEvent.psgNight  == self.fileName,
-                                TransientEvent.eventName == self.eventName).all()  
+                                TransientEvent.eventName == self.eventName)
   
         if self.verbose:
-            print "Processing propagation for " + str(len(events)),
-            print " transient events " + self.eventName + " present in file ",
-            print os.path.basename(self.fileName) + " on channels ",
-            print str(self.channelList)   
+            print("Processing propagation for " + str(eventQuery.count()), end=' ')
+            print(" transient events " + self.eventName + " present in file ", end=' ')
+            print(os.path.basename(self.fileName) + " on channels ", end=' ')
+            print(str(self.channelList))   
+        
+        #if self.verbose and len(events) > 100:
+        #    
+        #    t1 = datetime.now()     
+        #    for event in events[:100]:        
+        #        self._computeForEvent(event)   
+        #    t2 = datetime.now()    
+        #    
+        #    print "One hundred events have been processed in " + str((t2-t1).total_seconds()),
+        #    print " seconds. Estimated total processing time : ", 
+        #    print str((t2-t1).total_seconds()/100.0*len(events)) + " seconds."
+        #        
+        #    for event in events[100:]:        
+        #        self._computeForEvent(event)   
+        #         
+        #else:
   
   
-                                                                                                                     
-  
-  
-        if self.verbose and len(events) > 100:
-            
-            t1 = datetime.now()     
-            for event in events[:100]:        
-                self.__computeForEvent(event)   
-            t2 = datetime.now()    
-            
-            print "One hundred events have been processed in " + str((t2-t1).total_seconds()),
-            print " seconds. Estimated total processing time : ", 
-            print str((t2-t1).total_seconds()/100.0*len(events)) + " seconds."
-                
-            for event in events[100:]:        
-                self.__computeForEvent(event)   
-                 
-        else:
-            for event in events:        
-                self.__computeForEvent(event)            
+        offset = 0
+        while True:
+            limitedQuery = eventQuery.offset(offset).limit(10000)
+            if limitedQuery.count() == 0: 
+                break
+            for event in limitedQuery:
+                # Doing this instead of "for event in eventQuery.all():" makes that the
+                # ORM processing is made one event at a time instead of for all events
+                # at once.                
+                offset += limitedQuery.count()
+                self._computeForEvent(event)              
             
         # Update the data manipulation process object.            
         self.dataManipObj.reprStr = repr(self)
-        
-                    
 
 
 
@@ -491,23 +500,14 @@ class XCSTEvaluator:
             
         return signalsDataRef, deltaSampleStart, deltaSampleEnd
             
-            
-            
-            
-            
          
-    def __computeForEvent(self, event):       
-        """
-        Perform the 2D cross-corellation of S-Transform spectra for a specific
-        event.
-        
-        Parameters:
-            event : Event for which the XCST will be computed.     
-        """  
+         
+         
+         
+    def getSignals(self, event):
 
         refChannel        = event.channelName
-        fs                = self.reader.getChannelFreq(refChannel)
-        artifactPadSample = int(self.artifactPad*fs)          
+        fs                = self.reader.getChannelFreq(refChannel)        
     
         deltaSampleStart  = int(self.delta*fs)          
         deltaSampleEnd    = deltaSampleStart    
@@ -555,9 +555,62 @@ class XCSTEvaluator:
             deltaSampleEnd   = deltaSampleEndCmp   
                 
         assert(len(signalsDataCmp[refChannel].signal) == len(signalsDataRef[refChannel].signal))
+         
+        return signalsDataRef, signalsDataCmp, deltaSampleStart, deltaSampleEnd
 
+
+         
+         
+         
+    def _computeForEvent(self, event):       
+        """
+        """  
+        raise NotImplementedError("This method needs to be implemented in subclasses of PropagationEvaluator.")        
+       
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class XCSTEvaluator(PropagationEvaluator):
+    """
+    Class providing evaluator objects that can be used to compute
+    the 2D cross-corellation of S-Transform spectra described in [1, 2]. For 
+    performing this computation with a one-liner, please refer to the
+    spyndle.propagation.computeXCST(...) function.
+    """
+
+         
+    def _computeForEvent(self, event):       
+        """
+        Perform the 2D cross-corellation of S-Transform spectra for a specific
+        event.
         
-                      
+        Parameters:
+            event : Event for which the XCST will be computed.     
+        """  
+
+        refChannel        = event.channelName
+        fs                = self.reader.getChannelFreq(refChannel)                
+        artifactPadSample = int(self.artifactPad*fs)                        
+        signalsDataRef, signalsDataCmp, deltaSampleStart, deltaSampleEnd = self.getSignals(event)        
         
         # Spectra computation
         X, fXRef = computeMST(signalsDataRef[refChannel].signal, fs, m=0.0, k=1.0, fmin=11.0, fmax=16.0)     
@@ -568,7 +621,7 @@ class XCSTEvaluator:
             X = {"Ref" :X[:, (deltaSampleStart+artifactPadSample):-(deltaSampleEnd+artifactPadSample)]}
             #X["Ref2"] = Y
         except IndexError:
-            print deltaSampleStart, deltaSampleEnd, X.shape, artifactPadSample
+            print(deltaSampleStart, deltaSampleEnd, X.shape, artifactPadSample)
             raise               
         
         for testChannel in self.channelList :      
@@ -629,10 +682,11 @@ class XCSTEvaluator:
             elif self.similIndexType == "euclidean":
                 den = sqrt(CmpSelfCor**2 + refSelfCor**2)                                
             else: 
-                print "Error. The similarity index type " + self.similIndexType + "is unknown."
+                print("Error. The similarity index type " + self.similIndexType + "is unknown.")
                 raise TypeError
                 
             crosscor = unnormCrossCorr/den
+            assert(np.all((crosscor >= 0.0)*(crosscor <= 1.0)))    
     
             ind          = argmax(crosscor)                    
             diffCrosscor = diff2(arange(deltaSampleStart + deltaSampleEnd), crosscor)                
@@ -669,3 +723,122 @@ class XCSTEvaluator:
                                      delay=maxDeltay, offset=self.offset, 
                                     propRelNo = self.propRelNos[refChannel + testChannel]))
         self.dbSession.add_all(propagations)
+        self.dbSession.flush()
+        
+        
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        
+
+
+
+class TDPropagationEvaluator(PropagationEvaluator):
+    """
+    Class providing evaluator objects that can be used to compute
+    the best time alignement the time-domain signals using a cross-corellation.     
+    """
+
+       
+    def _computeForEvent(self, event):       
+
+        refChannel        = event.channelName
+        fs                = self.reader.getChannelFreq(refChannel)                                 
+        signalsDataRef, signalsDataCmp, deltaSampleStart, deltaSampleEnd = self.getSignals(event)        
+        artifactPadSample = int(self.artifactPad*fs)                              
+                      
+        X = {"Ref" :signalsDataRef[refChannel].signal[(deltaSampleStart+artifactPadSample):-(deltaSampleEnd+artifactPadSample)]}
+        for testChannel in self.channelList :      
+            X[testChannel] = signalsDataCmp[testChannel].signal[artifactPadSample:-artifactPadSample]              
+        
+        sigLen = len(X["Ref"])      
+        
+        unnormCrossCorr = zeros(deltaSampleStart + deltaSampleEnd)
+        time        = (arange(deltaSampleStart + deltaSampleEnd)-deltaSampleStart)/fs
+        refSelfCor  = self.intFct(X["Ref"]*X["Ref"])
+        indOffsets = arange(deltaSampleStart + deltaSampleEnd)
+        
+        propagations = []
+        for testChannel in self.channelList :
+            if testChannel == refChannel:  
+                continue                
+                
+            XCmpSquare = X[testChannel]*X[testChannel]
+            
+            
+            cums = np.cumsum(XCmpSquare)
+            CmpSelfCor = np.concatenate(([cums[sigLen-1]], 
+                                        cums[indOffsets[1:] + sigLen-1] - cums[indOffsets[:-1]]))
+    
+            # are slower than that:
+            for indOffset in indOffsets:
+                XCmp                        = X[testChannel][indOffset:(indOffset+sigLen)]
+                unnormCrossCorr[indOffset]  = self.intFct(abs(XCmp)*abs(X["Ref"])) # This index can only be computer on positive real functions, thus the abs(...)            
+    
+    
+            if self.similIndexType == "inf":
+                den = np.maximum(CmpSelfCor, refSelfCor)
+            elif self.similIndexType == "euclidean":
+                den = sqrt(CmpSelfCor**2 + refSelfCor**2)                                
+            else: 
+                print("Error. The similarity index type " + self.similIndexType + "is unknown.")
+                raise TypeError
+                
+            crosscor = unnormCrossCorr/den
+            assert(np.all((crosscor >= 0.0)*(crosscor <= 1.0)))
+    
+            ind          = argmax(crosscor)                    
+            diffCrosscor = diff2(arange(deltaSampleStart + deltaSampleEnd), crosscor)                
+    
+            # Interpolation to find the position of the true maximum
+            # which normally falls between samples
+            maxInd = len(crosscor)-1
+            if ind == 0 or ind == maxInd:
+                maxDeltay   = time[ind]       
+                maxCrosscor = crosscor[ind]                      
+            else:
+                if ind-2 > 0 :
+                    indm = ind-2
+                else:
+                    indm = 0
+                    
+                if ind+2 < maxInd :
+                    indp = ind+2
+                else:
+                    indp = maxInd
+    
+                pindinc = where(diff(sign(diffCrosscor[indm:(indp+1)])) != 0)[0][0]                
+                indFloor = indm +pindinc 
+                indCeil  = indFloor + 1
+                indFrac  = diffCrosscor[indFloor]/(diffCrosscor[indFloor] - diffCrosscor[indCeil])
+              
+                maxDeltay   = time[indFloor]      + indFrac*(time[indCeil]-time[indFloor])       
+                maxCrosscor = crosscor[indFloor]  + indFrac*(crosscor[indCeil]-crosscor[indFloor])       
+                                
+            assert(abs(maxDeltay) <= self.delta)
+            
+            propagations.append(Propagation(transientEventID=event.ID, sinkChannelName=testChannel, 
+                                    sourceChannelName=refChannel, similarity=maxCrosscor,
+                                     delay=maxDeltay, offset=self.offset, 
+                                    propRelNo = self.propRelNos[refChannel + testChannel]))
+        self.dbSession.add_all(propagations)
+        self.dbSession.flush()
+        
+        
+        
+

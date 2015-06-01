@@ -35,12 +35,12 @@
 """
 
 from spyndle.io import EDFReader, DatabaseMng
-from spyndle.detector import SpindleDectectorRMS
+from spyndle.detector import SpindleDetectorRMS
 from spyndle.propagation import SPFEvaluator
 from spyndle.EEG import getAdjacentsPairs_10_20, plotArrowsBidirect, \
     plotColorMap, getActiveElectrodes
-
-from urllib import  urlretrieve,  ContentTooShortError
+from urllib.request import urlretrieve
+from urllib.error import ContentTooShortError
 from scipy import unique
 from datetime import datetime                                                  
 
@@ -48,8 +48,8 @@ fileName        = "RITA_example.BDF"
 detectionStages = ["Sleep stage 2"]
 eventName       = "SpindleRMS"
 
-print "Loading the data file from Internet. This may take some time, " \
-      "the file is about 372 MB."
+print("Loading the data file from Internet. This may take some time, " \
+      "the file is about 372 MB.")
 url = "https://bitbucket.org/christian_oreilly/spyndle/"\
       "downloads/RITA_example.BDF"
 
@@ -58,61 +58,61 @@ t1 = datetime.now()
 try:
     urlretrieve(url, fileName)
 except ContentTooShortError:
-     print "The retreived file is shorter than expected. The download as "\
-           "probably been interrupted"
+     print("The retreived file is shorter than expected. The download as "\
+           "probably been interrupted")
      exit
 t2 = datetime.now()                                                             
-print "Duration of data downloading : ", t2-t1                                                                      
+print(("Duration of data downloading : ", t2-t1))                                                                      
 
-print "Creating a  database for recording final and intermediate results..."
+print("Creating a  database for recording final and intermediate results...")
 dbPath = "C:\\Python27\\Lib\\site-packages\\spyndle\\examples\\RITA.db"
 dbMng = DatabaseMng("sqlite:///" + dbPath)
 
-print "Reading the .bdf file..."
+print("Reading the .bdf file...")
 readerEDF    = EDFReader(fileName)
 
-print "Detecting spindles..."
+print("Detecting spindles...")
 t1 = datetime.now()  
-detector = SpindleDectectorRMS(readerEDF)
+detector = SpindleDetectorRMS(readerEDF)
 detector.setDetectionStages(detectionStages)
-detector.detectSpindles()
-detector.saveSpindle(readerEDF, eventName, dbSession=dbMng.session)
+detector.detectEvents()
+detector.saveEvents(readerEDF, eventName, dbSession=dbMng.session)
 t2 = datetime.now()                                                             
-print "Duration of spindle detection: ", t2-t1                                                                      
+print(("Duration of spindle detection: ", t2-t1))                                                                      
 
-print "Plotting the results in result_example_a.png..."
+print("Plotting the results in result_example_a.png...")
 filteringDict = {"psgNight":fileName, "eventName":eventName}
-spindles = dbMng.dmm.getTransientEvents(filteringDict, pandasFormat=True)                       
+spindles = dbMng.dmm.getTransientEvents(filteringDict, pandasFormat=True)                    
 spindles["electrode"] = getActiveElectrodes(spindles["channelName"])
 medDat = spindles.groupby("electrode").median()
 plotColorMap(unique(spindles["electrode"]), medDat.duration, "example_a.png")
 
 evaluator = SPFEvaluator(fileName, eventName, dbSession = dbMng.session, verbose=True)
          
-print "Computing synchrone comparisons..."
+print("Computing synchrone comparisons...")
 t1 = datetime.now()  
 evaluator.computeXCST(EDFReader, offset=0.0)
 t2 = datetime.now()                                                              
-print "Duration of synchronous comparison computation: ", t2-t1                                                                     
+print(("Duration of synchronous comparison computation: ", t2-t1))                                                                     
 
-print "Computing asynchrone comparisons..."
+print("Computing asynchrone comparisons...")
 t1 = datetime.now()  
 evaluator.computeXCST(EDFReader, offset=0.5)
 t2 = datetime.now()                                                           
-print "Duration of asynchronous comparison computation: ", t2-t1                                                                    
+print(("Duration of asynchronous comparison computation: ", t2-t1))                                                                    
 
 t1 = datetime.now()  
-print "Computing SPFs..."
+print("Computing SPFs...")
 evaluator.computeSPF()            
 
-print "Computing propagation averages..." 
+print("Computing propagation averages...") 
 evaluator.computeAveragePropagation(minNbValid=20)
 t2 = datetime.now()                                                           
-print "Duration of spindle propagation field computation: ", t2-t1                                                                     
+print(("Duration of spindle propagation field computation: ", t2-t1))                                                                     
 
-print "Plotting the results in result_example_b.png..."
+print("Plotting the results in result_example_b.png...")
 propagations = evaluator.getAveragePropagation(applyC3=True, applyC4=True)
-print propagations
+print(propagations)
 propagations["ref"] = getActiveElectrodes(propagations["sourceChannelName"])
 propagations["test"] = getActiveElectrodes(propagations["sinkChannelName"])
 adjPairs = getAdjacentsPairs_10_20(unique(propagations["ref"]))

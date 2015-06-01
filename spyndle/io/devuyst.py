@@ -43,9 +43,12 @@ class DevuystEvent(Event):
 
 # TODO: Abstract methods in EEGDBReaderBase must be implemented before we can
 # put back the inheritence.
-class DevuystReader(): #(EEGDBReaderBase):
+class DevuystReader(EEGDBReaderBase):
     def __init__(self, fname, samplingRate):
         #EEGDBReaderBase.__init__(self)
+ 
+
+        super(DevuystReader, self).__init__(30.0)  
  
         self.fname = fname
 
@@ -61,14 +64,14 @@ class DevuystReader(): #(EEGDBReaderBase):
             self.channelType = [channelType["EEG"]]  
         except:
             # TODO: Penser à un systeme de gestion des erreurs...
-            print "Erreur ouverture"
+            print("Erreur ouverture")
             raise
             
             
         self.samplingRates  = [samplingRate]
         self.baseFreq       = self.samplingRates[0]  
-        self.nbSamples      = len(self.signal[0])   
-        self.events         = []
+        self.nbSamples      = len(self.signal[0])
+        
  
     def getChannelLabels(self):
         return self.labels
@@ -77,9 +80,39 @@ class DevuystReader(): #(EEGDBReaderBase):
         return self.labels
  
 
+    def getChannelFreq(self):
+        raise NotImplemented
 
-    def importEvents(self, fname, eventName, groupName="Fuseau"):
 
+    def getChannelTime(self):
+        raise NotImplemented
+
+
+    def getFileName(self):
+        raise NotImplemented
+
+
+    def getNbRecords(self):
+        raise NotImplemented
+
+
+    def readChannel(self):
+        raise NotImplemented
+
+ 
+
+
+
+    def importEvents(self, fname, eventName, groupName="Spindle", noOverlapping=True):
+        """
+         If set to True, the noOverlapping parameters specifies that imported events
+         cannot overlap (i.e., the ending of a previous event cannot be after the 
+         beginning of the next one). In the database provided by Devuyst, some events
+         (e.g., K-complexes) slightly overlap. This should not happen and when it
+         does it cause problems when comparing scoring using detectorEvaluation module.
+         When overlapping events are detected, the starting of the second event is 
+         offset such that these events are contiguous.
+        """
         try:
             
             with open(fname) as f:
@@ -87,14 +120,24 @@ class DevuystReader(): #(EEGDBReaderBase):
 
         except:
             # TODO: Penser à un systeme de gestion des erreurs...
-            print "Erreur ouverture du fichier ->" + fname + "<-"
+            print(("Erreur ouverture du fichier ->" + fname + "<-"))
             return
                 
         content = array(content[1:])
         
+        lastStartTime = 0.0
+        lastDuration  = 0.0
         for line in content :
             startTime, timeDuration = array(line.split(), float)
-            self.events.append(DevuystEvent(groupName, eventName, self.labels[0], 
+            
+            if noOverlapping:
+                if startTime < lastStartTime + lastDuration:
+                    timeDuration -= lastStartTime + lastDuration - startTime
+                    startTime = lastStartTime + lastDuration
+                lastStartTime = startTime
+                lastDuration  = timeDuration
+            
+            self.events.add(DevuystEvent(groupName, eventName, self.labels[0], 
                                             startTime, timeDuration, self.samplingRates[0]))
 
 
@@ -108,35 +151,35 @@ class DevuystReader(): #(EEGDBReaderBase):
                 stages = f.readlines()            
         except:
             # TODO: Penser à un systeme de gestion des erreurs...
-            print "Erreur ouverture du fichier " + fname      
+            print(("Erreur ouverture du fichier " + fname))      
             return
 
 
               
         stages = array(stages[1:])
 
-        stageLabels = [u"Sleep stage 4", u"Sleep stage 3", u"Sleep stage 2", 
-                       u"Sleep stage 1", u"Sleep stage R", u"Sleep stage W", 
-                       u"Sleep stage ?"]        
+        stageLabels = ["Sleep stage 4", "Sleep stage 3", "Sleep stage 2", 
+                       "Sleep stage 1", "Sleep stage R", "Sleep stage W", 
+                       "Sleep stage ?"]        
         
         startTime = 0.0
         for stage in stages :
             stage = int(stage)
             if stage < 0 : stage = 6
-            self.events.append(DevuystEvent("Stage", stageLabels[stage], self.labels[0], 
+            self.events.add(DevuystEvent("Stage", stageLabels[stage], self.labels[0], 
                                             startTime, 5.0, self.samplingRates[0]))
             startTime += 5.0
     
 
                 
     #TODO: Optimiser...
-    def getEvents(self, startTime, endTime) :   #TODO: time
-        return filter(lambda e: (e.startTime >= startTime and e.startTime < endTime) or 
-                         (e.startTime + e.timeLength >= startTime and e.startTime + e.timeLength < endTime) , self.events)       
+    #def getEvents(self, startTime, endTime) :   #TODO: time
+    #    return [e for e in self.events if (e.startTime >= startTime and e.startTime < endTime) or 
+    #                     (e.startTime + e.timeLength >= startTime and e.startTime + e.timeLength < endTime)]       
         
     def getEventsBySample(self, startSample, endSample) :
-        return filter(lambda e: (e.startSample >= startSample and e.startSample < endSample) or 
-                         (e.startSample + e.sampleLength >= startSample and e.startSample + e.sampleLength < endSample) , self.events)       
+        return [e for e in self.events if (e.startSample >= startSample and e.startSample < endSample) or 
+                         (e.startSample + e.sampleLength >= startSample and e.startSample + e.sampleLength < endSample)]       
         
 
     def getRecordingStartTime(self):    
@@ -215,17 +258,17 @@ class DevuystReader(): #(EEGDBReaderBase):
         # (zeros(80000000).nbytes/1024/1024).
         NbSampleMaxPerReadCompleteCall =  40000000
         NbChannelPerCall = int(NbSampleMaxPerReadCompleteCall/self.nbSamples)
-        Indexes = range(0, len(signalNamesToPickle), NbChannelPerCall)
+        Indexes = list(range(0, len(signalNamesToPickle), NbChannelPerCall))
         if Indexes[-1] < len(signalNamesToPickle):
             Indexes.append(len(signalNamesToPickle))
         for i in range(len(Indexes)-1):   
-            print "Reading form .sig file for " + str(signalNamesToPickle[Indexes[i]:Indexes[i+1]]) + "..."
+            print(("Reading form .sig file for " + str(signalNamesToPickle[Indexes[i]:Indexes[i+1]]) + "..."))
             data = self.readComplete(signalNamesToPickle[Indexes[i]:Indexes[i+1]])
 
-            print data
+            print(data)
 
             for signalName in data:
-                print "Pickling data of " + signalName + " for next time..."
+                print(("Pickling data of " + signalName + " for next time..."))
                 savemat(fileName + signalName + ".mat", data[signalName])
 
 
@@ -289,17 +332,17 @@ class DevuystReader(): #(EEGDBReaderBase):
         nbPages      = int(self.nbSamples/self.samplingRates[0]/pageDuration)
 
         pageEventStr = []
-        filteredEvents = filter(lambda e: e.startTime < pageDuration, self.events)     
+        filteredEvents = [e for e in self.events if e.startTime < pageDuration]     
         pageEventStr.append(prepareEventStr(0.0, filteredEvents))
         nbEvents = len(filteredEvents)        
         
         for nopage in range(1, nbPages-1):
-            filteredEvents = filter(lambda e: e.startTime <  pageDuration*(nopage+1) and 
-                                              e.startTime >= pageDuration*nopage, self.events)     
+            filteredEvents = [e for e in self.events if e.startTime <  pageDuration*(nopage+1) and 
+                                              e.startTime >= pageDuration*nopage]     
             pageEventStr.append(prepareEventStr(pageDuration*nopage, filteredEvents))                                           
             nbEvents += len(filteredEvents)  
             
-        filteredEvents = filter(lambda e: e.startTime >= pageDuration*(nbPages-1), self.events)     
+        filteredEvents = [e for e in self.events if e.startTime >= pageDuration*(nbPages-1)]     
         pageEventStr.append(prepareEventStr(pageDuration*(nbPages-1), filteredEvents))      
         nbEvents += len(filteredEvents)  
     
@@ -314,14 +357,14 @@ class DevuystReader(): #(EEGDBReaderBase):
         with io.open(filename, 'wb') as f:
 
             if verbose:
-                print "Writing header..."
+                print("Writing header...")
 
             
             #8 ascii : version of this data format (0) 
             if fileType == "EDF":
-                f.write("0       ")
+                f.write("0       ".encode('latin-1'))
             elif fileType == "BDF":
-                f.write("\xFFBIOSEMI")
+                f.write("\xFFBIOSEMI".encode('latin-1'))
             
             #80 ascii : local patient identification 
             #The 'local patient identification' field must start with the subfields 
@@ -342,7 +385,7 @@ class DevuystReader(): #(EEGDBReaderBase):
             fname   = "firstName"
             lname   = "lastName"
             writeStr = id + " " + gender + " " +  date + " " + fname + "_" + lname     
-            f.write(writeStr + (80-len(writeStr))*" ")
+            f.write((writeStr + (80-len(writeStr))*" ").encode('latin-1'))
               
             # TODO: EDF need 7-bit ASCII character which cannot for example accept
             # Benoît as a valid string. We use encode("ascii", "ignore") which only
@@ -368,51 +411,51 @@ class DevuystReader(): #(EEGDBReaderBase):
             # 'local recording identification' field would start with: Startdate X X X X. 
             # Additional subfields may follow the ones described here.                  
             writeStr = "Startdate " + "X" + " " + "X" + " " + "X" + " " + "X"  
-            f.write(writeStr + (80-len(writeStr))*" ")              
+            f.write((writeStr + (80-len(writeStr))*" ").encode('latin-1'))              
               
             #8 ascii : startdate of recording (dd.mm.yy)
-            f.write("01.01.01")
+            f.write("01.01.01".encode('latin-1'))
             
             
             #8 ascii : starttime of recording (hh.mm.ss) 
-            f.write("01.01.01")
+            f.write("01.01.01".encode('latin-1'))
 
             # 8 ascii : number of bytes in header record
             ns = len(self.getChannelLabels())
             headerSize = 8 + 80 + 80 + 8 + 8 + 8 + 44 + 8 + 8 + 4 + (ns+1)* (16 + 80+ 8 + 8 + 8 + 8 + 8 + 80 + 8 + 32)
-            f.write("%08d" % headerSize)   
+            f.write(("%08d" % headerSize).encode('latin-1'))
             
             # 44 ascii : reserved
             if fileType == "EDF":
-                f.write(" "*44) 
+                f.write((" "*44).encode('latin-1'))
             elif fileType == "BDF":
-                f.write("24BIT" + " "*39)            
+                f.write(("24BIT" + " "*39).encode('latin-1'))
             
             
             # 8 ascii : number of data records (-1 if unknown)
             #  The 'number of data records' can only be -1 during recording. 
             # As soon as the file is closed, the correct number is known and must be entered. 
             
-            f.write("%08d" % nbPages)  
+            f.write(("%08d" % nbPages).encode('latin-1'))
             
             # 8 ascii : duration of a data record, in seconds
-            f.write(("%8.6f" % pageDuration)[:8] )  
+            f.write((("%8.6f" % pageDuration)[:8] ).encode('latin-1'))
             
             # 4 ascii : number of signals (ns) in data record
-            f.write("%04d" % (ns +1))
+            f.write(("%04d" % (ns +1)).encode('latin-1'))
             
                 
             # ns * 16 ascii : ns * label (e.g. EEG Fpz-Cz or Body temp)
             for i in range(ns): 
-                f.write("%16s" % self.getChannelLabels()[i])
-            f.write("%16s" % "EDF Annotations")
+                f.write(("%16s" % self.getChannelLabels()[i]).encode('latin-1'))
+            f.write(("%16s" % "EDF Annotations").encode('latin-1'))
 
   
             # ns * 80 ascii : ns * transducer type (e.g. AgAgCl electrode)
-            for i in range(ns+1): f.write(" "*80)
+            for i in range(ns+1): f.write((" "*80).encode('latin-1'))
 
             # ns * 8 ascii : ns * physical dimension (e.g. uV or degreeC)
-            for i in range(ns+1): f.write(" "*8)
+            for i in range(ns+1): f.write((" "*8).encode('latin-1'))
 
             #print self.IRecordingCalibration.GetBaseCalibration(SIGNALFILE_FLAGS_CALIBRATEASVOLTS)   
             #print self.IRecordingCalibration.GetBaseCalibration(SIGNALFILE_FLAGS_BASEINPUTCALIB)            
@@ -426,32 +469,32 @@ class DevuystReader(): #(EEGDBReaderBase):
             digitalMaximum  =  8388607
             # ns * 8 ascii : ns * physical minimum (e.g. -500 or 34)
             for i in range(ns): 
-                f.write(("%8.6f" %  physicalMinimum)[:8])
-            f.write(("%8.6f" %  -1)[:8]) 
+                f.write((("%8.6f" %  physicalMinimum)[:8]).encode('latin-1'))
+            f.write((("%8.6f" %  -1)[:8]).encode('latin-1'))
 
 
             # ns * 8 ascii : ns * physical maximum (e.g. 500 or 40)
             for i in range(ns): 
-                f.write(("%8.6f" %  physicalMaximum)[:8])
-            f.write(("%8.6f" %  1)[:8])  
+                f.write((("%8.6f" %  physicalMaximum)[:8]).encode('latin-1'))
+            f.write((("%8.6f" %  1)[:8]).encode('latin-1'))
 
 
             # ns * 8 ascii : ns * digital minimum (e.g. -2048)
             for i in range(ns): 
-                f.write("%08d" %  digitalMinimum)
-            f.write("%08d" %  -32768)        
+                f.write(("%08d" %  digitalMinimum).encode('latin-1'))
+            f.write(("%08d" %  -32768).encode('latin-1'))
 
 
             # ns * 8 ascii : ns * digital maximum (e.g. 2047)
             for i in range(ns): 
-                f.write("%08d" %  digitalMaximum)
-            f.write("%08d" %  32767)
+                f.write(("%08d" %  digitalMaximum).encode('latin-1'))
+            f.write(("%08d" %  32767).encode('latin-1'))
 
 
 
 
             # ns * 80 ascii : ns * prefiltering (e.g. HP:0.1Hz LP:75Hz)
-            for i in range(ns+1): f.write(" "*80)
+            for i in range(ns+1): f.write((" "*80).encode('latin-1'))
 
 
             if fileType == "EDF":
@@ -464,13 +507,13 @@ class DevuystReader(): #(EEGDBReaderBase):
             nbSamplePerPage = []
             for channel in self.labels: 
                 nbSamplePerPage.append(int(self.samplingRates[0]*pageDuration))
-                f.write("%08d" % nbSamplePerPage[-1])
+                f.write(("%08d" % nbSamplePerPage[-1]).encode('latin-1'))
             annotationFieldLength = int(max(400, max(array([len(eventStr) for eventStr in pageEventStr]))/nbByte*1.2))            
-            f.write("%08d" % annotationFieldLength)
+            f.write(("%08d" % annotationFieldLength).encode('latin-1'))
             
             
             # ns * 32 ascii : ns * reserved
-            for i in range(ns+1): f.write(" "*32)
+            for i in range(ns+1): f.write((" "*32).encode('latin-1'))
 
             """
              DATA RECORD
@@ -494,7 +537,7 @@ class DevuystReader(): #(EEGDBReaderBase):
 
 
             if verbose:
-                print "Writing body..."
+                print("Writing body...")
                         
             for nopage in range(nbPages):
              
@@ -505,7 +548,7 @@ class DevuystReader(): #(EEGDBReaderBase):
                     indStop  = indStart + nbSamplePerPage[0]
 
                     if indStop > len(self.signal[iChannel]):  # If the page is incomplete (this should be the last page)
-                        print nopage, nbPages, indStop, len(self.signal[iChannel])
+                        print((nopage, nbPages, indStop, len(self.signal[iChannel])))
                         recordedSignal = concatenate((self.signal[iChannel][indStart:len(self.signal[0])]), 
                                                 zeros(indStop -len(self.signal[iChannel])))
                     else:
@@ -527,12 +570,12 @@ class DevuystReader(): #(EEGDBReaderBase):
                         # Writing in a string of 32-bit integers and removing every fourth byte
                         # to obtain a string of 24-bit integers
                         recordedSignal = recordedSignal.astype('<i').tostring()
-                        recordedSignal = "".join([recordedSignal[noBit] for noBit in range(len(recordedSignal)) if (noBit+1)%4])
+                        recordedSignal = bytes([recordedSignal[noBit] for noBit in range(len(recordedSignal)) if (noBit+1)%4])
                         f.write(recordedSignal)
                                                 
 
                 # Annotation channel            
-                f.write((pageEventStr[nopage] +  "\0"*(annotationFieldLength*nbByte-len(pageEventStr[nopage]))).encode("utf8"))         
+                f.write((pageEventStr[nopage] +  "\0"*(annotationFieldLength*nbByte-len(pageEventStr[nopage]))).encode("latin-1"))         
 
         f.closed
 

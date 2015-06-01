@@ -222,7 +222,7 @@ def computeFastST(sig, fs, fmin=0, fmax=None):
     grid_imag = griddata((T, F), SIGNAL.imag, (cornerT, cornerF), method='nearest')
 
 
-    Tnew, Fnew = meshgrid(range(N), indF)
+    Tnew, Fnew = meshgrid(list(range(N)), indF)
     # Compute the linear interpolation, adding the values at the four corners to 
     # avoid extrapolation problems
     grid_real = griddata((concatenate((T, cornerT)), concatenate((F, cornerF))), 
@@ -262,7 +262,7 @@ def computeFastST_real(sig, fs, fmin=0, fmax=None):
 
 
 
-    Tnew, Fnew = meshgrid(range(N), indF)
+    Tnew, Fnew = meshgrid(list(range(N)), indF)
     # Compute the linear interpolation, adding the values at the four corners to 
     # avoid extrapolation problems
     grid_real = griddata((concatenate((T, cornerT)), concatenate((F, cornerF))), 

@@ -32,8 +32,8 @@ def main():
     detector = MassiminiSlowWaveDetector(reader)
     
     detector.detectEvents()
-    print reader.events
-    print len(detector.detectedEvents)
+    print((reader.events))
+    print((len(detector.detectedEvents)))
 
     detector.saveEvents(reader, eventName="MassiminiSL", eventGroupName="SlowWave")  
     

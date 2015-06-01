@@ -97,7 +97,7 @@ def findMaxima(y) :
 def findMinima(y) :
     #  Find location of local minima
 
-    return findmaxima(-1.0*np.array(y))    
+    return findMaxima(-1.0*np.array(y))    
     
     
     

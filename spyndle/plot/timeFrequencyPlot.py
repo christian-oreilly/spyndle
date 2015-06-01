@@ -134,7 +134,7 @@ class TimeFreqPlot(QDialog):
         self.spectogramPlot.draw()
 
         if not figname is None:
-            print "Saving " + figname
+            print(("Saving " + figname))
             self.figSingle.savefig(figname, dpi=250, facecolor='w', edgecolor='w',
                     orientation='portrait', papertype=None, format=None,
                     transparent=False, bbox_inches=None, pad_inches=0.1)

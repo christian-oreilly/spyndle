@@ -122,8 +122,8 @@ class TransientEvent(Base):
     eventName       = sa.Column(sa.String(30),  sa.ForeignKey("eventClass.name"))
     dataManipNo     = sa.Column(sa.Integer,     sa.ForeignKey("dataManipulationProcess.no"))
     
-    startTime       = sa.Column(sa.Float)
-    duration        = sa.Column(sa.Float)
+    startTime       = sa.Column(sa.types.Float(precision=40))
+    duration        = sa.Column(sa.types.Float(precision=40))
     
     stage           = sa.Column(sa.String(30))
     cycle           = sa.Column(sa.Integer)
@@ -169,11 +169,11 @@ class SpindleEvent(Base):
     """
     ID              = sa.Column(sa.String(36), sa.ForeignKey("transientEvent.ID"), primary_key=True)
     
-    slopeOrigin     = sa.Column(sa.Float)
-    slope           = sa.Column(sa.Float)
-    filteredRMSamp  = sa.Column(sa.Float)
-    RMSamp          = sa.Column(sa.Float)
-    meanFreq        = sa.Column(sa.Float)
+    slopeOrigin     = sa.Column(sa.types.Float(precision=40))
+    slope           = sa.Column(sa.types.Float(precision=40))
+    filteredRMSAmp  = sa.Column(sa.types.Float(precision=40))
+    RMSAmp          = sa.Column(sa.types.Float(precision=40))
+    meanFreq        = sa.Column(sa.types.Float(precision=40))
 
 
     """
@@ -186,17 +186,17 @@ class SpindleEvent(Base):
         def getProperty(cls, label):
             return cls(event.properties[label]) if label in event.properties else None
                          
-        RMSamp          = getProperty(float, "RMSamp")
+        RMSAmp          = getProperty(float, "RMSAmp")
         meanFreq        = getProperty(float, "meanFreq")
         slopeOrigin     = getProperty(float, "slopeOrigin")
         slope           = getProperty(float, "slope")
-        filteredRMSamp  = getProperty(float, "filteredRMSamp")   
+        filteredRMSAmp  = getProperty(float, "filteredRMSAmp")   
  
  
         return TransientEvent.fromEvent(event, psgNight, dataManipNo), \
-               SpindleEvent(ID = event.ID, RMSamp = RMSamp, 
+               SpindleEvent(ID = event.ID, RMSAmp = RMSAmp, 
                               meanFreq = meanFreq, slopeOrigin = slopeOrigin, 
-                              slope = slope, filteredRMSamp= filteredRMSamp)
+                              slope = slope, filteredRMSAmp= filteredRMSAmp)
 
 
 
@@ -221,16 +221,22 @@ class SlowWaveEvent(Base):
                                     sa.ForeignKey("transientEvent.ID"), 
                                     primary_key=True)
     
-    negatveDuration     = sa.Column(sa.Float)
-    positiveDuration    = sa.Column(sa.Float)
-    RMSamp              = sa.Column(sa.Float)
-    frequency           = sa.Column(sa.Float)
-    ZNSlope             = sa.Column(sa.Float)
-    NPslope             = sa.Column(sa.Float)
-    PZSlope             = sa.Column(sa.Float)
-    timeMin             = sa.Column(sa.Float)
+    negativeDuration     = sa.Column(sa.types.Float(precision=40))
+    positiveDuration    = sa.Column(sa.types.Float(precision=40))
+    RMSAmp              = sa.Column(sa.types.Float(precision=40))
+    ZNSlope             = sa.Column(sa.types.Float(precision=40))
+    NPSlope             = sa.Column(sa.types.Float(precision=40))
+    PZSlope             = sa.Column(sa.types.Float(precision=40))
+    timeMin             = sa.Column(sa.types.Float(precision=40))
+    timeMax             = sa.Column(sa.types.Float(precision=40))
 
 
+    @property
+    def P2PAmp(self):
+        """
+        Return the peak-to-peak amplitude.
+        """
+        return self.NPSlope*(self.timeMax-self.timeMin)
 
     """
      Factory static method used to get a TransientEvent and a SpindleEvent 
@@ -246,21 +252,21 @@ class SlowWaveEvent(Base):
                 return None
                     
                          
-        negatveDuration     = getProperty(float, "negatveDuration")
+        negativeDuration    = getProperty(float, "negativeDuration")
         positiveDuration    = getProperty(float, "positiveDuration")
-        RMSamp              = getProperty(float, "RMSamp")
-        frequency           = getProperty(float, "frequency")
+        RMSAmp              = getProperty(float, "RMSAmp")
         ZNSlope             = getProperty(float, "ZNSlope")   
-        NPslope             = getProperty(float, "NPslope")   
+        NPSlope             = getProperty(float, "NPSlope")   
         PZSlope             = getProperty(float, "PZSlope")  
         timeMin             = getProperty(float, "timeMin") 
+        timeMax             = getProperty(float, "timeMax") 
 
         return TransientEvent.fromEvent(event, psgNight, dataManipNo), \
-               SlowWaveEvent(ID = event.ID, negatveDuration = negatveDuration, 
-                            positiveDuration = positiveDuration, RMSamp = RMSamp, 
-                            frequency = frequency, ZNSlope = ZNSlope, 
-                            NPslope = NPslope, PZSlope = PZSlope,
-                            timeMin = timeMin)
+               SlowWaveEvent(ID = event.ID, negativeDuration = negativeDuration, 
+                            positiveDuration = positiveDuration, RMSAmp = RMSAmp, 
+                            ZNSlope = ZNSlope, NPSlope = NPSlope, 
+                            PZSlope = PZSlope, timeMin = timeMin, 
+                            timeMax = timeMax)
 
 
 
@@ -336,9 +342,9 @@ class Propagation(Base):
     sourceChannelName   = sa.Column(sa.String(30), sa.ForeignKey("channel.name"))
     sinkChannelName     = sa.Column(sa.String(30), sa.ForeignKey("channel.name"))
     
-    similarity          = sa.Column(sa.Float)
-    delay               = sa.Column(sa.Float)
-    offset              = sa.Column(sa.Float)
+    similarity          = sa.Column(sa.types.Float(precision=40))
+    delay               = sa.Column(sa.types.Float(precision=40))
+    offset              = sa.Column(sa.types.Float(precision=40))
     
     transientEvent      = sa.orm.relationship("TransientEvent", 
                                     primaryjoin='Propagation.transientEventID==TransientEvent.ID',
@@ -474,12 +480,12 @@ class PropagationRelationship(Base):
     psgNight            = sa.Column(sa.String(255), sa.ForeignKey("psgNight.fileName"))
     eventName           = sa.Column(sa.String(30), sa.ForeignKey("eventClass.name"))
     
-    cutoff              = sa.Column(sa.Float)
-    FDR                 = sa.Column(sa.Float)
+    cutoff              = sa.Column(sa.types.Float(precision=40))
+    FDR                 = sa.Column(sa.types.Float(precision=40))
     nbValid             = sa.Column(sa.Integer)
     nbOut               = sa.Column(sa.Integer)
-    delay_mean          = sa.Column(sa.Float)
-    delay_sd            = sa.Column(sa.Float)
+    delay_mean          = sa.Column(sa.types.Float(precision=40))
+    delay_sd            = sa.Column(sa.types.Float(precision=40))
     
     isValidC3           = sa.Column(sa.Boolean)
     isValidC4           = sa.Column(sa.Boolean)

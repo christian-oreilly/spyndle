@@ -77,7 +77,7 @@ class MassiminiSlowWaveDetector(TransientDetector):
         
 
 
-    def computeRMS(self, fmin=11, fmax=16):
+    def computeRMS(self, fmin=0.1, fmax=4.0):
         super(MassiminiSlowWaveDetector, self).computeRMS(self.lowFreq, self.highFreq)
 
 
@@ -106,7 +106,7 @@ class MassiminiSlowWaveDetector(TransientDetector):
         TransientDetector.detectEvents(self, channelList, reader, verbose)
 
         #################################### READING ##########################
-        if verbose:   print "Start reading datafile..."
+        if verbose:   print("Start reading datafile...")
 
         # Pickle data for each channel separatelly to simplify and accelerate
         # the reading of large files.    
@@ -114,7 +114,7 @@ class MassiminiSlowWaveDetector(TransientDetector):
             self.reader.pickleCompleteRecord(self.channelList)   
    
         for channel in self.channelList:    
-            if verbose:   print "Channel " + channel + "..."           
+            if verbose:   print(("Channel " + channel + "..."))           
             
             data            = self.reader.readChannel(channel, usePickled=self.usePickled)
             data.channel    = channel
@@ -124,7 +124,7 @@ class MassiminiSlowWaveDetector(TransientDetector):
             signal     = self.preprocessing(data)
 
             ############################### DETECTION #####################  
-            if verbose:  print "Detection..."
+            if verbose:  print("Detection...")
 
             # Thereshold are computed for each sleep cycles and each sleep stage
             # since the average amplitude of EEG signal can vary accoss night
@@ -134,8 +134,8 @@ class MassiminiSlowWaveDetector(TransientDetector):
             assert(len(channelTime) == len(signal))
             
             
-            stageEvents = filter(lambda e: e.groupName.lower() == "stage", self.reader.events)                
-            stageEvents = filter(lambda e: np.in1d(e.name.lower(),  [s.lower() for s in self.detectionStages]), stageEvents)
+            stageEvents = [e for e in self.reader.events if e.groupName.lower() == "stage"]                
+            stageEvents = [e for e in stageEvents if np.in1d(e.name.lower(),  [s.lower() for s in self.detectionStages])]
             self._detectMain_(stageEvents, channelTime, data.samplingRate, channel, signal)                       
                 
         # These are performed for all detected events, regarless of their channels.
@@ -242,7 +242,7 @@ class MassiminiSlowWaveDetector(TransientDetector):
 
 
 
-        labelInds, labels = zip(*sorted(zip(labelInds, labels), key=operator.itemgetter(0)))
+        labelInds, labels = list(zip(*sorted(zip(labelInds, labels), key=operator.itemgetter(0))))
         labels      = np.array(labels)
         labelInds   = np.array(labelInds)
 
@@ -291,7 +291,7 @@ class MassiminiSlowWaveDetector(TransientDetector):
             newEvent.negativeDuration   = channelTime[labelInds[seqInd+2]] - channelTime[labelInds[seqInd]]
             newEvent.positiveDuration   = channelTime[labelInds[seqInd+4]] - channelTime[labelInds[seqInd+2]] 
             newEvent.ZNSlope            = signal[labelInds[seqInd+1]]/(channelTime[labelInds[seqInd+1]] - channelTime[labelInds[seqInd]])
-            newEvent.NPslope            = (signal[labelInds[seqInd+3]] - signal[labelInds[seqInd+1]])/\
+            newEvent.NPSlope            = (signal[labelInds[seqInd+3]] - signal[labelInds[seqInd+1]])/\
                                           (channelTime[labelInds[seqInd+3]] - channelTime[labelInds[seqInd+1]])
             newEvent.PZSlope            = signal[labelInds[seqInd+3]]/(channelTime[labelInds[seqInd+4]] - channelTime[labelInds[seqInd+3]])
             newEvent.timeMin            = channelTime[labelInds[seqInd+1]]
@@ -303,7 +303,7 @@ class MassiminiSlowWaveDetector(TransientDetector):
             # it don't need to be filtered again for RMS computation              
             indStart = bisect.bisect_left(channelTime, newEvent.startTime()) 
             indEnd   = indStart + int(newEvent.timeDuration*fs)
-            newEvent.RMSamp = np.sqrt(np.mean(signal[indStart:(indEnd+1)]**2))                
+            newEvent.RMSAmp = np.sqrt(np.mean(signal[indStart:(indEnd+1)]**2))                
             
               
             
@@ -361,10 +361,10 @@ class MassiminiSlowWaveDetector(TransientDetector):
                           properties = {"negativeDuration"  :detectedEvent.negativeDuration,
                                         "positiveDuration"  :detectedEvent.positiveDuration,  
                                         "stage"             :detectedEvent.sleepStage,
-                                        "RMSamp"            :detectedEvent.RMSamp,
+                                        "RMSAmp"            :detectedEvent.RMSAmp,
                                         "cycle"             :detectedEvent.cycle,
                                         "ZNSlope"           :detectedEvent.ZNSlope,
-                                        "NPslope"           :detectedEvent.NPslope,
+                                        "NPSlope"           :detectedEvent.NPSlope,
                                         "PZSlope"           :detectedEvent.PZSlope,
                                         "timeMin"           :detectedEvent.timeMin,
                                         "timeMax"           :detectedEvent.timeMax}) 

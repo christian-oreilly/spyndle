@@ -102,25 +102,25 @@ f, axarr = plt.subplots(3, sharex=True)
 
 axarr[0].plot(t[:100], signal[:100])
 axarr[0].plot(t[:100], lowSignal[:100])
-axarr[0].set_title(u"passe-bas à 10 Hz")
-axarr[0].set_ylabel(u"amplitude (uV)")
-axarr[0].legend((u"original", u"filtré"), loc="lower center", ncol =2, frameon=False)
+axarr[0].set_title("passe-bas à 10 Hz")
+axarr[0].set_ylabel("amplitude (uV)")
+axarr[0].legend(("original", "filtré"), loc="lower center", ncol =2, frameon=False)
 
 axarr[1].plot(t[:100], signal[:100])
 axarr[1].plot(t[:100], highSignal[:100])
-axarr[1].set_title(u"passe-haut à 8 Hz")
-axarr[1].set_ylabel(u"amplitude (uV)")
-axarr[1].legend((u"original", u"filtré"), loc="lower center", ncol =2, frameon=False) 
+axarr[1].set_title("passe-haut à 8 Hz")
+axarr[1].set_ylabel("amplitude (uV)")
+axarr[1].legend(("original", "filtré"), loc="lower center", ncol =2, frameon=False) 
  
 axarr[2].plot(t[:100], signal[:100])
 axarr[2].plot(t[:100], bandSignal[:100])
-axarr[2].set_title(u"passe-bande 8-10 Hz")
-axarr[2].set_xlabel(u"temps (s)")
-axarr[2].set_ylabel(u"amplitude (uV)")
-axarr[2].legend((u"original", u"filtré"), loc="lower center", ncol =2, frameon=False)
+axarr[2].set_title("passe-bande 8-10 Hz")
+axarr[2].set_xlabel("temps (s)")
+axarr[2].set_ylabel("amplitude (uV)")
+axarr[2].legend(("original", "filtré"), loc="lower center", ncol =2, frameon=False)
 
 plt.savefig(os.path.join(path, "filterExample.png"))
-print "Saving " + os.path.join(path, "filterExample.png")
+print(("Saving " + os.path.join(path, "filterExample.png")))
 plt.show()
 
 
@@ -129,7 +129,7 @@ plt.show()
 # Making and saving a figure showing examples of spindles.
 ###############################################################################
 
-spindleEvents = filter(lambda e: e.name == "spindleV1" and e.channel == channel, reader.events)    
+spindleEvents = [e for e in reader.events if e.name == "spindleV1" and e.channel == channel]    
 
 startPad    = 4.0                               # Start zero padding 
 
@@ -142,7 +142,7 @@ bandPassFilter.create(low_crit_freq=2.0,
 f, axarr = plt.subplots(2, 2, sharex='col', sharey='row')
 f.set_size_inches(12, 3)
 f.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.2)
-for event, ax, i in zip(np.array(spindleEvents)[[0, 9, 18, 49]], axarr.flat, range(4)) :
+for event, ax, i in zip(np.array(spindleEvents)[[0, 9, 18, 49]], axarr.flat, list(range(4))) :
     data = reader.read([channel], event.startTime -startPad, 8.0)  
     t    = np.arange(len(data[channel].signal))/fs    # sampling time
 
@@ -167,7 +167,7 @@ for event, ax, i in zip(np.array(spindleEvents)[[0, 9, 18, 49]], axarr.flat, ran
                                       color="red", linewidth=2, linestyle="--")     
 
 plt.savefig(os.path.join(path, "spindleExample.png"), dpi=250)
-print "Saving " + os.path.join(path, "spindleExample.png")
+print(("Saving " + os.path.join(path, "spindleExample.png")))
 plt.show()
 
 
@@ -186,9 +186,10 @@ bandPassFilter.create(low_crit_freq=11.0,
                       btype="bandpass", ftype="FIR", useFiltFilt=True)              
 
 detector = SpindleDetectorRMS()
+detector.detectEvents(reader=reader)
 
-event = spindleEvents[49]
-data = reader.read([channel], event.startTime -2.0, 20.0)  
+event = detector.detectedEvents[0]
+data = reader.read([channel], event.startTime() -2.0, 20.0)  
 
 raw = data[channel].signal
 signal = bandPassFilter.applyFilter(data[channel].signal)     
@@ -223,6 +224,6 @@ axarr[1].set_xlabel("secondes")
 axarr[1].set_ylabel("Amplitude f(t)")     
 
 plt.savefig(os.path.join(path, "detectionExample.png"), dpi=250)
-print "Saving " + os.path.join(path, "detectionExample.png")
+print(("Saving " + os.path.join(path, "detectionExample.png")))
 plt.show()
 

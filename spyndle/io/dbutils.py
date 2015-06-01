@@ -31,22 +31,74 @@
 
 
 import pandas as pd
+import numpy as np
+from sqlalchemy.util._collections import KeyedTuple
+from warnings import warn
 
-
-def rows2df(rows):
+def rows2df(rows, columnsIn=[], columnsOut=[]):
     """
     Convert a set of rows obtained with session.query.all() in a pandas DataFrame 
-    object.
+    object. If a list a column names is passed as the columnsIn argument, only
+    these columns will be included. If columnsOut contains column names, these
+    will be excluded.
     """     
     if len(rows) == 0:
         return pd.DataFrame()
-    
-    d = {}
-    for column in rows[0].__table__.columns:
-        d[column.name] = [getattr(rows[0], column.name)]
 
-    for row in rows[1:]:
-        for column in row.__table__.columns:
-            d[column.name].append(getattr(row, column.name))
+    if len(columnsIn) != 0 and len(columnsOut) != 0:
+        warn("The columnsIn shadows the columnsOut argument in rows2df.")
+    
+    def setColumn(d, dKey, table, columnName):
+        if len(columnsIn) != 0:
+            if columnName in columnsIn:
+                if dKey in d:
+                    d[dKey].append(getattr(table, columnName))
+                else:
+                    d[dKey] = [getattr(table, columnName)] 
+            return
+        else:
+            if not columnName in columnsOut:
+                if dKey in d:
+                    d[dKey].append(getattr(table, columnName))
+                else:
+                    d[dKey] = [getattr(table, columnName)]         
+        
+        
+    d = {}
+    if isinstance(rows[0], KeyedTuple):
+        """
+        KeyedTuple are received from query of type query(Class1, Class2, ..., ClassN)
+        """
+        
+        """
+        Finding the column that have the same name accross different tables.
+        These names cannot be conveyed directly to the DataFrame because this
+        column would have twice (if two columns has the same name) as many
+        items as the other columns, half of it comming from the column of this
+        name in each of the two tables. Thus we identify columns names that are
+        the same accross more than one table such that we can prefix them with
+        the table name.
+        """
+        columnNames = []
+        for table in rows[0]:
+            columnNames.extend([c.name for c in table.__table__.columns])
+        columnNames = np.sort(columnNames)
+        commonNames = np.unique(columnNames[columnNames[1:] == columnNames[:-1]])      
+
+
+        for row in rows:
+            for table in row:
+                tblName = table.__table__.name
+                for column in table.__table__.columns:
+                    if column.name in commonNames: 
+                        setColumn(d, tblName + "_" + column.name, table, column.name)
+                    else:                     
+                        setColumn(d, column.name, table, column.name)                        
+                
+                
+    else:
+        for row in rows:
+            for column in row.__table__.columns:
+                setColumn(d, column.name, row, column.name)  
 
     return pd.DataFrame(d)         

@@ -1,8 +1,8 @@
 # __init__.py
 
-from system10_20 import get10_20AdjacentElectrodes, getAdjacentsPairs_10_20, \
+from .system10_20 import get10_20AdjacentElectrodes, getAdjacentsPairs_10_20, \
     getActiveElectrode, getEEGChannels, getPropagationDirection, getActiveElectrodes
-from electrodesSVG import getElectrodeCoordinates
-from mapping import plotArrowsBidirect, HeadDrawing, plotColorMap, \
+from .electrodesSVG import getElectrodeCoordinates
+from .mapping import plotArrowsBidirect, HeadDrawing, plotColorMap, \
     plotArrowsDifferential
     

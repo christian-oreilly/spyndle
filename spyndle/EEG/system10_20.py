@@ -210,7 +210,7 @@ def get_10_20_electrode_distance(sagital=0.35, transverse=0.35, circonf= 0.55, a
     for ref in ("O1", "O2"):
         distance[(ref, "Iz")] = sqrt((sagital*0.1)**2+(circonf*0.05)**2)
        
-    keys = distance.keys()
+    keys = list(distance.keys())
     for ref, test in keys:
         distance[(test, ref)] = distance[(ref, test)]
     
@@ -253,7 +253,7 @@ def getAdjacentsPairs_10_20(electrodes):
                 electTest.append(key2)
         
     
-    return zip(electRef, electTest)
+    return list(zip(electRef, electTest))
     
     
     
@@ -479,7 +479,7 @@ def getPropagationDirection(pairs):
         test1, test2 = splitElectrodeName(renameElectrode(pair[1]))
         
         rowOrder    = ["I", "O", "PO", "P", "CP", "C", "FC", "F", "AF", "Fp", "N"]
-        colOrder    = range(11, 0, -2) + range(0, 13, 2)
+        colOrder    = list(range(11, 0, -2)) + list(range(0, 13, 2))
         towardFront = rowOrder.index(test1) - rowOrder.index(ref1)
         towardRight = colOrder.index(test2) - colOrder.index(ref2)
             

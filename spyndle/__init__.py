@@ -2,11 +2,14 @@
 __version__ = "0.3.0"
 
 
-from miscellaneous.filters import Filter, channelType
-from miscellaneous.sleepCycles import cycleDefinitions, computeDreamCycles
-from miscellaneous.STransform import computeMST, computeST
-from miscellaneous.fastST import computeFastST, computeFastST_real
-from miscellaneous.line import Line, Point
-from miscellaneous.utils import setUnbufferedPrint, Unbuffered, terminate_process, diff2
+from .miscellaneous.filters import Filter, channelType
+from .miscellaneous.sleepCycles import CycleDefinitions, computeDreamCycles
+from .miscellaneous.STransform import computeMST, computeST
+from .miscellaneous.fastST import computeFastST, computeFastST_real
+from .miscellaneous.line import Line, Point
+from .miscellaneous.utils import setUnbufferedPrint, Unbuffered, terminate_process, diff2
 
-import io, DevuystDB, detector, miscellaneous, propagation, EEG
+# For backward compatibility
+from .miscellaneous.sleepCycles import cycleDefinitions
+
+#import io, DevuystDB, detector, miscellaneous, propagation, EEG

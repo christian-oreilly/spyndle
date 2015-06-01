@@ -31,7 +31,10 @@ from sys import stdout
 from copy import deepcopy
 from spyndle.io.edf import EDFHeader
 
-from EEGDatabaseReader import EEGDBReaderBase, Event, RecordedChannel, EEGPage, EEGPageInfo
+from .EEGDatabaseReader import EEGDBReaderBase, Event, RecordedChannel, EEGRecord, EEGRecordInfo
+
+
+channelTypes = {1:"EEG", 3:"EMG", 7:"EOG", 8:"ECG", 10:"MIC", 23:"RSP"}
 
 
 # Internal record size of Harmonie. According to Gaetan Poirier, internally, 
@@ -82,7 +85,7 @@ def secondToDays(seconds, startDay):
 
 
 class HarmonieEvent(Event):
-    def __init__(self, no, group, item, recordingStartTime):
+    def __init__(self, no, group, item, recordingStartTime, trueFreq): #
         self.no          = no
         self.groupName   = group.GetName()
         self.channel     = item.GetChannel()
@@ -94,42 +97,41 @@ class HarmonieEvent(Event):
         # Names for sleep stages in Harmonie are not constrained such that
         # there is no standard nqmes. Tore's lab, Julie's lab and clinical
         # lab use diffrent namings. So we must check for all possibles names.
-        if self.groupName.lower() == u"stage" or self.groupName.lower() == u"stade":
-            if  self.name.lower() == u"stage1" or self.name.lower() == u"stade1" \
-                                               or self.name.lower() == u"std1" :   
-                self.name = u"Sleep stage 1"
+        if self.groupName.lower() == "stage" or self.groupName.lower() == "stade":
+            if  self.name.lower() == "stage1" or self.name.lower() == "stade1" \
+                                               or self.name.lower() == "std1" :   
+                self.name = "Sleep stage 1"
                 
-            elif  self.name.lower() == u"stage2" or self.name.lower() == u"stade2" \
-                                                 or self.name.lower() == u"std2":   
-                self.name = u"Sleep stage 2"
+            elif  self.name.lower() == "stage2" or self.name.lower() == "stade2" \
+                                                 or self.name.lower() == "std2":   
+                self.name = "Sleep stage 2"
  
-            elif  self.name.lower() == u"stage3" or self.name.lower() == u"stade3" \
-                                                 or self.name.lower() == u"std3" :   
-                self.name = u"Sleep stage 3"
+            elif  self.name.lower() == "stage3" or self.name.lower() == "stade3" \
+                                                 or self.name.lower() == "std3" :   
+                self.name = "Sleep stage 3"
                   
-            elif  self.name.lower() == u"stage4" or self.name.lower() == u"stade4" \
-                                                 or self.name.lower() == u"std4":   
-                self.name = u"Sleep stage 4"
+            elif  self.name.lower() == "stage4" or self.name.lower() == "stade4" \
+                                                 or self.name.lower() == "std4":   
+                self.name = "Sleep stage 4"
                 
-            elif  self.name.lower() == u"rem" or self.name.lower() == u"sp" \
-                                              or self.name.lower() == u"mor":   
-                self.name = u"Sleep stage R"
+            elif  self.name.lower() == "rem" or self.name.lower() == "sp" \
+                                              or self.name.lower() == "mor":   
+                self.name = "Sleep stage R"
                 
-            elif  self.name.lower() == u"wake" or self.name == u"\xc9veil" \
-                                               or self.name == u"ÉV.":   
-                self.name = u"Sleep stage W"
+            elif  self.name.lower() == "wake" or self.name == "\xc9veil" \
+                                               or self.name == "ÉV.":   
+                self.name = "Sleep stage W"
                 
-            elif  self.name.lower() == u"unstaged" or self.name.lower() == u"stdnd" \
+            elif  self.name.lower() == "unstaged" or self.name.lower() == "stdnd" \
                                                   or self.name.lower() ==  "stageu":                  
-                self.name = u"Sleep stage ?"                   
+                self.name = "Sleep stage ?"                   
                 
             else:   
-                print self.name             
-                self.name = u"Sleep stage ?"
+                print((self.name))             
+                self.name = "Sleep stage ?"
                 
                 
-            self.groupName = u"stage"
-                                                         
+            self.groupName = "stage"
 
         
         # OLE complete date-time object giving the begining time of the event.
@@ -137,12 +139,21 @@ class HarmonieEvent(Event):
           
         # In seconds, since the begining of the recording of the EEG file.
         self.startTime   = (self.dateTime - recordingStartTime).total_seconds()  
-        
-        self.timeLength  = item.GetTimeLength()                
+                      
         self.startSample = item.GetStartSample()
         self.sampleLength= item.GetSampleLength()
         self.color       = group.GetColor() 
+        
 
+        # For some reason, the time duration given by Harmnie does not correspond
+        # to the sampleDuration according to the true frequency. This would be
+        # fine if it was for example to get accurate stages length but stage length
+        # are not accurate (for example, in a same recordin we can have [ 29.99612427  
+        # 29.9961319   29.99807739  29.99808502  30.00003052 30.00003815]) durations.
+        # To get it more manageable, we recompute the time length from the sample length.
+        #self.timeLength  = item.GetTimeLength()          
+        self.timeLength  = self.sampleLength/trueFreq      
+    
         self.properties  = {}
         # Keys and properties should be in unicode
         for i in range(group.GetItemPropertyCount()):
@@ -166,8 +177,10 @@ class HarmonieEvent(Event):
 
 
 class HarmonieReader(EEGDBReaderBase):
-    def __init__(self, fname):
+    def __init__(self, fname, resynch = True, verbose=False):
         super(HarmonieReader, self).__init__()
+        
+        self.verbose = verbose
  
         #c:\tests>python makepy.py -i StlSignalFile.tlb
         #StlSignalFileLib
@@ -185,7 +198,7 @@ class HarmonieReader(EEGDBReaderBase):
         try:        
             cc.GetModule((tlb_id, 1, 1))
         except WindowsError:
-            print "Using the HarmonieReader module requires the installation of the Harmonie API. This API is normally install together with the Harmonie software."
+            print("Using the HarmonieReader module requires the installation of the Harmonie API. This API is normally install together with the Harmonie software.")
             raise
         
         
@@ -199,13 +212,13 @@ class HarmonieReader(EEGDBReaderBase):
         try:
             self.ISignalFile.Open(str(fname), SIGNALFILE_FLAGS_READONLY)
         except:
-            print "An error has occured when trying to open " + str(fname)
+            print(("An error has occured when trying to open " + str(fname)))
             self.ISignalFile    = None
             self.labels         = None
             self.channelFreqs  = None
             self.nbChannels     = None
-            self.pageNbSamples  = None
-            self.basePageNbSamples = None
+            self.recordNbSamples  = None
+            self.baseRecordNbSamples = None
             self.channelType        = None
             raise IOError(fname)
             
@@ -251,35 +264,36 @@ class HarmonieReader(EEGDBReaderBase):
         ISignalRecord.SetStartSample(int(0))
         self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)  
         self.recordingStartTime  = ole2datetime(ISignalRecord.GetStartTime())              
-        ###########################################     
+        ###########################################
 
+        # We now avoid to use IRecordingMontage.GetBaseSampleFrequency() and always
+        # use self.IRecordingMontage.GetBaseSampleFrequency() to avoid any confusion.
+        self.trueBaseFreq      = self.IRecordingCalibration.GetTrueSampleFrequency()
         
         ###########################################
         # Store events     
         for i in range(self.ISignalInfo.GetEventItemCount()):    
             IEventItem = self.ISignalInfo.GetEventItem(i)
             IEventGroup = IEventItem.GetGroup()
-            self.events.add(HarmonieEvent(i, IEventGroup, IEventItem, self.recordingStartTime))
+            self.events.add(HarmonieEvent(i, IEventGroup, IEventItem, self.recordingStartTime, self.trueBaseFreq))
             
         # Patch used because data recorder with previous versions of Harmonie
         # inconsistent time stamp due to discontinuous recording. These lines
         # should not be necessary with another reader.
-        print "Resynchronization of the events..."
-        self.resyncEvents()                
+        if resynch:
+            if self.verbose :
+                print("Resynchronization of the events...")
+            self.resyncEvents()                
         ###########################################
-            
-            
-        self.pageDuration = np.median([e.timeLength for e in self.events if e.groupName.lower() == "stage"])
 
-        # We now avoid to use IRecordingMontage.GetBaseSampleFrequency() and always
-        # use self.IRecordingMontage.GetBaseSampleFrequency() to avoid any confusion.
-        self.trueBaseFreq      = self.IRecordingCalibration.GetTrueSampleFrequency()        
-        self.basePageNbSamples  = int(round(self.trueBaseFreq*self.pageDuration))   
+        # We truncate instead of rounding because we must avoid a too long record
+        # duration that would create records overlapping when converting to EDF        
+        self.baseRecordNbSamples  = int(self.trueBaseFreq*self.recordDuration)   
         
-        # We adjuste the page duration to account for the fact that it may not
+        # We adjuste the record duration to account for the fact that it may not
         # be exactly X seconds as the true base frequency is not an integer
         # but a float.
-        self.pageDuration       = self.basePageNbSamples/self.trueBaseFreq
+        self.recordDuration       = self.baseRecordNbSamples/self.trueBaseFreq
         
         self.nbChannels         = self.IRecordingMontage.GetChannelCount()     
         
@@ -292,9 +306,9 @@ class HarmonieReader(EEGDBReaderBase):
         for i in range(self.nbChannels):
             self.channelFreqs[self.labels[i]] = self.IRecordingMontage.GetChannelSampleFrequency(i)*freqCorrectFactor
             
-        self.pageNbSamples = {}
+        self.recordNbSamples = {}
         for channel in self.channelFreqs:
-            self.pageNbSamples[channel] = int(self.channelFreqs[channel]*self.pageDuration)
+            self.recordNbSamples[channel] = int(self.channelFreqs[channel]*self.recordDuration)
             
         self.channelType = {}
         for i in range(self.nbChannels):
@@ -310,29 +324,29 @@ class HarmonieReader(EEGDBReaderBase):
         # performed up to the specified number of sample but the behavior of 
         # reading function are uncertain. These situations can be detected and 
         # corrected by looking at the true file size.  
-        nbSampleRec = int(RECORD_NB*sum(array(self.channelFreqs.values())/self.trueBaseFreq))
+        nbSampleRec = int(RECORD_NB*sum(array(list(self.channelFreqs.values()))/self.trueBaseFreq))
 
         # Each sample is recorded using 16 bytes and the time/date is recorded
         # at the begining of each record using 8 bytes.
         recSize = nbSampleRec*2 + 8 
  
-        self.nbSamples = os.path.getsize(self.fileName)/recSize*RECORD_NB
+        self.nbSamples = int(os.path.getsize(self.fileName)/recSize*RECORD_NB)
         if self.nbSamples != int(self.ISignalFile.GetRecordCount(RECORD_NB))*RECORD_NB:
             self.nbSamples = min(self.nbSamples, int(self.ISignalFile.GetRecordCount(RECORD_NB))*RECORD_NB)
-            print "Warning: The file has been truncated and Harmonie is not reporting "\
+            print("Warning: The file has been truncated and Harmonie is not reporting "\
                   "the correct number of samples anymore. The know problems associated"\
                   " with this situation have been corrected but unknown problems may " \
                   "arise. Consider restauring this possibly corrupted .sig file if you"\
-                  " have a backup."
-            print "record size:", recSize
-            print "Expected number of record:", int(self.ISignalFile.GetRecordCount(RECORD_NB))
-            print "Computed number of record:", os.path.getsize(self.fileName)/recSize
+                  " have a backup.")
+            print(("record size:", recSize))
+            print(("Expected number of record:", int(self.ISignalFile.GetRecordCount(RECORD_NB))))
+            print(("Computed number of record:", os.path.getsize(self.fileName)/recSize))
             #print sum(array(self.channelFreqs.values())/self.trueBaseFreq)
             #print array(self.channelFreqs.values())/self.trueBaseFreq
         ####################################
         
 
-        self.definePages()
+        self.defineRecords()
 
 
 
@@ -343,16 +357,38 @@ class HarmonieReader(EEGDBReaderBase):
 
 
     """
-     Deines the pages and save it in the self.page attribute. This is useful
-     for managing the discontinuity. Every HarmonyPage object of self.pages
-     contains it start/end sample and an indication of wheter this page ends
-     with a discontinuity (i.e., it is an incomplete page).
+     Deines the records and save it in the self.record attribute. This is useful
+     for managing the discontinuity. Every HarmonyRecord object of self.records
+     contains it start/end sample and an indication of wheter this record ends
+     with a discontinuity (i.e., it is an incomplete record).
     """
-    def definePages(self):
+    def defineRecords(self):
+    
+        def appendRecordInfo(startSample, endSample, isComplete):
+    
+            nbSamples = endSample-startSample+1
+            ISignalRecord = self.ISignalFile.CreateSignalRecord(nbSamples) 
+        
+            ISignalRecord.SetStartSample(startSample)        
+            self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
+            startDateTime = ole2datetime(ISignalRecord.GetStartTime())
+            
+            startTime = (startDateTime - self.recordingStartTime).total_seconds()  
+                    
+            duration  = float(nbSamples)/self.trueBaseFreq
+                
+            recInfo = EEGRecordInfo(startSample=startSample, 
+                                    endSample=endSample, 
+                                    startTime=startTime,   
+                                    duration=duration, 
+                                    isComplete=isComplete)            
+            
+            self.recordsInfo.add(recInfo)
+            
     
         discontinuitySample = array([e.startSample for e in self.events if e.groupName == "Discontinuity" or
                                                                      e.groupName == "Recording Start"], dtype=int)    
-        sampleTransitions = sorted(concatenate((discontinuitySample, array([self.nbSamples+1], dtype=int))))
+        sampleTransitions = sorted(concatenate((discontinuitySample, array([self.nbSamples], dtype=int))))
                 
         noTransition = 0 
         startSample = 0                
@@ -362,11 +398,11 @@ class HarmonieReader(EEGDBReaderBase):
             
         while(True):
             
-            # The page contains a discontinuity
+            # The record contains a discontinuity
             if (sampleTransitions[noTransition] > startSample and
-                sampleTransitions[noTransition] <= startSample + self.basePageNbSamples):
+                sampleTransitions[noTransition] <= startSample + self.baseRecordNbSamples):
                    
-                   self.getInfoPages().append(EEGPageInfo(startSample, sampleTransitions[noTransition]-1, False))
+                   appendRecordInfo(startSample, sampleTransitions[noTransition]-1, isComplete = False)
                    startSample = sampleTransitions[noTransition]
                    
                    noTransition += 1
@@ -375,22 +411,28 @@ class HarmonieReader(EEGDBReaderBase):
                    if noTransition == len(sampleTransitions):
                        break;
                   
-            # The page contains no discontinuity
+            # The record contains no discontinuity
             else:
-                   self.getInfoPages().append(EEGPageInfo(startSample, startSample + self.basePageNbSamples, True))
-                   startSample += self.basePageNbSamples    
+                   appendRecordInfo(startSample, startSample + self.baseRecordNbSamples-1, isComplete = True)
+                   startSample += self.baseRecordNbSamples    
                    
                    if startSample == self.nbSamples:
                        break;
 
+
+        # Perform some sanity check
+        starts = np.array([r.startSample for r in self.recordsInfo])
+        ends   = np.array([r.endSample for r in self.recordsInfo])
+        assert(np.all(ends[:-1]+1 == starts[1:]))
+        assert(ends[-1]+1 == self.getNbSample())
 
     def getChannelLabels(self):
         return self.labels 
 
                 
     def getEventsBySample(self, startSample, endSample) :
-        return filter(lambda e: (e.startSample >= startSample and e.startSample < endSample) or 
-                         (e.startSample + e.sampleLength >= startSample and e.startSample + e.sampleLength < endSample) , self.events)       
+        return [e for e in self.events if (e.startSample >= startSample and e.startSample < endSample) or 
+                         (e.startSample + e.sampleLength >= startSample and e.startSample + e.sampleLength < endSample)]       
         
 
     def getRecordingStartTime(self):    
@@ -399,25 +441,32 @@ class HarmonieReader(EEGDBReaderBase):
         
         
     def getDuration(self):    # en secondes
-        return float(self.nbSamples)/self.trueBaseFreq       
+        return self.recordDuration #float(self.nbSamples)/self.trueBaseFreq       
 
     def getNbSample(self, channel=None):
         if channel is None:
             return self.nbSamples
         else:
-            if not (isinstance(channel, str) or isinstance(channel, unicode)):
+            if not (isinstance(channel, str) or isinstance(channel, str)):
                 raise TypeError 
-            return int(self.getDuration()*self.channelFreqs[channel])
+            return int(self.nbSamples*self.channelFreqs[channel]/self.trueBaseFreq)
             
+            
+    def getRecordNbSample(self, channel):
+        if not (isinstance(channel, str) or isinstance(channel, str)):
+            raise TypeError 
+        return int(self.getDuration()*self.channelFreqs[channel])
+                        
         
     def getElectrodesLabels(self):
         return self.labels
         
-    def readPage(self, signalNames, pageNo):
+    def readRecord(self, signalNames, recordNo):
 
-        # Indexing pages from 1 to NbPages
-        ISignalRecord = self.ISignalFile.CreateSignalRecord(self.getInfoPages(pageNo).getNbSamples())
-        ISignalRecord.SetStartSample(self.getInfoPages(pageNo).startSample) 
+        # Indexing records from 1 to NbRecords
+        recInfo = self.recordsInfo[recordNo-1]
+        ISignalRecord = self.ISignalFile.CreateSignalRecord(recInfo.getNbSamples())
+        ISignalRecord.SetStartSample(recInfo.startSample) 
         self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
         
         sigStart = ole2datetime(ISignalRecord.GetStartTime()) #(ole2datetime(ISignalRecord.GetStartTime()) - self.recordingStartDateTime).total_seconds()          
@@ -427,7 +476,7 @@ class HarmonieReader(EEGDBReaderBase):
         # TODO: Évaluer la possibilité d'utiliser GetRecordBuffer pour augmenter l'efficacité...
         record = ISignalRecord.GetRecordData()
         for channel in self.labels :
-            nbSamples = int(self.getInfoPages(pageNo).getNbSamples()/self.trueBaseFreq*self.channelFreqs[channel])  
+            nbSamples = int(recInfo.getNbSamples()/self.trueBaseFreq*self.channelFreqs[channel])  
                  
             if channel in signalNames:
                 # Get the number of sample associate to this channel 
@@ -435,8 +484,8 @@ class HarmonieReader(EEGDBReaderBase):
                 
             indS += nbSamples
 
-        # TODO: Should return a "page" object which is common to all reader.
-        return EEGPage(self.channelFreqs, sigStart, recordedSignals, self.recordingStartTime)
+        # TODO: Should return a "record" object which is common to all reader.
+        return EEGRecord(self.channelFreqs, sigStart, recordedSignals, self.recordingStartTime)
      
      
      
@@ -484,7 +533,7 @@ class HarmonieReader(EEGDBReaderBase):
 
     def pickleCompleteRecord(self, signalNames):
 
-        fileName = self.fname + "_readComplete_"
+        fileName = self.fileName + "_readComplete_"
 
         signalNamesToPickle = []
         for signalName in signalNames:
@@ -501,15 +550,15 @@ class HarmonieReader(EEGDBReaderBase):
         # (zeros(80000000).nbytes/1024/1024).
         NbSampleMaxPerReadCompleteCall =  40000000
         NbChannelPerCall = int(NbSampleMaxPerReadCompleteCall/self.nbSamples)
-        Indexes = range(0, len(signalNamesToPickle), NbChannelPerCall)
+        Indexes = list(range(0, len(signalNamesToPickle), NbChannelPerCall))
         if Indexes[-1] < len(signalNamesToPickle):
             Indexes.append(len(signalNamesToPickle))
         for i in range(len(Indexes)-1):   
-            print "Reading form .sig file for " + str(signalNamesToPickle[Indexes[i]:Indexes[i+1]]) + "..."
+            print(("Reading form .sig file for " + str(signalNamesToPickle[Indexes[i]:Indexes[i+1]]) + "..."))
             data = self.readComplete(signalNamesToPickle[Indexes[i]:Indexes[i+1]])
 
             for signalName in data:
-                print "Pickling data of " + signalName + " for next time..."
+                print(("Pickling data of " + signalName + " for next time..."))
                 savemat(fileName + signalName + ".mat", data[signalName])
 
 
@@ -546,17 +595,20 @@ class HarmonieReader(EEGDBReaderBase):
                     returnData[channel].type           = self.channelType[channel]
                     returnData[channel].startTime      = startDateTime   
             else:
+                
                 self.ISignalFile.InitSignalRecord(nbSamples, ISignalRecord)                
                 ISignalRecord.SetStartSample(startSample)  
                 self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)    
                               
 
-            cBuffer = ISignalRecord.GetRecordBuffer()        
-            record = numpy.frombuffer(numpy.core.multiarray.int_asbuffer(ctypes.addressof(cBuffer[0].contents), 8*cBuffer[1]), float) 
+            record = np.array(ISignalRecord.GetRecordData())
+            #cBuffer = ISignalRecord.GetRecordBuffer()        
+            #record = numpy.frombuffer(numpy.core.multiarray.int_asbuffer(ctypes.addressof(cBuffer[0].contents), 8*cBuffer[1]), float) 
             
             indS = 0
             for channel in self.labels :
-                channelNbSample = int(nbSamples/self.trueBaseFreq*self.channelFreqs[channel])  
+
+                channelNbSample = int(np.round(nbSamples/self.trueBaseFreq*self.channelFreqs[channel]))  
                 
                 if channel in signalNames:
                     channelStartSample = int(startSample/self.trueBaseFreq*self.channelFreqs[channel])   
@@ -565,8 +617,11 @@ class HarmonieReader(EEGDBReaderBase):
                         
                 indS += channelNbSample
                 
-            assert(indS ==  len(record))
-
+            try:
+                assert(indS ==  len(record))
+            except AssertionError:
+                print((indS, len(record)))
+                raise
 
 
         return returnData
@@ -588,7 +643,11 @@ class HarmonieReader(EEGDBReaderBase):
         
         i = 0
         for i in range(30):
-            if abs(time - approxTime) <= 0.5/self.trueBaseFreq:
+            # We would normally use 0.5 instead of 0.7 in the if below, but
+            # because Harmonie times are only precise to the ms, we must
+            # be more lenient to accomodate the rather large imprecision 
+            # cause by this.
+            if abs(time - approxTime) <= 0.7/self.trueBaseFreq:
                 break
             
             approxSample += int(round((time - approxTime)*self.trueBaseFreq))     
@@ -619,9 +678,11 @@ class HarmonieReader(EEGDBReaderBase):
     # pour la lecture.
     #def readWithTime(self, signalNames, startTime, timeDuration):
     def read(self, signalNames, startTime, timeDuration):
-                
-        recordNbSample = timeDuration*self.trueBaseFreq
-        ISignalRecord = self.ISignalFile.CreateSignalRecord(int(recordNbSample))
+        
+        recordNbSample = int(np.round(timeDuration*self.trueBaseFreq))
+
+        ISignalRecord = self.ISignalFile.CreateSignalRecord(recordNbSample)
+
         ISignalRecord.SetStartSample(self.getSampleFromTime(startTime))   
         self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
 
@@ -632,9 +693,10 @@ class HarmonieReader(EEGDBReaderBase):
         npBuffer = numpy.core.multiarray.int_asbuffer(ctypes.addressof(cBuffer[0].contents), 8*cBuffer[1])
         record = numpy.frombuffer(npBuffer, float)
         
-        startDateTime = ole2datetime(ISignalRecord.GetStartTime()) #.strftime("%a, %d %b %Y %H:%M:%S +0000")      
+        startDateTime = ole2datetime(ISignalRecord.GetStartTime()) #.strftime("%a, %d %b %Y %H:%M:%S +0000")   
+
         for channel in self.labels:
-            nbSamples = self.channelFreqs[channel]*timeDuration       
+            nbSamples = int(np.round(self.channelFreqs[channel]*timeDuration))
             if channel in signalNames:   
                 returnData[channel]                = RecordedChannel()                
                 returnData[channel].signal         = array(record[indS:int(indS+nbSamples)])
@@ -642,7 +704,7 @@ class HarmonieReader(EEGDBReaderBase):
                 returnData[channel].type           = self.channelType[channel]
                 returnData[channel].startTime      = startDateTime                   
                 
-            indS += int(nbSamples)
+            indS += nbSamples
 
         return returnData 
 
@@ -651,30 +713,60 @@ class HarmonieReader(EEGDBReaderBase):
 
 
 
-    def getChannelTime(self, channel) :
-        if not (isinstance(channel, str) or isinstance(channel, unicode)):
-            print type(channel)
+    def getChannelTime(self, channel, startTime=0.0, timeDuration=np.inf) :
+        if not (isinstance(channel, str) or isinstance(channel, str)):
+            print((type(channel)))
             raise TypeError        
         
+        freq = self.getChannelFreq(channel)
+        if startTime != 0.0:
+            startTime = float(self.getSampleFromTime(startTime))/freq  
+            
+        # We remove  0.1/freq to be sure that when we call arange(start, end, 1.0/freq)
+        # we dont get the last point at ~end because it is not numerically an exact
+        # multiplier of frec but just a bit larger        
+        if timeDuration != np.inf:
+            timeDuration = int(np.round(timeDuration*freq))/freq - 0.1/freq
+        endTime = startTime + timeDuration  
+
         #if not channel in self.getChannelLabels() :
         #    raise 
 
-        discontinuityEvent = [e for e in self.events if e.groupName == "Discontinuity" or
-                                                        e.groupName == "Recording Start"]      
-                                                        
+        discontinuityEvent = [e for e in self.events if e.groupName in ["Discontinuity", "Discontinuit\xe9",
+                                                                        "Recording Start", "D\xe9marrage de l'enreg."]]                                                   
         discontinuitySample = array([e.startSample for e in discontinuityEvent])                                                          
         # These sample are in base frequency. We must convert them in channel frequency.
         discontinuitySample = discontinuitySample*self.channelFreqs[channel]/self.trueBaseFreq 
-                                                        
+        
         sampleTransitions = concatenate((discontinuitySample, [self.getNbSample(channel)]))
+        
+        if len(sampleTransitions) <= 2:
+            nbSamples = self.getNbSample(channel)
+            freq = self.getChannelFreq(channel)
+            return arange(startTime, min(nbSamples/freq, endTime+1.0/freq), 1.0/freq)
+        else:
+            time = []
+            
+            for i in range(len(sampleTransitions)-1):
+                nbSamples = sampleTransitions[i+1] - sampleTransitions[i]
+                start = discontinuityEvent[i].startTime
+                end   = start + nbSamples/freq
+                if start > endTime:
+                    return time
+                if end < startTime:
+                    continue                                        
+                if end > endTime:
+                    end = endTime
+                if start < startTime:
+                    start = startTime                    
+                time = concatenate((time,  arange(start, end, 1.0/freq)))       
+            return time
 
-        time = []
-        samplingRate = self.getChannelFreq(channel)
-        for i in range(len(sampleTransitions)-1):
-            nbSamples = sampleTransitions[i+1] - sampleTransitions[i]
-            time = concatenate((time, discontinuityEvent[i].startTime + arange(nbSamples)/samplingRate))       
 
-        return time
+
+
+
+
 
 
     # Patch parce qu'il semble y avoir un problème avec le temps associé
@@ -715,14 +807,17 @@ class HarmonieReader(EEGDBReaderBase):
 
 
 
-    def getNbPages(self):
-        return len(self.getInfoPages())
+    def getNbRecords(self):
+        return len(self.recordsInfo)
 
 
 
-    def saveAsEDF(self, fileName=None, fileType = "EDF", isSplitted=True, 
-                       annotationFileName=None, channelList=None,
-                       basePath=None, annotationBasePath=None, verbose=True):
+    def saveAsEDF(self, fileName=None, fileType = "EDF+", isSplitted=True, 
+                       annotationFileName=None, channelList=None, 
+                       annotationSuffixe="Annotations", psgSuffixe="PSG",
+                       basePath=None, annotationBasePath=None, 
+                       verbose=None, contiguous=False, 
+                       recordStart=0, recordEnd=None, useIntegers=True):
         
         """
          Convert and save the .sig/.sts files in EDF/BDF format. 
@@ -733,9 +828,9 @@ class HarmonieReader(EEGDBReaderBase):
          reformatting the whole data file. In these case, it can be more interesting
          to split the original data and the annotations in two separate files. 
          
-         We suggest to always use the same name for both files, except for a 
-         supplementary "a" (for annotation) at the end of the extension of the 
-         annotation file (e.g. aFile.bdf/aFile.bdfa or someFile.edf/someFile.edfa).
+         We suggest to always use the same name steam for both files, adding only
+         a space separated "PSG" or "Annotations" sufixes  
+         (e.g. someFile PSG.edf/someFile Annotations.edf).
          Nevertheless, this class provide the option of using an arbitrary name 
          for the annotation file.
     
@@ -743,7 +838,7 @@ class HarmonieReader(EEGDBReaderBase):
          data file specified by fname is a splitted data/annotation set of files or
          a single file. If isSplitted == True, the annotationFileName
          parameter will specify the name of the annotation file.
-         If not specified, fname + "a" will be used.
+         If not specified, fname[-4] + " Annotations" + fname[-4:] will be used.
          If isSplitted == False, no supplementary annotation file is considered
          regardless of the value of annotationFileName.
          
@@ -757,12 +852,29 @@ class HarmonieReader(EEGDBReaderBase):
                       
          basePath   : If different than None, record the in this path. Else,
                       use the same path as the source file or as in fileName. 
-        """        
+                      
+         useIntegers: Harmonie works with precise float sampling frequency. This
+                       cause a lot of problems to many EDF reader which expect
+                       integer values for record duration, sampling frequency,
+                       and so on. Be setting this parameter to True, the 
+                       reader will approximate the non integer sampling frequency
+                       (e.g., 256.01223456) by an integer frequency (e.g., 256).
+        """    
+        if verbose is None:
+            verbose = self.verbose
+
+        returnOutput = {}
 
         if fileName is None:
+            fileSteam = ".".join(self.fileName.split(".")[:-1])
             # Use the same name as the source name, chnaging the extension.
-            fileName = ".".join(self.fileName.split(".")[:-1] + [fileType.lower()])
-  
+            if isSplitted:
+                    fileName = fileSteam + " " + psgSuffixe + "." + fileType[:3].lower()
+                    
+            else:
+                fileName = fileSteam + "." + fileType[:3].lower()
+        else:
+            fileSteam = ".".join(fileName.split(".")[:-1])
             
         if not basePath is None:
             fileName = os.path.join(basePath, os.path.basename(fileName))
@@ -770,18 +882,63 @@ class HarmonieReader(EEGDBReaderBase):
 
         if isSplitted:        
             if annotationFileName is None:
-                annotationFileName = fileName + "a"  
-                
+                annotationFileName = fileSteam + " " + annotationSuffixe + "." + fileType[:3].lower()            
+                if not basePath is None:
+                    annotationFileName = os.path.join(basePath, os.path.basename(annotationFileName))
+                    
             if not annotationBasePath is None:
                 annotationFileName = os.path.join(annotationBasePath, os.path.basename(annotationFileName))                
         
-
         
+        returnOutput["fileName"] = fileName        
+        returnOutput["annotationFileName"] = annotationFileName        
+        
+        """
+         By default, every records are used in the conversion, but this behavior
+         can be overide by specifying recordStart and recordEnd values. 
+        """
+        if recordEnd is None:
+            if recordStart == 0:
+                completeFile = True
+            else:
+                completeFile = False                    
+            recordEnd = self.getNbRecords()
+        else:
+            completeFile = False            
+        
+        if recordStart:
+            ISignalRecord = self.ISignalFile.CreateSignalRecord(RECORD_NB)   
+            ISignalRecord.SetStartSample(self.recordsInfo[recordStart].startSample)
+            self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)         
+            recordingStartTime = ole2datetime(ISignalRecord.GetStartTime()) 
+        else:
+            recordingStartTime = self.recordingStartTime
 
+        recordsInfo = self.recordsInfo[recordStart:(recordEnd+1)]
+
+        #print "start, end, ", recordStart, recordEnd        
+        
+        
+        if useIntegers:
+            # Duration of stage events should always be an integer value 
+            # (typically 20 or 30 seconds). Harmonie will return a float duration
+            # of type 19.99999826160749. To avoid problems with edf reader, this
+            # value is rounded.            
+            for e in self.events:
+                if e.groupName == "stage" :
+                    e.timeLength = np.round(e.timeLength)
+                
+            self.timeFactor = np.round(self.recordDuration)/self.recordDuration
         
         #######################################################################
         # Internal methods
         #######################################################################        
+        
+        def adjustTime(time):
+            if useIntegers:
+                return time*self.timeFactor
+            else:
+                return time
         
         def subjectFields(field):
             return field if field else "X"
@@ -794,12 +951,32 @@ class HarmonieReader(EEGDBReaderBase):
             return "%02d-%s-%04d" % (OLEdate.day, month[OLEdate.month], OLEdate.year)
         
 
-        def prepareEventStr(timeDiff, events):
-            # Annotation channel            
-            timeKeepingStr = "+" + str(timeDiff) + "\x14\x14\0"       
+        def prepareEventStr(noRecord, events):
+            
+            baseTime = recordsInfo[noRecord].startTime
+
+            if contiguous:
+                if useIntegers:
+                    offsetTime = noRecord*np.round(self.recordDuration)
+                else:
+                    offsetTime = noRecord*self.recordDuration
+            else:
+                offsetTime = adjustTime(baseTime - recordsInfo[0].startTime)   
+                # The rounding is necessary to avoid overlaping errors because
+                # of numerical imprecision.
+                offsetTime = np.round(offsetTime, 2)
+            
+            # Annotation channel    
+
+            timeKeepingStr = "+" + str(offsetTime) + "\x14\x14\0"                                 
+                            
                             
             for event in events:
-                timeKeepingStr += event.toEDFStr() #edfEventEncode(event)  
+                copiedEvent  = deepcopy(event)
+                copiedEvent.startTime = adjustTime(event.startTime - baseTime) + offsetTime
+                #print copiedEvent.startTime , event.startTime, baseTime, offsetTime
+                if copiedEvent.startTime >= 0.0:
+                    timeKeepingStr += copiedEvent.toEDFStr() #edfEventEncode(event)  
 
             return timeKeepingStr
  
@@ -808,78 +985,48 @@ class HarmonieReader(EEGDBReaderBase):
         # Encoding events
         #######################################################################
  
-        # Encoding events such that events are writen in their respective page.
-        # This has the disaventage to use a lot of space (each pages have
+        # Encoding events such that events are writen in their respective record.
+        # This has the disaventage to use a lot of space (each records have
         # is reserved enough space to record as much annotation as the 
-        # page with the most annotation) but to make complete data records.
+        # record with the most annotation) but to make complete data records.
         if verbose:
-            print "Encoding events..."
-
-        ISignalRecord = self.ISignalFile.CreateSignalRecord(RECORD_NB)   
-        for page in self.getInfoPages():
-              
-            if self.getNbSample() - page.startSample >= RECORD_NB: 
-                start = page.startSample
-                ISignalRecord.SetStartSample(page.startSample)
-            else:
-                start = self.getNbSample() - RECORD_NB
-                ISignalRecord.SetStartSample(self.getNbSample() - RECORD_NB)
-
-            # This function call is the bottle neck of this section.
-            try:             
-                self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
-            except:
-                print "error: ", self.getNbSample(), start
-                raise
-
-            # Annotation channel            
-            page.startTime = (ole2datetime(ISignalRecord.GetStartTime()) - self.recordingStartTime).total_seconds()         
-
-            
-            # This function call is the bottle neck of this section.
-            self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
-
-            # Annotation channel            
-            page.startTime = (ole2datetime(ISignalRecord.GetStartTime()) - self.recordingStartTime).total_seconds()         
-
-            if self.getNbSample() - page.startSample < RECORD_NB: 
-               page.startTime += (page.startSample - (self.getNbSample() - RECORD_NB))/self.trueBaseFreq            
+            print("Encoding events...")
 
 
+        limitTimes = [rec.startTime for rec in recordsInfo]
+        limitTimes.append(recordsInfo[-1].startTime + recordsInfo[-1].duration)
+
+        nbEvents = 0      
+        for noRecord in range(len(recordsInfo)):                
+            try:
+                indMin = self.events.getIndexMinStartTime(limitTimes[noRecord])
+            except ValueError:
+                indMin = len(self.events)
+
+            try:
+                indMax = self.events.getIndexMaxStartTime(limitTimes[noRecord+1], inclusive=False)
+            except ValueError:
+                # This exception is trigered when there is no events starting 
+                # before startTime such that no corresponding index can be returned.                 
+                indMax = 0
 
 
-        startTime = self.getInfoPages()[1].startTime
-        indMax = max(0, min(len(self.events)-1, self.events.getIndexMaxStartTime(startTime, inclusive=False)))     
-        #filteredEvents = filter(lambda e: e.startTime < self.getInfoPages()[1].startTime, self.events)    
-        filteredEvents = self.events[:(indMax+1)]
-        self.getInfoPages()[0].eventStr = prepareEventStr(self.getInfoPages()[0].startTime, filteredEvents)
-        nbEvents = len(filteredEvents)  
-        #print 0, indMax, len(filteredEvents), startTime,  [e.startTime for e in filteredEvents]  
-            
-        for nopage in range(1, len(self.getInfoPages())-1):
-
-            indMax = min(len(self.events)-1, self.events.getIndexMaxStartTime(self.getInfoPages()[nopage+1].startTime, inclusive=False))   
-            indMin = max(0, self.events.getIndexMinStartTime(self.getInfoPages()[nopage].startTime))
-            
             filteredEvents = self.events[indMin:(indMax+1)]          
-            #filteredEvents = filter(lambda e: e.startTime <  self.getInfoPages()[nopage+1].startTime and 
-            #                                  e.startTime >= self.getInfoPages()[nopage].startTime, self.events)   
-            startTime = self.getInfoPages()[nopage].startTime
-            self.getInfoPages()[nopage].eventStr = prepareEventStr(startTime, filteredEvents)                                           
+            recordsInfo[noRecord].eventStr = prepareEventStr(noRecord, filteredEvents)                                           
             nbEvents += len(filteredEvents)  
-            #print indMin, indMax, len(filteredEvents) , startTime,  [e.startTime for e in filteredEvents]  
-            
-        startTime = self.getInfoPages()[len(self.getInfoPages())-1].startTime
-        indMin = max(0, self.events.getIndexMinStartTime(startTime))
-        filteredEvents = self.events[indMin:]        
-        #filteredEvents = filter(lambda e: e.startTime >= self.getInfoPages()[len(self.getInfoPages())-1].startTime, self.events)     
-        self.getInfoPages()[len(self.getInfoPages())-1].eventStr = prepareEventStr(self.getInfoPages()[len(self.getInfoPages())-1].startTime, filteredEvents)        
-        nbEvents += len(filteredEvents)  
-        #print indMin, len(self.events)-1, len(filteredEvents), startTime,  [e.startTime for e in filteredEvents]         
-        
-        #print "res:", nbEvents, len(self.events)
-        assert(nbEvents == len(self.events))            
-            
+
+
+        ### Only a part of the sig file can be saved. In these cases, only the  
+        ### events in the saved part will be saved in the EDF file. This number
+        ### can be smaller than the total number of event in the sig file.
+        try:
+            if completeFile:
+                assert(nbEvents == len(self.events))  
+            else:
+                assert(nbEvents <= len(self.events))         
+        except AssertionError:
+            print((nbEvents, len(self.events))) 
+            raise
 
 
 
@@ -891,34 +1038,57 @@ class HarmonieReader(EEGDBReaderBase):
 
         dataHeader = EDFHeader()       
 
-        dataHeader.fileType = fileType
-        dataHeader.contiguous = False
 
         id      = subjectFields(self.patientInfo["Id1"])
         gender  = "M" if self.patientInfo["gender"] == 1 else "F"
         date    = dateStr(ole2datetime(self.patientInfo["birthDate"])) if self.patientInfo["birthDate"] else "X"     
-        fname   =  subjectFields(self.patientInfo["firstName"]).encode("ascii", "ignore")
-        lname   = subjectFields(self.patientInfo["lastName"]).encode("ascii", "ignore")            
+        fname   =  subjectFields(self.patientInfo["firstName"]) #.encode("ascii", "ignore")
+        lname   = subjectFields(self.patientInfo["lastName"]) #.encode("ascii", "ignore")  
+
         dataHeader.subjectID = id + " " + gender + " " +  date + " " + fname + "_" + lname   
         
-        startdate    = dateStr(self.recordingStartTime) if self.recordingStartTime else "X"                     
+        startdate    = dateStr(recordingStartTime) if recordingStartTime else "X"                     
         dataHeader.recordingIR = "Startdate " + startdate + " " + "X" + " " + "X" + " " + "X"  
 
-        dataHeader.startDateTime = self.recordingStartTime
+        dataHeader.startDateTime = recordingStartTime #+ timedelta(0, recordsInfo[0].startTime)
             
-        if channelList is None:
-            acceptedChannels = self.getChannelLabels()   
-        else:
-            acceptedChannels = [channel for channel in self.getChannelLabels() if channel in channelList]            
-            
-            
-        ns = len(acceptedChannels)
+        # Building the channel labels for EDF recording
+        harmonieLabels = {}
+        EDFLabels = []
+        for channel in self.getChannelLabels():
+            if channelList is None or channel in channelList:
+                if self.channelType[channel] in channelTypes:
+                    if channelTypes[self.channelType[channel]] in ["EEG", "EMG", "EOG", "ECG"] :
+                        prefix = channelTypes[self.channelType[channel]] + " "
+                    elif channelTypes[self.channelType[channel]] == "MIC":
+                        prefix = "Sound "
+                    elif channelTypes[self.channelType[channel]] == "RSP":
+                        prefix = "Resp "
+                    else:
+                        raise ValueError("Unmanaged channel type.")
+                else:
+                    prefix = ""
+                    
+                harmonieLabels[prefix + channel] = channel
+                EDFLabels.append(prefix + channel)
+
+        ns = len(EDFLabels)
         dataHeader.headerNbBytes      = 8 + 80 + 80 + 8 + 8 + 8 + 44 + 8 + 8 + 4 + (ns+1)* (16 + 80+ 8 + 8 + 8 + 8 + 8 + 80 + 8 + 32) 
-        dataHeader.nbRecords          = self.getNbPages()
-        dataHeader.recordDuration     = self.pageDuration
+        dataHeader.nbRecords          = len(recordsInfo)
+        
+        # We need to truncate the record duration to the ms because the starting
+        # of the records extracted from Harmony seems truncated to the ms. If not
+        # truncating the recordDuration, this results in sub-millisecond overlapping
+        # of records wich cause problems when reading the EDF with some readers.
+        if useIntegers:
+            dataHeader.recordDuration     = np.round(self.recordDuration)
+        else:
+            dataHeader.recordDuration     = self.recordDuration #float(str(self.recordDuration)[:len('%.*f' % (3, self.recordDuration))])
+            
         dataHeader.nbChannels         = ns +1
         
-        dataHeader.channelLabels      = acceptedChannels + ["EDF Annotations"]        
+        dataHeader.channelLabels      = EDFLabels + ["EDF Annotations"]        
+        harmonieLabels["EDF Annotations"]   = "EDF Annotations"        
         
         dataHeader.transducerType     = {}
         dataHeader.prefiltering       = {} 
@@ -935,16 +1105,20 @@ class HarmonieReader(EEGDBReaderBase):
         digitalMin = {}
         digitalMax = {}
         
-        if fileType == "EDF":
-            nbByte = 2
+        dataHeader.contiguous = contiguous
+        dataHeader.fileType = fileType
+        if fileType[:3] == "EDF":
+            nbByte = 2        
         elif fileType == "BDF":
             nbByte = 3
+        else:
+            raise ValueError("The fileType argument has an invalid value: " + fileType)
 
-        annotationFieldLength = int(max(400, max(array([len(page.eventStr) for page in self.getInfoPages()]))/nbByte*1.2))             
+        annotationFieldLength = int(max(400, max(array([len(record.eventStr) for record in recordsInfo]))/nbByte*1.2))             
         
-        for i, channel in enumerate(dataHeader.channelLabels) :   
+        for i, channel in enumerate(EDFLabels + ["EDF Annotations"]) :   
             
-            if fileType == "EDF":
+            if fileType[:3] == "EDF":
                 digitalMin[channel] = -32768
                 digitalMax[channel] =  32767
             elif fileType == "BDF":
@@ -964,7 +1138,7 @@ class HarmonieReader(EEGDBReaderBase):
                 dataHeader.digitalMin[channel]  = -32768    
                 dataHeader.digitalMax[channel]  = 32767  
                 if isSplitted:
-                    dataHeader.nbSamplesPerRecord[channel] = 10
+                    dataHeader.nbSamplesPerRecord[channel] = 15
                 else:
                     dataHeader.nbSamplesPerRecord[channel] = annotationFieldLength
             else:
@@ -977,7 +1151,7 @@ class HarmonieReader(EEGDBReaderBase):
                 dataHeader.physicalMax[channel]         = physicalMaxMicro[channel]
                 dataHeader.digitalMin[channel]          = digitalMin[channel]
                 dataHeader.digitalMax[channel]          = digitalMax[channel]
-                dataHeader.nbSamplesPerRecord[channel]  = self.pageNbSamples[channel]
+                dataHeader.nbSamplesPerRecord[channel]  = self.recordNbSamples[harmonieLabels[channel]]
 
 
 
@@ -1003,19 +1177,20 @@ class HarmonieReader(EEGDBReaderBase):
             annotationHeader.digitalMax         = {"EDF Annotations":32767}         
             annotationHeader.nbSamplesPerRecord = {"EDF Annotations":annotationFieldLength} 
             
+                      
             with io.open(annotationFileName, 'wb') as f:    
                 
                 if verbose:
-                    print "Writing annotation file header..."
+                    print("Writing annotation file header...")
                 
                 annotationHeader.write(f)
 
                 if verbose:
-                    print "Writing annotation file body..."
+                    print("Writing annotation file body...")
         
-                for nopage, page in enumerate(self.getInfoPages()):            
-                    encodedPageStr = page.eventStr.encode("utf8")
-                    f.write(encodedPageStr +  "\0"*(annotationFieldLength*nbByte-len(encodedPageStr)))         
+                for noRecord, record in enumerate(recordsInfo):            
+                    encodedRecordStr = record.eventStr.encode("latin-1")
+                    f.write(encodedRecordStr +  b"\0"*(annotationFieldLength*nbByte-len(encodedRecordStr)))         
 
                
        
@@ -1032,58 +1207,68 @@ class HarmonieReader(EEGDBReaderBase):
 
 
             if verbose:
-                print "Writing data file header..."
+                print("Writing data file header...")
             dataHeader.write(f)
 
 
 
             if verbose:
-                print "Writing date file body..."
+                print("Writing date file body...")
                         
             ISignalRecord = self.ISignalFile.CreateSignalRecord(RECORD_NB) 
-            for nopage, page in enumerate(self.getInfoPages()):    
-                self.ISignalFile.InitSignalRecord(page.getNbSamples(), ISignalRecord) 
-                
-                ISignalRecord.SetStartSample(page.startSample)
+
+            for noRecord, record in enumerate(recordsInfo):    
+                self.ISignalFile.InitSignalRecord(record.getNbSamples(), ISignalRecord) 
+
+                ISignalRecord.SetStartSample(record.startSample)
 
                 # This function call is the bottle neck of this section.
                 self.ISignalFile.Read(ISignalRecord, SIGNALFILE_FLAGS_CALIBRATE)
 
-                cBuffer = ISignalRecord.GetRecordBuffer()        
-                record = numpy.frombuffer(numpy.core.multiarray.int_asbuffer(ctypes.addressof(cBuffer[0].contents), 8*cBuffer[1]), float) 
-                #record = ISignalRecord.GetRecordData()
+                npRecord = np.array(ISignalRecord.GetRecordData())
+                #print(len(npRecord), RECORD_NB)
+                #cBuffer = ISignalRecord.GetRecordBuffer()        
+                #npRecord = numpy.frombuffer(numpy.core.multiarray.int_asbuffer(ctypes.addressof(cBuffer[0].contents), 8*cBuffer[1]), float) 
+
                 # record is in uV
 
-                #print nopage+1, f.tell()
+                #print noRecord+1, f.tell()
                                         
-                indS = 0                
-                for channel in self.labels:
+                indS = 0        
+                for hChannel in self.getChannelLabels():
+                    try:                    
+                        edfChannel = dict((v, k) for (k, v) in list(harmonieLabels.items()))[hChannel] 
+                    except KeyError:
+                        edfChannel = ""
+                        
+                    if edfChannel == 'EDF Annotations':                 
+                        continue
                     
-                    # If this page is discontinuous within the .sig file, only 
+                    # If this record is discontinuous within the .sig file, only 
                     # the part up to the discontinuity is used: the rest of 
                     # this EDF signal is padded with zeros to make it the correct
                     # size of a complete record.                    
-                    if not page.isComplete:
-                        # Get the number of sample associate to the incomplete pages for that channel 
+                    if not record.isComplete:
+                        # Get the number of sample associate to the incomplete records for that channel 
 
-                        channelPageNbSample = int(page.getNbSamples()/self.trueBaseFreq*self.channelFreqs[channel])  
+                        channelRecordNbSample = int(record.getNbSamples()/self.trueBaseFreq*self.channelFreqs[hChannel])  
                         
-                        recordedSignal = append(array(record[indS:(indS+channelPageNbSample)]), 
-                                                zeros(self.pageNbSamples[channel] - channelPageNbSample))
-                        indS += channelPageNbSample
+                        recordedSignal = append(array(npRecord[indS:(indS+channelRecordNbSample)]), 
+                                                zeros(self.recordNbSamples[hChannel] - channelRecordNbSample))
+                        indS += channelRecordNbSample
                         
                     else:
-                        recordedSignal = array(record[indS:(indS+self.pageNbSamples[channel])])
-                        indS += self.pageNbSamples[channel]
+                        recordedSignal = array(npRecord[indS:(indS+self.recordNbSamples[hChannel])])
+                        indS += self.recordNbSamples[hChannel]
                     
 
-                    if channel in acceptedChannels:
-                                            
+                    if edfChannel in EDFLabels:
+                                       
                         # WRITE RECORDED SIGNAL....
-                        physical_min = physicalMinMicro[channel] 
-                        physical_max = physicalMaxMicro[channel] 
-                        digital_min  = digitalMin[channel] 
-                        digital_max  = digitalMax[channel] 
+                        physical_min = physicalMinMicro[edfChannel] 
+                        physical_max = physicalMaxMicro[edfChannel] 
+                        digital_min  = digitalMin[edfChannel] 
+                        digital_max  = digitalMax[edfChannel] 
     
                         phys_range = physical_max - physical_min
                         dig_range = digital_max - digital_min
@@ -1099,24 +1284,27 @@ class HarmonieReader(EEGDBReaderBase):
                             # Writing in a string of 32-bit integers and removing every fourth byte
                             # to obtain a string of 24-bit integers
                             recordedSignal = recordedSignal.astype('<i').tostring()
-                            recordedSignal = "".join([recordedSignal[noBit] for noBit in range(len(recordedSignal)) if (noBit+1)%4])
+                            recordedSignal = bytes([recordedSignal[noBit] for noBit in range(len(recordedSignal)) if (noBit+1)%4])
+                            # print(len(recordedSignal), self.recordNbSamples[hChannel], len(recordedSignal))
                             f.write(recordedSignal)
                                                     
                
                 
                 # Annotation channel            
                 if isSplitted:
-                     eventStr = page.eventStr.split("\x14\x14\0")[0] + "\x14\x14\0"
+                     eventStr = record.eventStr.split("\x14\x14\0")[0] + "\x14\x14\0"
                 else:
-                     eventStr = page.eventStr
+                     eventStr = record.eventStr
                      
-                encodedPageStr = eventStr.encode("utf8")
-                f.write(encodedPageStr +  "\0"*(dataHeader.nbSamplesPerRecord["EDF Annotations"]*nbByte-len(encodedPageStr)))         
+                encodedRecordStr = eventStr.encode("latin-1")
+    
+                f.write(encodedRecordStr +  b"\x00"*(dataHeader.nbSamplesPerRecord["EDF Annotations"]*nbByte-len(encodedRecordStr)))         
 
                 if verbose:
-                    done=float(nopage)/len(self.getInfoPages())*100.0
+                    done=float(noRecord)/len(recordsInfo)*100.0
                     stdout.write(" Body writing percentage: %s%%      %s"%(done,"\r"))
                     stdout.flush()
         
-
+        
+        return returnOutput
 

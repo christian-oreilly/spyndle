@@ -149,7 +149,7 @@ def getElectCircleProp(nameElect):
             transform = pathNode.getAttribute("transform")
             return cx, cy, rx, ry, transform
 
-    print "Electrode " + nameElect + " not found in eeg_electrodes_10-20.svg."
+    print(("Electrode " + nameElect + " not found in eeg_electrodes_10-20.svg."))
     raise KeyError
     
 
