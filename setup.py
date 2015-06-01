@@ -1,15 +1,17 @@
-from setuptools import setup
+from distutils.core import setup, Extension
 import os
+from Cython.Build import cythonize
+import numpy
 
 PACKAGE = "spyndle"
 NAME = "spyndle"
 DESCRIPTION = "Toolbox for analyzing sleep spindles."
 AUTHOR = "Christian O'Reilly"
 AUTHOR_EMAIL = "christian.oreilly@umontreal.ca"
-VERSION = __import__(PACKAGE).__version__
+VERSION = "0.4.0" #__import__(PACKAGE).__version__
 URL = "https://bitbucket.org/christian_oreilly/spyndle/"
 DOWNLOAD_URL = URL + "downloads/" + NAME + "-" + VERSION + ".zip"
-
+extensions = ["spyndle/io/*.pyx", "spyndle/miscellaneous/*.pyx"]
 
 def is_package(path):
     return (
@@ -44,6 +46,8 @@ setup(
     version=VERSION,
     description=DESCRIPTION,
     long_description=open("README.txt").read(),
+    ext_modules=cythonize(extensions),
+    include_dirs=[numpy.get_include()],
     author=AUTHOR,
     author_email=AUTHOR_EMAIL,
     maintainer=AUTHOR,
@@ -61,7 +65,7 @@ setup(
 			"License :: Free for non-commercial use",
 			"License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
 			"Natural Language :: English",
-			"Programming Language :: Python :: 2.7",
+			"Programming Language :: Python :: 3.4",
 			"Topic :: Scientific/Engineering"])
 	
 	
