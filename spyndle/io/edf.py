@@ -102,7 +102,7 @@ def tal(tal_str):
 
   def parse(dic):
     return (
-      float(dic['onset']), 
+      round(float(dic['onset']), 6), 
       float(dic['duration']) if dic['duration'] else 0.,
       annotation_to_list(dic['annotation']))
 
@@ -123,10 +123,10 @@ class EDFEvent(Event):
 
         self.properties  = {}
         # XML event
-        self.label = talEvent[2]
-        if talEvent[2][:6] == "<Event" :
+        self.label = talEvent[2].decode('latin-1')
+        if self.label[:6] == "<Event" :
             try:
-                root = etree.fromstring(talEvent[2])
+                root = etree.fromstring(self.label)
                 for name, value in sorted(root.items()):
                     if not isinstance(name, str):
                         if isinstance(name, str):  
@@ -153,10 +153,10 @@ class EDFEvent(Event):
                     else :
                         self.properties[name] = value                    
             except:
-                print((talEvent[2]))
+                print(( self.label))
                 raise
         else:
-            self.name = talEvent[2].decode('latin-1')
+            self.name =  self.label
             if ( self.name == "Sleep stage 1" or self.name == "Sleep stage 2" or
                  self.name == "Sleep stage 3" or self.name == "Sleep stage 4" or
                  self.name == "Sleep stage R" or self.name == "Sleep stage W" or
@@ -164,6 +164,8 @@ class EDFEvent(Event):
                
                
                self.groupName = "Stage"
+            else:
+                raise(ValueError("Unrecognized event format (" + self.label + ")."))
 
 
     def initFromData_sample(self, reader, startSample, 
@@ -1333,11 +1335,12 @@ class EDFBaseReader(EEGDBReaderBase) :
         endTime = startTime + timeDuration
         nbSamples = float(self.header.nbSamplesPerRecord[channel])
         recordTime = arange(nbSamples)/self.getChannelFreq(channel)
+        recordDuration = nbSamples/self.getChannelFreq(channel)
         
         recs = self.recordsInfo
         
         if not startTime is 0:
-            recs = [r for r in recs if startTime <=  r.startTime + recordTime[-1]]    
+            recs = [r for r in recs if startTime <=  r.startTime + recordDuration]     
             
         if not endTime is np.inf:
             recs = [r for r in recs if endTime >=  r.startTime]       
@@ -1539,14 +1542,20 @@ class EDFBaseReader(EEGDBReaderBase) :
         records = []
         for noRecord, startTimeEvent in enumerate(self.recordsInfo):
             recordStartTime = startTimeEvent.startTime
-            recordDuration  = startTimeEvent.duration
+            recordDuration  = startTimeEvent.duration            
+
+
+            if recordStartTime > startTime + timeDuration:    
+                break
             
             if recordStartTime + recordDuration >= startTime:
                 records.append(self.readRecord(signalNames, noRecord+1))
-            
-            if recordStartTime >= startTime + timeDuration:    
-                break
-
+                #try:
+                #    assert(records[-1].getStartTime() == recordStartTime)
+                #except AssertionError:
+                #    print(records[-1].getStartTime(), recordStartTime)
+                #    raise
+    
             # Caution: The records need to be in order.
 
         assert(len(records)>0)
@@ -1556,8 +1565,9 @@ class EDFBaseReader(EEGDBReaderBase) :
         time    = {}                    
         for channel in signalNames:
             signals[channel] = concatenate([rec.recordedSignals[channel] for rec in records])
-            time[channel]    = concatenate([rec.getStartTime() + arange(len(rec.recordedSignals[channel]))/rec.samplingRates[channel]
-                                            for rec in records])    
+            time[channel]    = concatenate([rec.getStartTime() + arange(len(rec.recordedSignals[channel]))/self.getChannelFreq(channel)
+                                                                        for rec in records])
+                                                
                 
         info.time = time            
         info.recordedSignals = signals            
@@ -1694,7 +1704,7 @@ class EDFBaseReader(EEGDBReaderBase) :
         for channel in rawRecord:
             if channel == EVENT_CHANNEL:
                 ann = tal(rawRecord[channel])
-                time = self.header.startDateTime + datetime.timedelta(0,ann[0][0]) 
+                time = self.header.startDateTime + datetime.timedelta(0,ann[0][0])
                 events.extend(ann[1:])
             elif channel == REFORMAT_CHANNEL:
                 signals[channel] = rawRecord[channel]
