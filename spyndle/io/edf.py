@@ -381,11 +381,11 @@ class IntDict(dict):
 class EDFHeader :
     # BDF is a 24-bit version of the 16-bit EDF format, so we read it with the
     # the same reader
-    def __init__(self, f=None, fileName=None):
+    def __init__(self, f=None, fileName=None, eventChannel=EVENT_CHANNEL):
         if not f is None and not fileName is None:
             self.read(f, fileName)
             self.fileName = fileName
-        
+            self.eventChannel = eventChannel
 
     def anonymize(self):         
         self.subjectID = "X X X X"
@@ -696,16 +696,16 @@ class EDFHeader :
             self.nbSamplesPerRecord[channel]    = expressionMng.nbSamplesPerRecord(channel)     
 
 
-        self.channelLabels.extend([EVENT_CHANNEL, REFORMAT_CHANNEL])
+        self.channelLabels.extend([self.eventChannel, REFORMAT_CHANNEL])
 
-        self.transducerType[EVENT_CHANNEL]        = ""
-        self.prefiltering[EVENT_CHANNEL]          = ""   
-        self.units[EVENT_CHANNEL]                 = "" 
-        self.physicalMin[EVENT_CHANNEL]           = -1
-        self.physicalMax[EVENT_CHANNEL]           =  1
-        self.digitalMin[EVENT_CHANNEL]            = -32768
-        self.digitalMax[EVENT_CHANNEL]            =  32767
-        self.nbSamplesPerRecord[EVENT_CHANNEL]    = 400
+        self.transducerType[self.eventChannel]        = ""
+        self.prefiltering[self.eventChannel]          = ""   
+        self.units[self.eventChannel]                 = "" 
+        self.physicalMin[self.eventChannel]           = -1
+        self.physicalMax[self.eventChannel]           =  1
+        self.digitalMin[self.eventChannel]            = -32768
+        self.digitalMax[self.eventChannel]            =  32767
+        self.nbSamplesPerRecord[self.eventChannel]    = 400
 
 
         # We store in a new signal the reformattedChannels dict for reference.
@@ -765,16 +765,16 @@ class EDFHeader :
                 self.nbSamplesPerRecord[newChannelKey]    = originalHeader.nbSamplesPerRecord[originalChannelLabel]     
                 self.gain[newChannelKey]                  = originalHeader.gain[originalChannelLabel]  
 
-        self.channelLabels.append(EVENT_CHANNEL)
+        self.channelLabels.append(self.eventChannel)
 
-        self.transducerType[EVENT_CHANNEL]        = ""
-        self.prefiltering[EVENT_CHANNEL]          = ""   
-        self.units[EVENT_CHANNEL]                 = "" 
-        self.physicalMin[EVENT_CHANNEL]           = -1
-        self.physicalMax[EVENT_CHANNEL]           =  1
-        self.digitalMin[EVENT_CHANNEL]            = -32768
-        self.digitalMax[EVENT_CHANNEL]            =  32767
-        self.nbSamplesPerRecord[EVENT_CHANNEL]    = originalHeader.nbSamplesPerRecord[EVENT_CHANNEL]
+        self.transducerType[self.eventChannel]        = ""
+        self.prefiltering[self.eventChannel]          = ""   
+        self.units[self.eventChannel]                 = "" 
+        self.physicalMin[self.eventChannel]           = -1
+        self.physicalMax[self.eventChannel]           =  1
+        self.digitalMin[self.eventChannel]            = -32768
+        self.digitalMax[self.eventChannel]            =  32767
+        self.nbSamplesPerRecord[self.eventChannel]    = originalHeader.nbSamplesPerRecord[self.eventChannel]
 
         self.nbChannels         = len(self.channelLabels)
 
@@ -787,8 +787,9 @@ class EDFHeader :
 class EDFBaseReader(EEGDBReaderBase) :
 
     def __init__(self, fileName, isSplitted=None, annotationFileName=None, 
-                 readEventsOnInit=True):        
+                 readEventsOnInit=True, eventChannel=EVENT_CHANNEL):        
         self.fileName = fileName
+        self.eventChannel = eventChannel
         
         with io.open(fileName, 'rb') as fileObj:
             self.header = EDFHeader(fileObj, self.fileName)  
@@ -810,16 +811,16 @@ class EDFBaseReader(EEGDBReaderBase) :
         return self.header.nbRecords          
                 
     def getChannelLabels(self):
-        return [v for v in self.header.channelLabels if not v == EVENT_CHANNEL and not v == REFORMAT_CHANNEL]        
+        return [v for v in self.header.channelLabels if not v == self.eventChannel and not v == REFORMAT_CHANNEL]        
         
         
     def readEvents(self, fileObj):    
         fileObj.seek(self.header.headerNbBytes)        
 
-        #indEventChannel = self.header.label.index(EVENT_CHANNEL)
+        #indEventChannel = self.header.label.index(self.eventChannel)
         for noRecord in range(self.getNbRecords()):            
             rawRecord = self.readRawRecord(fileObj)  
-            tals      = tal(rawRecord[EVENT_CHANNEL])     
+            tals      = tal(rawRecord[self.eventChannel])     
            
             # The first index is the mendatory time keeping event. We record it separately.
             # The time duration of this time keeping event is left blank but we know that records
@@ -854,7 +855,7 @@ class EDFBaseReader(EEGDBReaderBase) :
     
             for noRecord in range(self.getNbRecords()):            
                 rawRecord = self.readRawRecord(fileObj)  
-                tals      = tal(rawRecord[EVENT_CHANNEL])        
+                tals      = tal(rawRecord[self.eventChannel])        
                 
                 for talEvent in tals[1:] : 
                     # One TAL can contain many events wit the same startTime/Duration properties
@@ -893,11 +894,11 @@ class EDFBaseReader(EEGDBReaderBase) :
                 
                 # Verifying if the annotation field is large enough to record the annotations.
                 # If not, enlarge it on the writing copy.
-                nbBytesEvent    = reformattedReader.header.nbSamplesPerRecord[EVENT_CHANNEL]*reformattedReader.header.nbBytes
+                nbBytesEvent    = reformattedReader.header.nbSamplesPerRecord[self.eventChannel]*reformattedReader.header.nbBytes
                 nbBytesReformat = reformattedReader.header.nbSamplesPerRecord[REFORMAT_CHANNEL]*reformattedReader.header.nbBytes
                 if max([len(s) for s in eventStings]) >= nbBytesEvent:       
-                    reformattedReader.header.nbSamplesPerRecord[EVENT_CHANNEL] = int(max([len(s) for s in eventStings])*1.2/reformattedReader.header.nbBytes)
-                    nbBytesEvent    = reformattedReader.header.nbSamplesPerRecord[EVENT_CHANNEL]*reformattedReader.header.nbBytes
+                    reformattedReader.header.nbSamplesPerRecord[self.eventChannel] = int(max([len(s) for s in eventStings])*1.2/reformattedReader.header.nbBytes)
+                    nbBytesEvent    = reformattedReader.header.nbSamplesPerRecord[self.eventChannel]*reformattedReader.header.nbBytes
 
                
                 # Write the header
@@ -910,7 +911,7 @@ class EDFBaseReader(EEGDBReaderBase) :
                     record = self.readRecord(expressionMng.getUsedChannels(), noRecord+1) 
                         
                     for channel in reformattedReader.header.channelLabels:
-                        if channel == EVENT_CHANNEL:    
+                        if channel == self.eventChannel:    
                             encodedString = eventStings[noRecord].encode("latin-1")  
                             fileWrite.write(encodedString + b'\x00'*(nbBytesEvent - len(encodedString)) )  
                         elif channel == REFORMAT_CHANNEL:
@@ -997,10 +998,10 @@ class EDFBaseReader(EEGDBReaderBase) :
                 
                 # Verifying if the annotation field is large enough to record the annotations.
                 # If not, enlarge it on the writing copy.
-                nbBytesEvent    = changedReader.header.nbSamplesPerRecord[EVENT_CHANNEL]*changedReader.header.nbBytes
+                nbBytesEvent    = changedReader.header.nbSamplesPerRecord[self.eventChannel]*changedReader.header.nbBytes
                 if max([len(s) for s in eventStings]) >= nbBytesEvent:       
-                    changedReader.header.nbSamplesPerRecord[EVENT_CHANNEL] = int(max([len(s) for s in eventStings])*1.2/changedReader.header.nbBytes)
-                    nbBytesEvent    = changedReader.header.nbSamplesPerRecord[EVENT_CHANNEL]*changedReader.header.nbBytes
+                    changedReader.header.nbSamplesPerRecord[self.eventChannel] = int(max([len(s) for s in eventStings])*1.2/changedReader.header.nbBytes)
+                    nbBytesEvent    = changedReader.header.nbSamplesPerRecord[self.eventChannel]*changedReader.header.nbBytes
                
                 # Write the header
                 changedReader.header.write(fileWrite)
@@ -1011,7 +1012,7 @@ class EDFBaseReader(EEGDBReaderBase) :
                     record = self.readRawRecord(fileRead)                   
                         
                     for channel in changedReader.header.channelLabels: 
-                        if channel == EVENT_CHANNEL:    
+                        if channel == self.eventChannel:    
                             encodedString = eventStings[noRecord].encode("latin-1")  
                             writeStr = encodedString + b"\x00"*(nbBytesEvent - len(encodedString))
                             assert(len(writeStr) == nbBytesEvent)
@@ -1161,8 +1162,8 @@ class EDFBaseReader(EEGDBReaderBase) :
                 
                 # Verifying if the annotation field is large enough to record the annotations.
                 # If not, enlarge it on the writing copy.
-                if max([len(s) for s in eventStings]) >= self.header.nbSamplesPerRecord[EVENT_CHANNEL]*self.header.nbBytes:       
-                    writeHeader.nbSamplesPerRecord[EVENT_CHANNEL] = int(max([len(s) for s in eventStings])/self.header.nbBytes*1.2)
+                if max([len(s) for s in eventStings]) >= self.header.nbSamplesPerRecord[self.eventChannel]*self.header.nbBytes:       
+                    writeHeader.nbSamplesPerRecord[self.eventChannel] = int(max([len(s) for s in eventStings])/self.header.nbBytes*1.2)
                
                 # Write the header
                 writeHeader.write(fileWrite)
@@ -1181,7 +1182,7 @@ class EDFBaseReader(EEGDBReaderBase) :
                     rawRecord = self.readRawRecord(fileObj)    
                     if noRecord in noRecords:                    
                         for channel in self.header.channelLabels:
-                            if channel == EVENT_CHANNEL:    
+                            if channel == self.eventChannel:    
                                 encodedString = eventStr.encode("latin-1")                     
                                 fileWrite.write(encodedString + b"\x00"*(writeHeader.nbSamplesPerRecord[channel]*self.header.nbBytes - len(encodedString)) )  
                             else: 
@@ -1410,8 +1411,12 @@ class EDFBaseReader(EEGDBReaderBase) :
 
     """
      Read the complete signal recorded by a given channel.
+     
+     Normally, decode is always True but can be set to False to get the raw
+     record. This is useful for example when the signal is actually a 
+     text string.
     """
-    def readChannel(self, signalName, usePickled=False, startTime=None, endTime=None):
+    def readChannel(self, signalName, usePickled=False, startTime=None, endTime=None, decode=True):
 
         if not isinstance(signalName, str) :
             raise TypeError("The signalName argument must be a string. Received: " + str(type(signalName)))
@@ -1431,9 +1436,12 @@ class EDFBaseReader(EEGDBReaderBase) :
                 N = self.getNbSample(signalName)
                 data.signal = np.zeros(N)
                 i = 0
-                for noRecord in range(self.getNbRecords()):                  
-                    dig = self.byteStr2integers(self.readRawRecord(fileObj)[signalName])
-                    bloc = self.digital2physical(dig, signalName)
+                for noRecord in range(self.getNbRecords()):
+                    bloc = self.readRawRecord(fileObj)[signalName]
+                    if decode:
+                        bloc = self.digital2physical(self.byteStr2integers(bloc), signalName)
+                    else:
+                        bloc = np.array([x for x in bloc])
                     data.signal[i:(i+len(bloc))] = bloc
                     i += len(bloc)
                     
@@ -1605,14 +1613,15 @@ class EDFBaseReader(EEGDBReaderBase) :
         
     def setRecordDuration(self, duration):
         nbSamples = copy(self.header.nbSamplesPerRecord)
-        del nbSamples[EVENT_CHANNEL]
+        if self.eventChannel in nbSamples:
+            del nbSamples[self.eventChannel]
         
         # len(nbSamples) == 0 for edfa files.
         if len(nbSamples):
             dtMax = self.header.recordDuration/max(array(list(nbSamples.values())))
             # We change the duration only if its greater than half the size of the 
             # smaller sampling period. Else, because of the digitization resolution,
-            # the change has no effet. We remove the EVENT_CHANNEL from the computation
+            # the change has no effet. We remove the self.eventChannel from the computation
             # of the sampling period because the sampling period of this channel has
             # no meaning.
             if abs(duration - self.getRecordDuration()) > dtMax:
@@ -1702,7 +1711,7 @@ class EDFBaseReader(EEGDBReaderBase) :
         signals = {}
         events = []
         for channel in rawRecord:
-            if channel == EVENT_CHANNEL:
+            if channel == self.eventChannel:
                 ann = tal(rawRecord[channel])
                 time = self.header.startDateTime + datetime.timedelta(0,ann[0][0])
                 events.extend(ann[1:])
@@ -1737,7 +1746,7 @@ class EDFBaseReader(EEGDBReaderBase) :
                     rawRecord = self.readRawRecord(fileObj)    
 
                     for channel in rawRecord:
-                        if channel == EVENT_CHANNEL:
+                        if channel == self.eventChannel:
                             ann = tal(rawRecord[channel])
                             if endTime - ann[0][0] > 0.00000001 :
                                 print(("Record " + str(noRecord) + ": Overlapping error. Record " \
@@ -1769,8 +1778,9 @@ class EDFMultiReader(EDFBaseReader) :
      compatible with EDFBaseReader. 
     """
 
-    def __init__(self, fileNames, readEventsOnInit=True): 
-        self.readers = {f:EDFBaseReader(f, readEventsOnInit=readEventsOnInit) for f in fileNames}
+    def __init__(self, fileNames, readEventsOnInit=True, eventChannel = EVENT_CHANNEL): 
+        self.readers = {f:EDFBaseReader(f, readEventsOnInit=readEventsOnInit, eventChannel=eventChannel) 
+		                for f in fileNames}
         self.initEvents([reader.events for reader in list(self.readers.values())])
 
     def getFileName(self): 
@@ -1965,7 +1975,9 @@ class EDFReader(EEGDBReaderBase) :
      masked.
     """
     def __init__(self, fileName, isSplitted=None, annotationFileName=None,
-                 readEventsOnInit=True):        
+                 readEventsOnInit=True, eventChannel = EVENT_CHANNEL):        
+        
+        self.eventChannel = eventChannel        
         
         if isSplitted is False:
             self.isSplitted = False
@@ -1998,7 +2010,7 @@ class EDFReader(EEGDBReaderBase) :
                   "values True, False or None. Value " + str(isSplitted) + " used."                   
 
 
-        self.dataReader        = EDFBaseReader(fileName, readEventsOnInit=readEventsOnInit)
+        self.dataReader        = EDFBaseReader(fileName, readEventsOnInit=readEventsOnInit, eventChannel=eventChannel)
         super(EDFReader, self).__init__(self.getRecordDuration()) 
 
         if self.isSplitted :
@@ -2009,9 +2021,9 @@ class EDFReader(EEGDBReaderBase) :
                 raise TypeError
 
             if isinstance(self.annotationFileName, list):
-                self.annotationsReader  = EDFMultiReader(self.annotationFileName, readEventsOnInit=readEventsOnInit)                
+                self.annotationsReader  = EDFMultiReader(self.annotationFileName, readEventsOnInit=readEventsOnInit, 										 eventChannel=eventChannel)                
             else:
-                self.annotationsReader  = EDFBaseReader(self.annotationFileName, readEventsOnInit=readEventsOnInit)
+                self.annotationsReader  = EDFBaseReader(self.annotationFileName, readEventsOnInit=readEventsOnInit, 									   eventChannel=eventChannel)
             #self.events             = self.annotationsReader.events
         else:
             self.annotationsReader = None
@@ -2297,8 +2309,8 @@ class EDFReader(EEGDBReaderBase) :
     """
      Read the complete signal recorded by a given channel.
     """
-    def readChannel(self, signalName, usePickled=False):
-        return self.dataReader.readChannel(signalName, usePickled)           
+    def readChannel(self, signalName, usePickled=False, decode=True):
+        return self.dataReader.readChannel(signalName, usePickled, decode=decode)           
 
 
 
