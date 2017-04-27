@@ -150,6 +150,8 @@ class EDFEvent(Event):
                         self.groupName = value
                     elif name == "channel":
                         self.channel = value
+                    elif name == "cycle":
+                        self.cycle = int(value)
                     else :
                         self.properties[name] = value                    
             except:

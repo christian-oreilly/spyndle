@@ -954,9 +954,12 @@ class Event(SortedMember, metaclass=ABCMeta):
 
     def getXml(self):
         # create XML 
+        properties = deepcopy(self.properties)
+        if hasattr(self, "cycle"):
+            properties["cycle"] = self.cycle
         try:
             root = etree.Element('Event', name=self.name, groupName=self.groupName, channel=self.channel)
-            for propKey in self.properties:
+            for propKey in properties:
                 #propertyElem = etree.Element('Property')
                 
                 # XML properties cannot contain space characters. Substituting them by "_".                
@@ -966,12 +969,12 @@ class Event(SortedMember, metaclass=ABCMeta):
                 
                 # We replace all non alphanumeric characters by "_" to make sure
                 # the property name is valid for XML representation.
-                root.set(str(re.sub('[^0-9a-zA-Z]+', '_', propKey)), str(self.properties[propKey])) 
+                root.set(str(re.sub('[^0-9a-zA-Z]+', '_', propKey)), str(properties[propKey])) 
                 
         except ValueError :
             print(self.name, self.groupName, self.channel)
-            print(self.properties)
-            print(self.properties.keys())
+            print(properties)
+            print(properties.keys())
             #print(("propKey:", str(propKey),propKey)) 
             #print(("property:", str(self.properties[propKey]), self.properties[propKey]))
             raise
