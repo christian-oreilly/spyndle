@@ -68,18 +68,18 @@ class DetectorEvaluator:
     
         ########### PERFORM SPINDLE DETECTION
         print("Detecting spindles using the gold standard...")
-        self.goldStandard.setDetectionStages(listSleepStages)
-        self.goldStandard.detectSpindles(channelList) 
-        self.goldStandard.saveSpindle(self.goldStandard.reader, goldSpindleName, "Spindle")
+        self.goldStandardDetector.setDetectionStages(listSleepStages)
+        self.goldStandardDetector.detectSpindles(channelList) 
+        self.goldStandardDetector.saveSpindle(self.goldStandardDetector.reader, goldSpindleName, "Spindle")
 
 
         print("Detecting spindles using the tested detector...")
-        self.tested.setDetectionStages(listSleepStages)
-        self.tested.detectSpindles(channelList) 
-        self.tested.saveSpindle(self.tested.reader, testedSpindleName, "Spindle")
+        self.testedDetector.setDetectionStages(listSleepStages)
+        self.testedDetector.detectSpindles(channelList) 
+        self.testedDetector.saveSpindle(self.testedDetector.reader, testedSpindleName, "Spindle")
 
         self.computeStatistics(self, listSleepStages, goldSpindleName, testedSpindleName,
-                               self.goldStandard.reader, self.tested.reader, channelList)
+                               self.goldStandard.reader, self.testedDetector.reader, channelList)
         
         
         
