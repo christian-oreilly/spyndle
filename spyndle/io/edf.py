@@ -93,7 +93,7 @@ def tal(tal_str):
   stream.
   '''
   exp = b'(?P<onset>[+\-]\d+(?:\.\d*)?)'       + \
-        b'(?:\x15(?P<duration>\d+(?:\.\d*)))?' + \
+        b'(?:\x15(?P<duration>\d+(?:\.\d*)?))?' + \
         b'(\x14(?P<annotation>[^\x00]*))?'     + \
         b'(?:\x14\x00)'
 
@@ -1087,7 +1087,7 @@ class EDFBaseReader(EEGDBReaderBase) :
         # Because the annotation field may change in size, records can be shifted 
         # so we cannot only alter the information in the annotation fields. We need
         # to create a completely new file and swap it with the original.
-        tempFileName = tempPath + "temp-" + str(uuid.uuid1()) + "-" + os.path.basename(self.fileName)
+        tempFileName = os.path.join(tempPath, "temp-" + str(uuid.uuid1()) + "-" + os.path.basename(self.fileName))
 
         self.saveAs(tempFileName, noRecords=noRecords)
 
@@ -1150,7 +1150,6 @@ class EDFBaseReader(EEGDBReaderBase) :
             
                 # Computing the strings representing the EDF annotations
                 eventStings = self.computeEDFAnnotations()       
-                               
                 # Any modifications to the header for the writing must be made in a copied
                 # header as it must not alter the reading of the file for the duration
                 # of the saving operation.
@@ -1183,8 +1182,8 @@ class EDFBaseReader(EEGDBReaderBase) :
                     if noRecord in noRecords:                    
                         for channel in self.header.channelLabels:
                             if channel == self.eventChannel:    
-                                encodedString = eventStr.encode("latin-1")                     
-                                fileWrite.write(encodedString + b"\x00"*(writeHeader.nbSamplesPerRecord[channel]*self.header.nbBytes - len(encodedString)) )  
+                                encodedString = eventStr.encode("latin-1")                    
+                                fileWrite.write(encodedString + b"\x00"*(writeHeader.nbSamplesPerRecord[channel]*self.header.nbBytes - len(encodedString)) )     
                             else: 
                                 fileWrite.write(rawRecord[channel])
             
@@ -1990,9 +1989,9 @@ class EDFReader(EEGDBReaderBase) :
             elif os.path.isfile(fileName + "a") :
                 self.annotationFileName = fileName + "a"
             else:
-                raise "In EDFReader(...), the parameter isSplitted is set to True but"\
+                raise ValueError("In EDFReader(...), the parameter isSplitted is set to True but"\
                       " no annotation file name is specified using the annotationFileName"\
-                      " parameter and no file " + fileName + "a is existing."
+                      " parameter and no file " + fileName + "a is existing.")
                       
         elif isSplitted is None:
             if not annotationFileName is None:
