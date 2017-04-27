@@ -411,14 +411,15 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
 
 
 
-    def setCyclesToEventTypes(self, eventNames):
+    def setCyclesToEventTypes(self, eventNames, cycles = None):
 
         if isinstance(eventNames, str):
             eventNames = [eventNames]
         
-        self.cycleDef = CycleDefinitions()
-        self.cycleDef.setAeschbach()
-        cycles = computeDreamCycles([e for e in self.events if e.groupName.lower() == "stage"], self.cycleDef)
+        if cycles is None:
+            self.cycleDef = CycleDefinitions()
+            self.cycleDef.setAeschbach()
+            cycles = computeDreamCycles([e for e in self.events if e.groupName.lower() == "stage"], self.cycleDef)
         
         nbEvents = len([e for e in self.events if e.name in eventNames])
         gotNbEvents = 0
@@ -441,7 +442,15 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
             gotNbEvents += len(events)
             for event in events:
                 event.cycle = i+1
-
+        
+            # Some definition can allow for gap between cycles (e.g., when the persone woke)
+            if i > 0:
+                indUp  = self.events.getIndexMaxStartTime(cycles[i].timeStart(), inclusive=False)    
+                indLow = self.events.getIndexMinStartTime(cycles[i-1].timeEnd(), inclusive=True)    
+                #cycle.timeStart() <= event.startTime() and cycle.timeEnd() > event.startTime()
+                events = [e for e in self.events[indLow:indUp+1] if e.name in eventNames]                
+                gotNbEvents += len(events)      
+                
         # cycles[-1].timeEnd() <= event.startTime()
         try:
             indLow = self.events.getIndexMinStartTime(cycles[-1].timeEnd(), inclusive=True)   
@@ -503,7 +512,7 @@ class TimeOrderedList(object):
     def __str__(self):
         eventNames = [e.name for e in self.memberList]
         
-        retStr = "The list object contains " + str(len(eventNames)) + " memberss:\n"
+        retStr = "The list object contains " + str(len(eventNames)) + " members:\n"
         for eventName in np.unique(eventNames):
             retStr += eventName + ":" + str(np.sum(np.in1d(eventNames, [eventName]))) + "\n"
         return retStr
