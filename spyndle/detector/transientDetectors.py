@@ -286,9 +286,9 @@ class TransientDetector(metaclass=ABCMeta):
             for i, w in enumerate(weightingFct(windowNbSample)) :
                 result += w*signal[i:i+N]
 
-        # TODO: This line causes MemoryError in some case. THis need to be fixed.
-        return concatenate((ones(windowNbSample/2)*result[0], result, 
-                            ones(windowNbSample/2)* result[-1]))/windowNbSample 
+        # TODO: This line causes MemoryError in some case. This need to be fixed.
+        return concatenate((ones(int(windowNbSample/2))*result[0], result, 
+                            ones(int(windowNbSample/2))* result[-1]))/windowNbSample 
 
 
 
@@ -541,7 +541,10 @@ class ThresholdDetector(TransientDetector, metaclass=ABCMeta):
         if verbose is None:
             verbose = self.verbose
 
-        if len(stageEvents) == 0:  return 
+        if len(stageEvents) == 0:  
+            if verbose:
+                print("No stageEvents. _detectMain_ is returning.")
+            return 
 
         #################################### READING ##########################
         if verbose:   print("Start reading datafile...")
@@ -570,7 +573,10 @@ class ThresholdDetector(TransientDetector, metaclass=ABCMeta):
             excludedIndicators = self.reader.getEventIndicator([e for e in excludedEvents if e.channel == channel], time=channelTime)  
             samplesIndicators *= np.logical_not(excludedIndicators) 
             
-            if np.sum(samplesIndicators) == 0:  return
+            if np.sum(samplesIndicators) == 0:  
+                if verbose:
+                    print("sample Indicators is empty. _detectMain_ is returning.")                
+                return
 
             # We are working with two kind of signals, the raw EEG signal and
             # the transformed signal indexing the presence of the event to be detected.
@@ -594,19 +600,33 @@ class ThresholdDetector(TransientDetector, metaclass=ABCMeta):
             startInd = where(eventMarkers == 1)[0]
             stopInd  = where(eventMarkers == -1)[0]
                   
-            if len(stopInd) == 0 or len(startInd) == 0:  return
+            if len(stopInd) == 0 or len(startInd) == 0:  
+                if verbose:
+                    print("stopInd or startId is empty. _detectMain_ is continuing with next channel.")       
+                    print("Effective threshold: ", self.getEffectiveThreshold(indexSignal))
+                    print("indexSignal, min and max: ", min(indexSignal), max(indexSignal))
+                    print("len(indexSignal): ", len(indexSignal))
+                    print("Length of startInd and stopInd: ", len(stopInd), len(startInd))
+                continue
         
             #The first marker should be a start marker.                
             if stopInd[0] < startInd[0]:
+                if verbose:
+                    print("stopInd[0] < startInd[0]. Removing first stopInd")
                 stopInd = stopInd[1:]
+
+                if len(stopInd) == 0 or len(startInd) == 0:  
+                    if verbose:
+                        print("stopInd or startId is empty. _detectMain_ is continuing with next channel..")                
+                    continue
+        
     
             indEnd = min(len(startInd), len(stopInd))
             
             startInd = startInd[:indEnd]
             stopInd  = stopInd[:indEnd] 
     
-            if len(stopInd) == 0 or len(startInd) == 0:  return
-    
+
             
             try:
                 assert(all(stopInd - startInd > 0))
