@@ -45,7 +45,7 @@ setup(
                   'spyndle.DevuystDB': ['*.txt', '*.edf']},
     version=VERSION,
     description=DESCRIPTION,
-    long_description=open("README.txt").read(),
+    long_description=open("README.md").read(),
     ext_modules=cythonize(extensions),
     include_dirs=[numpy.get_include()],
     author=AUTHOR,
