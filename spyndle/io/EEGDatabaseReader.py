@@ -20,6 +20,7 @@ from scipy import array, arange, sqrt, mean, concatenate, zeros, fft
 from scipy.io import loadmat
 from scipy.fftpack import fftfreq
 from scipy.integrate import trapz
+from scipy.signal import hilbert, chirp
 
 from copy import deepcopy
 from spyndle import computeST
@@ -243,12 +244,13 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
         
         event.properties["RMSAmp"] = np.sqrt(np.mean(signal**2))
 
-    
-    def computeMeanFreq(self, event, fmin=11, fmax=16):
-   
+
+
+    def __getFFTEvent(self, event, fmin=11, fmax=16, removeBaseline=True):
         fs          = self.getChannelFreq(event.channel) 
         data        = self.read([event.channel], event.timeStart(), event.duration())
         signal      = data[event.channel].signal
+        signal      -= np.mean(signal)
 
         if signal.size < 512:
             signal = concatenate((signal, zeros(512 - signal.size)))
@@ -260,9 +262,56 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
         FFT   = FFT[(freqs >= fmin)*(freqs <= fmax)]
         freqs = freqs[(freqs >= fmin)*(freqs <= fmax)]
         
+        if removeBaseline:
+            FFT = FFT-min(FFT)    
+            
+        return freqs, FFT
+    
+    def computeMeanFreq(self, event, fmin=11, fmax=16, removeBaseline=True):
+        freqs, FFT = self.__getFFTEvent(event, fmin, fmax, removeBaseline)
         event.properties["meanFreq"] = sum(freqs*FFT)/sum(FFT)
 
 
+
+    def computeModeFreq(self, event, fmin=11, fmax=16, removeBaseline=True,
+                        method="hilbert"):
+                            
+        if method == "hilbert":
+            fs          = self.getChannelFreq(event.channel) 
+            data        = self.read([event.channel], event.timeStart()-6, event.duration()+6)
+        
+            signal      = data[event.channel].signal
+            signal      -= np.mean(signal)
+        
+            bandPassFilter = Filter(fs)
+            bandPassFilter.create(low_crit_freq=fmin, high_crit_freq=fmax, 
+                                  order=1001, btype="bandpass", ftype="FIR", useFiltFilt=True)          
+        
+            padBeforeTime = (event.timeStart()-data[event.channel].startTime)
+            indStart = int(padBeforeTime*fs)
+            indEnd = int(indStart + event.duration()*fs)
+        
+            signal = bandPassFilter.applyFilter(signal)[indStart:indEnd]      
+        
+        
+            analytic_signal = hilbert(signal)
+            instantaneous_phase = np.unwrap(np.angle(analytic_signal))
+            instantaneous_frequency = (np.diff(instantaneous_phase) /
+                                       (2.0*np.pi) * fs)
+            hist = np.histogram(instantaneous_frequency, bins=int((fmax-fmin+2)*10), range=(fmin-1, fmax+1))
+            spinFreq = (hist[1][1:]+hist[1][:-1])/2
+            density = hist[0]
+            freqMode = spinFreq[np.argmax(density)]
+            
+        elif method == "FFT":
+                                
+            freqs, FFT = self.__getFFTEvent(event, fmin, fmax, removeBaseline)
+            freqMode= freqs[np.argmax(FFT)]
+            
+        else:
+            raise ValueError("method must be 'hilbert' or 'FFT'.")
+
+        event.properties["modeFreq"] = freqMode
 
 
     def computeFreqSlope(self, event, fmin=11, fmax=16):
