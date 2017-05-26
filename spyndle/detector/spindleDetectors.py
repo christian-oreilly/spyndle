@@ -341,7 +341,7 @@ class ThresholdSpindleDetector(ThresholdDetector, metaclass=ABCMeta):
          for startInd, stopInd, spindle in zip(startSpinInds, stopSpinInds, newSpindles):
             sig       = signal[startInd:stopInd]
    
-            nbMinSamples = fs
+            nbMinSamples = int(fs)
             N            = len(sig)
             if N < nbMinSamples:
                 sig = np.concatenate((sig, np.zeros(nbMinSamples - N)))   
