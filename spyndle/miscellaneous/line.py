@@ -36,14 +36,14 @@
 try:
     from PySide import QtCore, QtGui    
 except ImportError:
-    from PyQt4 import QtCore, QtGui    
-    
-from numpy import sqrt
+    from PyQt4 import QtCore, QtGui   
 
+
+from numpy import sqrt
 
 class Polygon(QtGui.QPolygon):
     def __init__(self, points):
-        
+
         QtGui.QPolygon.__init__(self)        
         for point in points:
             if isinstance(point, Point):
@@ -51,10 +51,9 @@ class Polygon(QtGui.QPolygon):
             elif not isinstance(point, QtCore.QPoint):
                 raise TypeError("The points argument contain an item which is equal to " \
                                 + str(point) + " and of type " + str(type(point)))
-            
-            self.append(point)
-            
         
+            self.append(point)
+
 
 class Point(object):
     def __init__(self, x=0, y=0):

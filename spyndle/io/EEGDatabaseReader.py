@@ -246,51 +246,79 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
 
 
 
-    def __getFFTEvent(self, event, fmin=11, fmax=16, removeBaseline=True):
-        fs          = self.getChannelFreq(event.channel) 
-        data        = self.read([event.channel], event.timeStart(), event.duration())
-        signal      = data[event.channel].signal
+    def getFFTEvent(self, event, fmin=None, fmax=None, removeBaseline=True, 
+                    channel=None, takeDiff=False):
+
+        if channel is None:
+            if event.channel == "":
+                channel = self.getChannelLabels()[0]
+            else:
+                channel = event.channel
+        
+        fs          = self.getChannelFreq(channel) 
+        data        = self.read([channel], event.timeStart(), event.duration())
+        signal      = data[channel].signal
         signal      -= np.mean(signal)
+
+        if takeDiff:
+            signal = np.diff(signal)
 
         if signal.size < 512:
             signal = concatenate((signal, zeros(512 - signal.size)))
         
-        
         FFT = abs(fft(signal))
         freqs = fftfreq(signal.size, 1.0/fs)        
         
-        FFT   = FFT[(freqs >= fmin)*(freqs <= fmax)]
-        freqs = freqs[(freqs >= fmin)*(freqs <= fmax)]
+        if not fmin is None:
+            FFT   = FFT[freqs >= fmin]
+            freqs = freqs[freqs >= fmin]
+        if not fmax is None:
+            FFT   = FFT[freqs <= fmax]
+            freqs = freqs[freqs <= fmax]
+
         
         if removeBaseline:
             FFT = FFT-min(FFT)    
             
         return freqs, FFT
+      
+    
+    
     
     def computeMeanFreq(self, event, fmin=11, fmax=16, removeBaseline=True):
-        freqs, FFT = self.__getFFTEvent(event, fmin, fmax, removeBaseline)
+        freqs, FFT = self.getFFTEvent(event, fmin, fmax, removeBaseline)
         event.properties["meanFreq"] = sum(freqs*FFT)/sum(FFT)
 
 
 
     def computeModeFreq(self, event, fmin=11, fmax=16, removeBaseline=True,
                         method="hilbert"):
-                            
+ 
+        if event.channel == "":
+            channel = self.getChannelLabels()[0]
+        else:
+            channel = event.channel
+                           
         if method == "hilbert":
-            fs          = self.getChannelFreq(event.channel) 
-            data        = self.read([event.channel], event.timeStart()-6, event.duration()+6)
+            fs          = self.getChannelFreq(channel) 
+            data        = self.read([channel], event.timeStart()-6, event.duration()+6)
         
-            signal      = data[event.channel].signal
+            signal      = data[channel].signal
             signal      -= np.mean(signal)
         
             bandPassFilter = Filter(fs)
-            bandPassFilter.create(low_crit_freq=fmin, high_crit_freq=fmax, 
-                                  order=1001, btype="bandpass", ftype="FIR", useFiltFilt=True)          
+            order = int(len(signal)/3)-1
+            if order % 2 == 0:
+                order -= 1 # Need to be an odd number
+            order = min(1001, order) # No need for the order to be higher than 1001
+
+            bandPassFilter.create(low_crit_freq=fmin, high_crit_freq=fmax, order=order, 
+                                  btype="bandpass", ftype="FIR", useFiltFilt=True)          
         
             padBeforeTime = (event.timeStart()-data[event.channel].startTime)
             indStart = int(padBeforeTime*fs)
             indEnd = int(indStart + event.duration()*fs)
-        
+
             signal = bandPassFilter.applyFilter(signal)[indStart:indEnd]      
         
         
@@ -305,7 +333,7 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
             
         elif method == "FFT":
                                 
-            freqs, FFT = self.__getFFTEvent(event, fmin, fmax, removeBaseline)
+            freqs, FFT = self.getFFTEvent(event, fmin, fmax, removeBaseline)
             freqMode= freqs[np.argmax(FFT)]
             
         else:
@@ -391,7 +419,7 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
          globalEvent must be false for events that have no specific channel
          such as stage events. However, a channel must nevertheless be passed
          to get the right number of stamples for a given channel.
-        """          
+        """
         if globalEvent:
             if isinstance(eventName, list):
                events = [e for e in self.events if e.name in eventName]                
@@ -541,7 +569,7 @@ class TimeOrderedList(object):
     """
      Inheriting classes should defined setter and getter for a memberList 
      property.
-    """    
+    """
     
     
     def __init__(self): 

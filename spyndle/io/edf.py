@@ -2007,8 +2007,8 @@ class EDFReader(EEGDBReaderBase) :
                 self.annotationFileName = None
     
         else:
-            raise "In EDFReader(...), the parameter isSplitted can only take the "\
-                  "values True, False or None. Value " + str(isSplitted) + " used."                   
+            raise ValueError("In EDFReader(...), the parameter isSplitted can only take the "\
+                  "values True, False or None. Value " + str(isSplitted) + " used.")
 
 
         self.dataReader        = EDFBaseReader(fileName, readEventsOnInit=readEventsOnInit, eventChannel=eventChannel)
