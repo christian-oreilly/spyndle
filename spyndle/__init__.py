@@ -6,7 +6,12 @@ from .miscellaneous.filters import Filter, channelType
 from .miscellaneous.sleepCycles import CycleDefinitions, computeDreamCycles
 from .miscellaneous.STransform import computeMST, computeST
 from .miscellaneous.fastST import computeFastST, computeFastST_real
-from .miscellaneous.line import Line, Point
+
+try:
+    from .miscellaneous.line import Line, Point
+except ImportError:
+    pass
+
 from .miscellaneous.utils import setUnbufferedPrint, Unbuffered, terminate_process, diff2
 
 # For backward compatibility
