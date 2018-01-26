@@ -55,7 +55,7 @@ setup(
     license='LICENSE.txt',
     url=URL,
     download_url=DOWNLOAD_URL,
-    requires=['pandas (>= 0.11.0)', 'lxml', 'comtypes', 'sqlalchemy'],
+    requires=['pandas (>= 0.11.0)', 'lxml', 'comtypes', 'sqlalchemy', 'cython'],
     classifiers=["Development Status :: 3 - Alpha",
 			"Environment :: MacOS X",
 			"Environment :: Win32 (MS Windows)",
