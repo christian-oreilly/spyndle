@@ -10,7 +10,8 @@ from .miscellaneous.fastST import computeFastST, computeFastST_real
 try:
     from .miscellaneous.line import Line, Point
 except ImportError:
-    pass
+    class Line
+    class Point
 
 from .miscellaneous.utils import setUnbufferedPrint, Unbuffered, terminate_process, diff2
 
