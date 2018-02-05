@@ -16,7 +16,11 @@ import numpy as np
 import re
 from numpy import sqrt
 
-from spyndle import Line, Point
+try:
+    from spyndle import Line, Point
+except ImportError:
+    pass
+
 from spyndle.EEG.electrodesSVG import getElectrodeCoordinates
 from spyndle.EEG.mapping import getTransformedCoord
 
