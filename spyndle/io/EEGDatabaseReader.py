@@ -176,36 +176,36 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
                [e.dateTime for e in stageEvents]
         
     def getSleepStage_REM(self):
-        return [e for e in self.reader.events if e.name == "Sleep stage R"]      
+        return [e for e in self.events if e.name == "Sleep stage R"]      
         
     def getSleepStage_NREM(self):
-        return [e for e in self.reader.events if e.name == "Sleep stage 1" or 
-                                                e.name == "Sleep stage 2" or 
-                                                e.name == "Sleep stage 3" or 
-                                                e.name == "Sleep stage 4" or 
-                                                e.name == "Sleep stage N" or 
-                                                e.name == "Sleep stage N1" or 
-                                                e.name == "Sleep stage N2" or 
-                                                e.name == "Sleep stage N3"]      
+        return [e for e in self.events if e.name == "Sleep stage 1" or 
+                                          e.name == "Sleep stage 2" or 
+                                          e.name == "Sleep stage 3" or 
+                                          e.name == "Sleep stage 4" or 
+                                          e.name == "Sleep stage N" or 
+                                          e.name == "Sleep stage N1" or 
+                                          e.name == "Sleep stage N2" or 
+                                          e.name == "Sleep stage N3"]      
         
     def getSleepStage_1(self):
-        return [e for e in self.reader.events if e.name == "Sleep stage 1" or 
-                                                 e.name == "Sleep stage N1" ]     
+        return [e for e in self.events if e.name == "Sleep stage 1" or 
+                                          e.name == "Sleep stage N1" ]     
     def getSleepStage_2(self):
-        return [e for e in self.reader.events if e.name == "Sleep stage 2" or 
-                                                 e.name == "Sleep stage N2" ]     
+        return [e for e in self.events if e.name == "Sleep stage 2" or 
+                                          e.name == "Sleep stage N2" ]     
         
     def getSleepStage_3(self):
-        return [e for e in self.reader.events if e.name == "Sleep stage 3" or 
-                                                 e.name == "Sleep stage N3" ]      
+        return [e for e in self.events if e.name == "Sleep stage 3" or 
+                                          e.name == "Sleep stage N3" ]      
         
     def getSleepStage_4(self):
-        return [e for e in self.reader.events if e.name == "Sleep stage 4"]      
+        return [e for e in self.events if e.name == "Sleep stage 4"]      
         
     def getSleepStage_SWS(self):
-        return [e for e in self.reader.events if e.name == "Sleep stage 3" or 
-                                                e.name == "Sleep stage 4" or 
-                                                e.name == "Sleep stage N3"]         
+        return [e for e in self.events if e.name == "Sleep stage 3" or 
+                                          e.name == "Sleep stage 4" or 
+                                          e.name == "Sleep stage N3"]         
         
         
     def getEventsByTime(self, startTime, endTime) :
@@ -246,8 +246,20 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
 
 
 
+    def getSignalEvent(self, event, beforePadding=0, afterPadding=0, channel=None):
+
+        if channel is None:
+            if event.channel == "":
+                channel = self.getChannelLabels()[0]
+            else:
+                channel = event.channel
+        
+        data        = self.read([channel], event.timeStart()-beforePadding, event.duration()+afterPadding+beforePadding)
+        return data[channel]
+
+
     def getFFTEvent(self, event, fmin=None, fmax=None, removeBaseline=True, 
-                    channel=None, takeDiff=False):
+                    channel=None, takeDiff=False, beforePadding=0, afterPadding=0):
 
         if channel is None:
             if event.channel == "":
@@ -256,7 +268,7 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
                 channel = event.channel
         
         fs          = self.getChannelFreq(channel) 
-        data        = self.read([channel], event.timeStart(), event.duration())
+        data        = self.read([channel], event.timeStart()+beforePadding, event.duration()+afterPadding+beforePadding)
         signal      = data[channel].signal
         signal      -= np.mean(signal)
 
@@ -467,7 +479,7 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
                 event.properties["stage"] = "No stage"
             else:
                 event.properties["stage"] = stages[0].name           
-                print(("Waring: " + str(len(stages)) + " staged are including the event starting at time " + str(event.startTime) + ". Keeping only the first one."))
+                print(("Waring: " + str(len(stages)) + " stages are including the event starting at time " + str(event.startTime) + ". Keeping only the first one."))
 
 
 
@@ -587,12 +599,7 @@ class TimeOrderedList(object):
         return len(self.memberList)
 
     def __str__(self):
-        eventNames = [e.name for e in self.memberList]
-        
-        retStr = "The list object contains " + str(len(eventNames)) + " members:\n"
-        for eventName in np.unique(eventNames):
-            retStr += eventName + ":" + str(np.sum(np.in1d(eventNames, [eventName]))) + "\n"
-        return retStr
+        return str(self.memberList)
 
 
     def removeType(self, eventType):
@@ -700,6 +707,15 @@ class EventList(TimeOrderedList):
     
     def __init__(self):
         self.__events = []
+        
+    def __str__(self):
+        eventNames = [e.name for e in self.memberList]
+        
+        retStr = "The list object contains " + str(len(eventNames)) + " members:\n"
+        for eventName in np.unique(eventNames):
+            retStr += eventName + ":" + str(np.sum(np.in1d(eventNames, [eventName]))) + "\n"
+        return retStr        
+        
         
     @property
     def memberList(self):
