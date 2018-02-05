@@ -164,7 +164,7 @@ def computeDreamCycles(events, cyclesDefinition):
     cycles = []
     sleeping = False
     while(len(lastingEvents)):
-        cycle, lastingEvents, sleeping = computeUneDreamCyle(lastingEvents, cyclesDefinition, sleeping, len(cycles)+1) 
+        cycle, lastingEvents, sleeping = computeOneDreamCycle(lastingEvents, cyclesDefinition, sleeping, len(cycles)+1) 
         if not cycle is None : 
             cycles.append(cycle)
 
@@ -205,7 +205,7 @@ def computeDreamCycles(events, cyclesDefinition):
     
     
     
-def computeUneDreamCyle(events, cycleDefinition, sleeping, noCycle): 
+def computeOneDreamCycle(events, cycleDefinition, sleeping, noCycle): 
     
     cycle = DreamCycle()
     cycle, lastingEvents, sleeping = computeNREM(cycle, events, cycleDefinition, sleeping, noCycle)
