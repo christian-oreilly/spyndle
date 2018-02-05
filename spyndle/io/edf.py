@@ -800,7 +800,11 @@ class EDFBaseReader(EEGDBReaderBase) :
             
             if readEventsOnInit:
                 if self.header.fileType == "EDF+" or self.header.fileType == "BDF" :
-                    self.readEvents(fileObj)        
+                    self.readEvents(fileObj)
+                else:
+                    for noRecord in range(self.getNbRecords()):
+                        self.recordsInfo.add(EEGRecordInfo(startTime=noRecord*self.getRecordDuration(), 
+                                                 duration=self.getRecordDuration()))                    
         
 
     def getFileName(self): 
@@ -1569,7 +1573,7 @@ class EDFBaseReader(EEGDBReaderBase) :
 
         assert(len(records)>0)
 
-        info = records[0]                    
+        info = deepcopy(records[0])                    
         signals = {}
         time    = {}                    
         for channel in signalNames:
@@ -1577,7 +1581,6 @@ class EDFBaseReader(EEGDBReaderBase) :
             time[channel]    = concatenate([rec.getStartTime() + arange(len(rec.recordedSignals[channel]))/self.getChannelFreq(channel)
                                                                         for rec in records])
                                                 
-                
         info.time = time            
         info.recordedSignals = signals            
 
@@ -1594,6 +1597,7 @@ class EDFBaseReader(EEGDBReaderBase) :
             time = info.time[channel]
             ind  = where((time >= startTime)*(time < startTime + timeDuration))[0]
             
+            
             try:
                 assert(len(ind)>0)
             except :
@@ -1608,7 +1612,7 @@ class EDFBaseReader(EEGDBReaderBase) :
             returnData[channel].type           = None
             returnData[channel].signal         = info.recordedSignals[channel][ind]
             returnData[channel].startTime      = time[ind[0]]      
-    
+
         return returnData
 
         
@@ -1711,6 +1715,7 @@ class EDFBaseReader(EEGDBReaderBase) :
         #time = self.header.date_time + datetime.timedelta(0,offset_seconds)
         signals = {}
         events = []
+        time = None
         for channel in rawRecord:
             if channel == self.eventChannel:
                 ann = tal(rawRecord[channel])
@@ -1721,6 +1726,10 @@ class EDFBaseReader(EEGDBReaderBase) :
             else:
                 dig = self.byteStr2integers(rawRecord[channel])                                
                 signals[channel] = self.digital2physical(dig, channel)
+        
+        if time is None:
+            recordNo = (fileObj.tell()-self.header.headerNbBytes)/self.header.recordSize
+            time = self.header.startDateTime + datetime.timedelta(0, recordNo*self.header.recordDuration )           
         
         return time, signals, events
 
