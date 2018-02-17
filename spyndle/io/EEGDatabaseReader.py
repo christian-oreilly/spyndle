@@ -21,6 +21,7 @@ from scipy.io import loadmat
 from scipy.fftpack import fftfreq
 from scipy.integrate import trapz
 from scipy.signal import hilbert, chirp
+from scipy.stats import gaussian_kde
 
 from copy import deepcopy
 from spyndle import computeST
@@ -304,7 +305,7 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
 
 
     def computeModeFreq(self, event, fmin=11, fmax=16, removeBaseline=True,
-                        method="hilbert"):
+                        method="hilbert", padding=6):
  
         if event.channel == "":
             channel = self.getChannelLabels()[0]
@@ -313,7 +314,8 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
                            
         if method == "hilbert":
             fs          = self.getChannelFreq(channel) 
-            data        = self.read([channel], event.timeStart()-6, event.duration()+6)
+            data        = self.read([channel], event.timeStart()-padding, 
+                                    event.duration()+padding)
         
             signal      = data[channel].signal
             signal      -= np.mean(signal)
@@ -338,10 +340,17 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
             instantaneous_phase = np.unwrap(np.angle(analytic_signal))
             instantaneous_frequency = (np.diff(instantaneous_phase) /
                                        (2.0*np.pi) * fs)
-            hist = np.histogram(instantaneous_frequency, bins=int((fmax-fmin+2)*10), range=(fmin-1, fmax+1))
-            spinFreq = (hist[1][1:]+hist[1][:-1])/2
-            density = hist[0]
-            freqMode = spinFreq[np.argmax(density)]
+            #hist = np.histogram(np.abs(instantaneous_frequency), bins=int((fmax-fmin+2)*10), range=(fmin-1, fmax+1))
+            #spinFreq = (hist[1][1:]+hist[1][:-1])/2
+            #density = hist[0]
+            #freqMode = spinFreq[np.argmax(density)]
+
+            freqs = np.linspace(fmin-1, fmax+1, (fmax-fmin+2)*100)
+            density = gaussian_kde(np.abs(instantaneous_frequency))
+            #density.covariance_factor = lambda : .025
+            density._compute_covariance()
+            freqMode = freqs[np.argmax(density(freqs))]
+
             
         elif method == "FFT":
                                 
@@ -1012,7 +1021,7 @@ class Event(SortedMember, metaclass=ABCMeta):
             raise ValueError("Must be XML compatible: Unicode or ASCII, no NULL bytes or control characters.")
     
     def __init__(self, name = "", groupName = "", channel = "", startTime = -1.0,
-                 timeLength = -1.0, dateTime = None, properties = {}):
+                 timeLength = -1.0, dateTime = None, properties = None):
                      
         self.ID          = str(uuid.uuid1())
         self._groupName   = groupName
@@ -1022,7 +1031,10 @@ class Event(SortedMember, metaclass=ABCMeta):
         self.timeLength  = timeLength  # Duration in seconds      
         self.dateTime    = dateTime    # datetime  object giving the begining time of the event.
 
-        self.properties  = properties
+        if properties is None:
+            self.properties = {}
+        else:
+            self.properties  = properties
     
         
         
