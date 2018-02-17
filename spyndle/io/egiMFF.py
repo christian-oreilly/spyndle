@@ -653,7 +653,7 @@ class EgiMffReader(EEGDBReaderBase) :
             endsam = int(endTime*data.samplingRate)
 
         if signalName in self.preloaded:
-            data.signal = self.preloaded[signalName].signal[begsam:endsam]
+            data.signal = deepcopy(self.preloaded[signalName].signal[begsam:endsam])
         else:
             data.signal = self.wonambiReader.return_dat([self.getChannelLabels().index(signalName)], 
                                                          begsam=begsam, 
