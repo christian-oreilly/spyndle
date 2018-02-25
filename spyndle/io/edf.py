@@ -175,7 +175,7 @@ class EDFEvent(Event):
                               channel = "", properties={}):
 
         self.startTime   = reader.timeFromSample(channel, startSample)
-        self.timeLength  = durationSample/reader.getChannelFreq(channel)
+        self.timeLength  = durationSample/float(reader.getChannelFreq(channel))
         
         self.properties  = properties
         self.name = name
@@ -485,7 +485,7 @@ class EDFHeader :
         for channel in self.channelLabels : 
             self.nbSamplesPerRecord[channel]    = int(f.read(8))  
         for channel in self.channelLabels : 
-            self.samplingRate[channel]          = float(self.nbSamplesPerRecord[channel])/self.recordDuration
+            self.samplingRate[channel]          = float(self.nbSamplesPerRecord[channel])/float(self.recordDuration)
 
 
         f.read(32 * self.nbChannels)  # reserved
@@ -514,9 +514,16 @@ class EDFHeader :
         for channel in self.channelLabels :         
             physicalRange = self.physicalMax[channel] - self.physicalMin[channel]
             digitalRange  = self.digitalMax[channel]  - self.digitalMin[channel]
-            assert np.all(physicalRange > 0)
-            assert np.all(digitalRange > 0)
-            self.gain[channel] = physicalRange / digitalRange        
+            #try:
+            #    assert np.all(physicalRange > 0)
+            #    assert np.all(digitalRange > 0)
+            #except:
+            #    print(physicalRange, digitalRange)
+            #    print(self.physicalMax)
+            #    print(self.physicalMin)
+            #    print(self.digitalMax)
+            #    print(self.digitalMin)
+            self.gain[channel] = physicalRange / float(digitalRange)        
         
 
 
@@ -728,7 +735,7 @@ class EDFHeader :
             digitalRange  = self.digitalMax[channel]  - self.digitalMin[channel]
             assert np.all(physicalRange > 0)
             assert np.all(digitalRange > 0)
-            self.gain[channel] = physicalRange / digitalRange        
+            self.gain[channel] = physicalRange / float(digitalRange)       
         
         self.headerNbBytes = 8 + 80 + 80 + 8 + 8 + 8 + 44 + 8 + 8 + 4 + \
                               self.nbChannels*(16 + 80+ 8 + 8 + 8 + 8 + 8 + 80 + 8 + 32)
@@ -903,7 +910,7 @@ class EDFBaseReader(EEGDBReaderBase) :
                 nbBytesEvent    = reformattedReader.header.nbSamplesPerRecord[self.eventChannel]*reformattedReader.header.nbBytes
                 nbBytesReformat = reformattedReader.header.nbSamplesPerRecord[REFORMAT_CHANNEL]*reformattedReader.header.nbBytes
                 if max([len(s) for s in eventStings]) >= nbBytesEvent:       
-                    reformattedReader.header.nbSamplesPerRecord[self.eventChannel] = int(max([len(s) for s in eventStings])*1.2/reformattedReader.header.nbBytes)
+                    reformattedReader.header.nbSamplesPerRecord[self.eventChannel] = int(max([len(s) for s in eventStings])*1.2/float(reformattedReader.header.nbBytes))
                     nbBytesEvent    = reformattedReader.header.nbSamplesPerRecord[self.eventChannel]*reformattedReader.header.nbBytes
 
                
@@ -931,7 +938,7 @@ class EDFBaseReader(EEGDBReaderBase) :
                             dig_range = reformattedReader.header.digitalMax[channel] - reformattedReader.header.digitalMin[channel]
                             assert np.all(phys_range > 0)
                             assert np.all(dig_range > 0)
-                            gain = dig_range/phys_range                          
+                            gain = dig_range/float(phys_range)                        
                             
                             formatedSignal = (formatedSignal -  reformattedReader.header.physicalMin[channel])*gain + reformattedReader.header.digitalMin[channel]       
         
@@ -1006,7 +1013,7 @@ class EDFBaseReader(EEGDBReaderBase) :
                 # If not, enlarge it on the writing copy.
                 nbBytesEvent    = changedReader.header.nbSamplesPerRecord[self.eventChannel]*changedReader.header.nbBytes
                 if max([len(s) for s in eventStings]) >= nbBytesEvent:       
-                    changedReader.header.nbSamplesPerRecord[self.eventChannel] = int(max([len(s) for s in eventStings])*1.2/changedReader.header.nbBytes)
+                    changedReader.header.nbSamplesPerRecord[self.eventChannel] = int(max([len(s) for s in eventStings])*1.2/float(changedReader.header.nbBytes))
                     nbBytesEvent    = changedReader.header.nbSamplesPerRecord[self.eventChannel]*changedReader.header.nbBytes
                
                 # Write the header
@@ -1168,7 +1175,7 @@ class EDFBaseReader(EEGDBReaderBase) :
                 # Verifying if the annotation field is large enough to record the annotations.
                 # If not, enlarge it on the writing copy.
                 if max([len(s) for s in eventStings]) >= self.header.nbSamplesPerRecord[self.eventChannel]*self.header.nbBytes:       
-                    writeHeader.nbSamplesPerRecord[self.eventChannel] = int(max([len(s) for s in eventStings])/self.header.nbBytes*1.2)
+                    writeHeader.nbSamplesPerRecord[self.eventChannel] = int(max([len(s) for s in eventStings])/float(self.header.nbBytes)*1.2)
                
                 # Write the header
                 writeHeader.write(fileWrite)
@@ -1340,8 +1347,8 @@ class EDFBaseReader(EEGDBReaderBase) :
         
         endTime = startTime + timeDuration
         nbSamples = float(self.header.nbSamplesPerRecord[channel])
-        recordTime = arange(nbSamples)/self.getChannelFreq(channel)
-        recordDuration = nbSamples/self.getChannelFreq(channel)
+        recordTime = arange(nbSamples)/float(self.getChannelFreq(channel))
+        recordDuration = nbSamples/float(self.getChannelFreq(channel))
         
         recs = self.recordsInfo
         
@@ -1506,7 +1513,7 @@ class EDFBaseReader(EEGDBReaderBase) :
         recordStartTime = recInfo.startTime
         recordNbSamples = self.header.nbSamplesPerRecord[signalName]
         
-        time = recordStartTime + arange(recordNbSamples)/self.getChannelFreq(signalName)
+        time = recordStartTime + arange(recordNbSamples)/float(self.getChannelFreq(signalName))
         #time = record.getStartTime() + arange(len(record.recordedSignals[signalName]))/record.samplingRates[signalName]
         IND = where(time >= startTime)[0]
         if len(IND) == 0 :
@@ -1543,7 +1550,7 @@ class EDFBaseReader(EEGDBReaderBase) :
         
         nbSamplePerRec = self.header.nbSamplesPerRecord[signalName]
         recordNo = int(sample/nbSamplePerRec)
-        dt = float(sample - nbSamplePerRec*recordNo)/nbSamplePerRec*self.header.recordDuration
+        dt = float(sample - nbSamplePerRec*recordNo)/float(nbSamplePerRec)*self.header.recordDuration
         return self.recordsInfo[recordNo].startTime + dt
 
 
@@ -1578,7 +1585,7 @@ class EDFBaseReader(EEGDBReaderBase) :
         time    = {}                    
         for channel in signalNames:
             signals[channel] = concatenate([rec.recordedSignals[channel] for rec in records])
-            time[channel]    = concatenate([rec.getStartTime() + arange(len(rec.recordedSignals[channel]))/self.getChannelFreq(channel)
+            time[channel]    = concatenate([rec.getStartTime() + arange(len(rec.recordedSignals[channel]))/float(self.getChannelFreq(channel))
                                                                         for rec in records])
                                                 
         info.time = time            
@@ -1586,7 +1593,7 @@ class EDFBaseReader(EEGDBReaderBase) :
 
         if debug:
             channel = list(info.recordedSignals.keys())[0]
-            time = info.getStartTime() + arange(len(info.recordedSignals[channel]))/info.samplingRates[channel]
+            time = info.getStartTime() + arange(len(info.recordedSignals[channel]))/float(info.samplingRates[channel])
             print(("Reader : ", len(records), startTime, timeDuration, time, info.samplingRates[channel]))
 
 
@@ -1623,7 +1630,7 @@ class EDFBaseReader(EEGDBReaderBase) :
         
         # len(nbSamples) == 0 for edfa files.
         if len(nbSamples):
-            dtMax = self.header.recordDuration/max(array(list(nbSamples.values())))
+            dtMax = self.header.recordDuration/float(max(array(list(nbSamples.values()))))
             # We change the duration only if its greater than half the size of the 
             # smaller sampling period. Else, because of the digitization resolution,
             # the change has no effet. We remove the self.eventChannel from the computation
@@ -1728,7 +1735,7 @@ class EDFBaseReader(EEGDBReaderBase) :
                 signals[channel] = self.digital2physical(dig, channel)
         
         if time is None:
-            recordNo = (fileObj.tell()-self.header.headerNbBytes)/self.header.recordSize
+            recordNo = (fileObj.tell()-self.header.headerNbBytes)/float(self.header.recordSize)
             time = self.header.startDateTime + datetime.timedelta(0, recordNo*self.header.recordDuration )           
         
         return time, signals, events
@@ -2031,9 +2038,11 @@ class EDFReader(EEGDBReaderBase) :
                 raise TypeError
 
             if isinstance(self.annotationFileName, list):
-                self.annotationsReader  = EDFMultiReader(self.annotationFileName, readEventsOnInit=readEventsOnInit, 										 eventChannel=eventChannel)                
+                self.annotationsReader  = EDFMultiReader(self.annotationFileName, readEventsOnInit=readEventsOnInit,
+                                                         eventChannel=eventChannel)                
             else:
-                self.annotationsReader  = EDFBaseReader(self.annotationFileName, readEventsOnInit=readEventsOnInit, 									   eventChannel=eventChannel)
+                self.annotationsReader  = EDFBaseReader(self.annotationFileName, readEventsOnInit=readEventsOnInit,
+                                                        eventChannel=eventChannel)
             #self.events             = self.annotationsReader.events
         else:
             self.annotationsReader = None
@@ -2049,7 +2058,7 @@ class EDFReader(EEGDBReaderBase) :
     @events.setter
     def events(self, events):
         if self.isSplitted:
-            self.annotationsReader.events = events
+            self.annotationsReader.initEvents(events)
         else:
             self.dataReader.events = events
 
