@@ -41,6 +41,12 @@ from spyndle import CycleDefinitions, computeDreamCycles
 from spyndle.errorMng import ErrPureVirtualCall
 from spyndle import Filter
 
+from scipy.signal import decimate
+from sklearn import linear_model
+def running_mean(x, N):
+    cumsum = np.cumsum(np.insert(x, 0, 0)) 
+    return (cumsum[N:] - cumsum[:-N]) / float(N)
+
 """
  Abstract class describing an EEG reader.
 """
@@ -222,7 +228,7 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
         # The filters need the signal to be at least 3*nbTaps
         nbTaps      = 1001.0        
         fs          = self.getChannelFreq(event.channel) 
-        duration    = max((nbTaps*3.0+1)/fs, event.duration())   
+        duration    = max((nbTaps*3.0+1)/float(fs), event.duration())   
         data        = self.read([event.channel], event.timeStart(), duration)
         signal      = data[event.channel].signal
         
@@ -235,7 +241,8 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
         # Defining EEG filters
         bandPassFilter = Filter(fs)
         bandPassFilter.create(low_crit_freq=fmin, high_crit_freq=fmax, 
-                              order=nbTaps, btype="bandpass", ftype="FIR", useFiltFilt=True)          
+                              order=int(nbTaps), btype="bandpass", 
+                              ftype="FIR", useFiltFilt=True)          
              
         try :
             signal = bandPassFilter.applyFilter(signal)[0:int(event.duration()*fs)]                                
@@ -280,7 +287,7 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
             signal = concatenate((signal, zeros(512 - signal.size)))
         
         FFT = abs(fft(signal))
-        freqs = fftfreq(signal.size, 1.0/fs)        
+        freqs = fftfreq(signal.size, 1.0/float(fs))        
         
         if not fmin is None:
             FFT   = FFT[freqs >= fmin]
@@ -300,7 +307,7 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
     
     def computeMeanFreq(self, event, fmin=11, fmax=16, removeBaseline=True):
         freqs, FFT = self.getFFTEvent(event, fmin, fmax, removeBaseline)
-        event.properties["meanFreq"] = sum(freqs*FFT)/sum(FFT)
+        event.properties["meanFreq"] = sum(freqs*FFT)/float(sum(FFT))
 
 
 
@@ -350,6 +357,30 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
             #density.covariance_factor = lambda : .025
             density._compute_covariance()
             freqMode = freqs[np.argmax(density(freqs))]
+    
+    
+            #############
+            regx = arange(len(instantaneous_frequency))/float(fs)
+            regy = np.abs(instantaneous_frequency)
+            #for i in range(N):
+            #    try:
+            #        result = trapz(fX*Y[:, i], fX)/trapz(Y[:, i], fX)
+            #        regy.append(result)  
+            #        #if np.isnan(result) or np.isnan(result):
+            #        #    print fX, Y[:, i], len(signal), event.duration()
+            #    except:
+            #        print((fX.shape, Y.shape, fX.shape))
+            #        print((i, self.recordsInfo[-1].startTime, self.recordsInfo[-1].duration, event.timeStart(), event.duration()))
+            #        raise
+            # 
+            assert(not np.any(np.isnan(regy)))
+            assert(not np.any(np.isinf(regy)))
+            z = np.polyfit(regx, regy, deg=1)     
+    
+            event.properties["slopeOriginHilbert"] = z[1]
+            event.properties["slopeHilbert"]       = z[0]
+            #############
+
 
             
         elif method == "FFT":
@@ -363,46 +394,96 @@ class EEGDBReaderBase(object, metaclass=ABCMeta) :
         event.properties["modeFreq"] = freqMode
 
 
-    def computeFreqSlope(self, event, fmin=11, fmax=16):
-   
-        fs          = self.getChannelFreq(event.channel) 
-        data        = self.read([event.channel], event.timeStart(), event.duration())
-        signal      = data[event.channel].signal
 
-        nbMinSamples = self.getChannelFreq(event.channel)
-        N            = len(signal)
-        if len(signal) < nbMinSamples:
-            signal = np.concatenate((signal, np.zeros(nbMinSamples - N)))
+
+    def computeFreqSlope(self, event, fmin=11, fmax=16, method="hilbert",
+                         beforePadding=2, afterPadding=2, doubleFilt=True,
+                         keep_curve=True):
+
+        if method == "stransform":
+            # The filters need the signal to be at least 3*nbTaps
+            nbTaps      = 1001.0           
+            fs          = self.getChannelFreq(event.channel) 
+            duration    = max((nbTaps*3.0+1)/float(fs), event.duration())  
+            data        = self.read([event.channel], event.timeStart(), duration)
+            signal      = data[event.channel].signal
+    
+            nbMinSamples = int(self.getChannelFreq(event.channel))
+            N            = len(signal)
+            if len(signal) < nbMinSamples:
+                signal = np.concatenate((signal, np.zeros(nbMinSamples - N)))
+                
+            X, fX = computeST(signal, fs, fmin=fmin-1, fmax=fmax+1)  
+    
+            Y = abs(np.transpose(X))
+                            
+            regx = arange(N)/float(fs)
+            regy = []
+            for i in range(N):
+                try:
+                    result = trapz(fX*Y[:, i], fX)/float(trapz(Y[:, i], fX))
+                    regy.append(result)  
+                    #if np.isnan(result) or np.isnan(result):
+                    #    print fX, Y[:, i], len(signal), event.duration()
+                except:
+                    print((fX.shape, Y.shape, fX.shape))
+                    print((i, self.recordsInfo[-1].startTime, self.recordsInfo[-1].duration, event.timeStart(), event.duration()))
+                    raise
+    
+            assert(not np.any(np.isnan(regy)))
+            assert(not np.any(np.isinf(regy)))
+            z = np.polyfit(regx, regy, deg=1)     
+    
+            event.properties["slope"]       = z[0]
+
+        elif method == "hilbert":
+
+            if event.channel == "":
+                channel = self.getChannelLabels()[0]
+            else:
+                channel = event.channel
+        
+            fs          = self.getChannelFreq(channel) 
+            data        = self.read([channel], 
+                                      event.timeStart() + event.duration()/2.0 - beforePadding, 
+                                      afterPadding+beforePadding)
             
-        X, fX = computeST(signal, fs, fmin=fmin-1, fmax=fmax+1)  
-
-        Y = abs(np.transpose(X))
-                        
-        regx = arange(N)/fs
-        regy = []
-        for i in range(N):
-            try:
-                result = trapz(fX*Y[:, i], fX)/trapz(Y[:, i], fX)
-                regy.append(result)  
-                #if np.isnan(result) or np.isnan(result):
-                #    print fX, Y[:, i], len(signal), event.duration()
-            except:
-                print((fX.shape, Y.shape, fX.shape))
-                print((i, self.recordsInfo[-1].startTime, self.recordsInfo[-1].duration, event.timeStart(), event.duration()))
-                raise
-
-        assert(not np.any(np.isnan(regy)))
-        assert(not np.any(np.isinf(regy)))
-        z = np.polyfit(regx, regy, deg=1)     
-
-        event.properties["slopeOrigin"] = z[1]
-        event.properties["slope"]       = z[0]
-
-
-
-
-
-
+            decimate_factor = int(fs/100)
+            signal      = data[channel].signal
+            signal      -= np.mean(signal)
+            signal      = decimate(signal, decimate_factor, zero_phase=True)
+            fs          /= decimate_factor;
+        
+            bandPassFilter = Filter(fs)
+            order = int(len(signal)/3)-1
+            if order % 2 == 0:
+                order -= 1 # Need to be an odd number
+            #order = min(1001, order) # No need for the order to be higher than 1001
+            order = min(3001, order) # No need for the order to be higher than 1001
+        
+            bandPassFilter.create(low_crit_freq=fmin, high_crit_freq=fmax, order=order, 
+                                  btype="bandpass", ftype="FIR", useFiltFilt=True)          
+        
+            
+            signal = bandPassFilter.applyFilter(signal)    
+            if doubleFilt:
+                signal = bandPassFilter.applyFilter(signal)   
+        
+            analytic_signal = hilbert(signal)
+            instantaneous_phase = np.unwrap(np.angle(analytic_signal))
+            instantaneous_frequency = (np.diff(instantaneous_phase) /(2.0*np.pi) * fs)
+        
+            freq = running_mean(np.abs(instantaneous_frequency), int(fs/4))
+            regy = freq[int(len(freq)/2-fs/4):int(len(freq)/2+fs/4)]
+            regx = np.arange(len(regy))/float(fs)
+            ransac = linear_model.RANSACRegressor()
+            ransac.fit(regx[:, np.newaxis], regy)    
+            
+            event.properties["slope"] = ransac.estimator_.coef_[0]
+            if keep_curve:
+                event.properties["slopeCurve"] = freq
+            
+  
 
     def getEventIndicator(self, events, channel=None, time=None, checkUniqueness=False):
  
@@ -792,14 +873,14 @@ class EEGRecord:
 
     def getDuration(self):
         for channel in self.recordedSignals:
-            return float(len(self.recordedSignals[channel]))/self.samplingRates[channel]
+            return float(len(self.recordedSignals[channel]))/float(self.samplingRates[channel])
         
   
     def getSignal(self, channel):
         return self.recordedSignals[channel] 
         
     def getSignalTime(self, channel):
-        return arange(len(self.recordedSignals[channel]))/self.samplingRates[channel] + self.getStartTime()
+        return arange(len(self.recordedSignals[channel]))/float(self.samplingRates[channel]) + self.getStartTime()
   
   
   
