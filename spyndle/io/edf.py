@@ -379,6 +379,21 @@ class IntDict(dict):
 
 
 
+def rename_duplicated_channels(channels):
+    """
+     We don't allow for duplicated channel names. First because it poorly 
+     identifies the signals, second because it crash thre reader because of 
+     the use of dictionnaries indexed by channel names.
+    """
+    for item in channels:
+        if channels.count(item) > 1:
+            assert(channels.count(item) < 10)
+            no =1
+            for i in range(len(channels)):
+                if channels[i] == item:
+                    channels[i] = channels[i][:14] + "_" + str(no)
+                    no += 1        
+    return channels
 
 class EDFHeader :
     # BDF is a 24-bit version of the 16-bit EDF format, so we read it with the
@@ -425,12 +440,20 @@ class EDFHeader :
         # parse timestamp
         (day, month, year) = [int(x) for x in re.findall('(\d+)', f.read(8).decode('latin-1'))]
         (hour, minute, sec)= [int(x) for x in re.findall('(\d+)', f.read(8).decode('latin-1'))]
-        
-        # Guessing that the data are less than 100 years old....
-        year = year + (2000 if year + 2000 < datetime.date.today().year else 1900) 
-        self.startDateTime = datetime.datetime(year, month, day, hour, minute, sec)
-        
-        
+
+        try:        
+            # Guessing that the data are less than 100 years old....
+            year = year + (2000 if year + 2000 < datetime.date.today().year else 1900) 
+            self.startDateTime = datetime.datetime(year, month, day, hour, minute, sec)
+        except ValueError:
+            if month > 12:
+                warnings.warn("Found a month larger than 12 for the recording date. " + 
+                              "Considering that the month and the day in the date "   +
+                              "format have been inverted. Correcting.")
+                self.startDateTime = datetime.datetime(year, day, month, hour, minute, sec)
+            else:
+                raise
+
         # misc
         self.headerNbBytes      = int(f.read(8))
         self.subtype            = f.read(44).decode('latin-1')[:5]
@@ -457,6 +480,8 @@ class EDFHeader :
         
         # read channel info
         self.channelLabels      = [f.read(16).decode('latin-1').strip() for n in range(self.nbChannels)]
+        self.channelLabels      = rename_duplicated_channels(self.channelLabels)
+        
 
         self.transducerType     = {}
         self.units              = {}
@@ -678,6 +703,8 @@ class EDFHeader :
         
         # read channel info
         self.channelLabels      = list(reformattedChannels.keys())
+        self.channelLabels      = rename_duplicated_channels(self.channelLabels)
+                
         for i, channel in enumerate(self.channelLabels):
             if len(channel) > 16:
                 self.channelLabels[i] = channel[:16]
@@ -1361,6 +1388,9 @@ class EDFBaseReader(EEGDBReaderBase) :
         time = concatenate([e.startTime + recordTime for e in recs])        
         return time[np.where((time >= startTime)*(time < endTime))]
 
+
+
+
     """
      Convert a String of bytes to an array of integers.
     """
@@ -1428,7 +1458,7 @@ class EDFBaseReader(EEGDBReaderBase) :
      record. This is useful for example when the signal is actually a 
      text string.
     """
-    def readChannel(self, signalName, usePickled=False, startTime=None, endTime=None, decode=True):
+    def readChannel(self, signalName, usePickled=False, startTime=None, decode=True):
 
         if not isinstance(signalName, str) :
             raise TypeError("The signalName argument must be a string. Received: " + str(type(signalName)))
@@ -1558,7 +1588,7 @@ class EDFBaseReader(EEGDBReaderBase) :
 
 
     def read(self, signalNames, startTime, timeDuration, debug=False):
-                
+     
         records = []
         for noRecord, startTimeEvent in enumerate(self.recordsInfo):
             recordStartTime = startTimeEvent.startTime
@@ -1569,7 +1599,9 @@ class EDFBaseReader(EEGDBReaderBase) :
                 break
             
             if recordStartTime + recordDuration >= startTime:
-                records.append(self.readRecord(signalNames, noRecord+1))
+                record = self.readRecord(signalNames, noRecord+1)
+                records.append(record)
+            
                 #try:
                 #    assert(records[-1].getStartTime() == recordStartTime)
                 #except AssertionError:
@@ -1587,7 +1619,7 @@ class EDFBaseReader(EEGDBReaderBase) :
             signals[channel] = concatenate([rec.recordedSignals[channel] for rec in records])
             time[channel]    = concatenate([rec.getStartTime() + arange(len(rec.recordedSignals[channel]))/float(self.getChannelFreq(channel))
                                                                         for rec in records])
-                                                
+                              
         info.time = time            
         info.recordedSignals = signals            
 
@@ -1604,15 +1636,14 @@ class EDFBaseReader(EEGDBReaderBase) :
             time = info.time[channel]
             ind  = where((time >= startTime)*(time < startTime + timeDuration))[0]
             
-            
             try:
                 assert(len(ind)>0)
             except :
-                print(("time: ", time))
-                print((info.getStartTime(), len(info.recordedSignals[channel]), info.samplingRates[channel]))
-                print((startTime, timeDuration))
+                print("time: ", time[0], " ... ", time[-1])
+                print(info.getStartTime(), len(info.recordedSignals[channel]), info.samplingRates[channel])
+                print(startTime, timeDuration)
+                print(channel)
                 raise
-
 
             returnData[channel]                = RecordedChannel()               
             returnData[channel].samplingRate   = info.samplingRates[channel]
@@ -1642,6 +1673,7 @@ class EDFBaseReader(EEGDBReaderBase) :
                 #print nbSamples        
                 #print abs(duration - self.getRecordDuration()), duration, self.getRecordDuration()
                 self.changeRecordDuration(duration)
+        
         
     def getRecordDuration(self):
         return self.header.recordDuration
@@ -1699,12 +1731,21 @@ class EDFBaseReader(EEGDBReaderBase) :
 
         result = {}
         
+        init_pos = fileObj.tell()
         for channel in self.header.channelLabels:
             nbBytes = self.header.nbSamplesPerRecord[channel]*self.header.nbBytes
             result[channel] = fileObj.read(nbBytes)
             if len(result[channel]) != nbBytes :
                 raise EOFError  
                 
+        new_pos = fileObj.tell()                
+        try:
+            assert(new_pos - init_pos == self.header.recordSize)
+        except:
+            print(new_pos, init_pos, self.header.recordSize, new_pos - init_pos, 
+                  self.header.channelLabels)
+            raise
+        
         return result
 
 
@@ -1714,15 +1755,16 @@ class EDFBaseReader(EEGDBReaderBase) :
     '''    
     def readFormatedRecord(self, fileObj):
 
+        record_start_pos = fileObj.tell()
         rawRecord = self.readRawRecord(fileObj)    
         
         #dig_min, phys_min, gain = self.dig_min, self.phys_min, self.gain
-            
         #offset_seconds = self.currentRecordInd*self.header.record_length      
         #time = self.header.date_time + datetime.timedelta(0,offset_seconds)
         signals = {}
         events = []
         time = None
+
         for channel in rawRecord:
             if channel == self.eventChannel:
                 ann = tal(rawRecord[channel])
@@ -1735,8 +1777,8 @@ class EDFBaseReader(EEGDBReaderBase) :
                 signals[channel] = self.digital2physical(dig, channel)
         
         if time is None:
-            recordNo = (fileObj.tell()-self.header.headerNbBytes)/float(self.header.recordSize)
-            time = self.header.startDateTime + datetime.timedelta(0, recordNo*self.header.recordDuration )           
+            recordNo = (record_start_pos-self.header.headerNbBytes)/float(self.header.recordSize)
+            time = self.header.startDateTime + datetime.timedelta(0, recordNo*self.header.recordDuration ) 
         
         return time, signals, events
 
