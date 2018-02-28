@@ -43,6 +43,7 @@ from spyndle import Filter
 
 from scipy.signal import decimate
 from sklearn import linear_model
+
 def running_mean(x, N):
     cumsum = np.cumsum(np.insert(x, 0, 0)) 
     return (cumsum[N:] - cumsum[:-N]) / float(N)
@@ -855,6 +856,12 @@ class EEGRecord:
         self.samplingRates      = samplingRates
 
 
+    def __str__(self):
+        return "{recordStartTime: " + str(self.recordStartTime) +           \
+                ", recordingStartTime: " + str(self.recordingStartTime) +   \
+                ", recordedSignals: " + str(self.recordedSignals) +         \
+                ", samplingRates: " + str(self.samplingRates) + "}"
+
         
     """
      Return the datetime object corresponding to the starting of the record.
@@ -944,7 +951,14 @@ class EEGRecordInfo(SortedMember):
             raise TypeError            
             
         
-        
+    def __str__(self):
+        return "{startSample:" + str(self.startSample) +\
+                ", endSample:" + str(self.endSample) +\
+                ", startTime:" + str(self.startTime) +\
+                ", duration:" + str(self.duration) +\
+                ", isComplete:" + str(self.isComplete) +  "}"     
+            
+            
         
     def getNbSamples(self):
         return self.endSample - self.startSample+1
