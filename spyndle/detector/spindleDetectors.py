@@ -69,6 +69,23 @@ class DetectedSpindle(DetectedEvent):
         self.slopeOrigin    = 0.0
         self.slope          = 0.0
 
+
+
+
+    def __str__(self):
+        return   "{channel:"      + str(self.channel)       \
+               + ", startTime:"   + str(self.startTime())   \
+               + ", endTime:"     + str(self.endTime())     \
+               + ", RMSAmp:"      + str(self.RMSAmp)        \
+               + ", meanFreq:"    + str(self.meanFreq)      \
+               + ", sleepStage:"  + str(self.sleepStage)    \
+               + ", sleepStage:"  + str(self.sleepStage)    \
+               + ", slopeOrigin:" + str(self.slopeOrigin)   \
+               + ", slope:"       + str(self.slope) + "}"
+
+
+
+
     def computeRMS(self, fmin=11, fmax=16, reader=None):
         raise UserWarning("The code of this function need to be recoded to use time rather than sample.")        
         
