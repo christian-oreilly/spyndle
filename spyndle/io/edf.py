@@ -404,6 +404,32 @@ class EDFHeader :
             self.fileName = fileName
             self.eventChannel = eventChannel
 
+
+
+    def __str__(self):
+        return \
+        "File type           :" + str(self.fileType) + "\n" + \
+        "Byte per number     :" + str(self.nbBytes)  + "\n" + \
+        "Subject id          :" + str(self.subjectID)  + "\n" + \
+        "Recording id        :" + str(self.recordingIR)  + "\n" + \
+        "Recording start time:" + str(self.startDateTime)  + "\n" + \
+        "Header size (bytes) :" + str(self.headerNbBytes)  + "\n" + \
+        "Recording subtypes  :" + str(self.subtype)  + "\n" + \
+        "Contiguous          :" + str(self.contiguous)  + "\n" + \
+        "Number of records   :" + str(self.nbRecords)  + "\n" + \
+        "Record duration     :" + str(self.recordDuration)  + "\n" + \
+        "Number of channels  :" + str(self.nbChannels)  + "\n" + \
+        "Units               :" + str(self.units)  + "\n" + \
+        "Physical minima     :" + str(self.physicalMin)  + "\n" + \
+        "Physical maxima     :" + str(self.physicalMax)  + "\n" + \
+        "Digital minima      :" + str(self.digitalMin)  + "\n" + \
+        "Digital maxima      :" + str(self.digitalMax)  + "\n" + \
+        "Prefiltering        :" + str(self.prefiltering)  + "\n" + \
+        "Number of records   :" + str(self.nbSamplesPerRecord)  + "\n" + \
+        "Sampling rate       :" + str(self.samplingRate)  + "\n" + \
+        "Gain                :" + str(self.gain)
+
+
     def anonymize(self):         
         self.subjectID = "X X X X"
         self.recordingIR = "Startdate X X X X"
@@ -411,9 +437,6 @@ class EDFHeader :
         # Guessing that the data are less than 100 years old....
         self.startDateTime = datetime.datetime(2000, 1, 1, self.startDateTime.hour, 
                                                self.startDateTime.minute, self.startDateTime.second)
-        
-        
-        
         
         
         
