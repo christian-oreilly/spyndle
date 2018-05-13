@@ -37,7 +37,6 @@ import copy, gc
 from abc import ABCMeta, abstractmethod
 import numpy as np
 
-
 from scipy import concatenate, ones, unique, diff, where
 
 from datetime import timedelta
@@ -54,8 +53,6 @@ from spyndle import Filter
 
 
 
-
-
 # Class representing a detected event.
 class DetectedEvent(object):
     def __init__(self, channel, startTime, endTime):
@@ -69,10 +66,19 @@ class DetectedEvent(object):
         # Event ending time
         self.__endTime   = endTime
 
-        self.timeDuration   = endTime - startTime        
+    def __str__(self):
+        return "{channel:" + str(self.channel)              \
+               + ", startTime:" + str(self.__startTime)     \
+               + ", endtime:" + str(self.__endTime) + "}"
+
 
     def duration(self):
         return self.timeDuration
+        
+    @property
+    def timeDuration(self):
+        return self.endTime() - self.startTime() 
+        
 
     def startTime(self):
         return self.__startTime
@@ -565,8 +571,8 @@ class ThresholdDetector(TransientDetector, metaclass=ABCMeta):
 
             #data            = self.reader.readChannel(channel, usePickled=self.usePickled)  
             data            = self.reader.read([channel], startTime, timeDuration)[channel]  
-            channelTime     = self.reader.getChannelTime(channel, 
-                                                      startTime=startTime, timeDuration=timeDuration)   
+            channelTime     = self.reader.getChannelTime(channel, startTime=startTime, 
+                                                         timeDuration=timeDuration)   
             assert(len(channelTime) == len(data.signal))
 
             samplesIndicators = self.reader.getEventIndicator(stageEvents, time=channelTime)  
@@ -652,6 +658,9 @@ class ThresholdDetector(TransientDetector, metaclass=ABCMeta):
             startInd     = startInd[valid]
             stopInd      = stopInd[valid]
             duration     = duration[valid]               
+            
+            assert(np.all([end-start<= self.maximalDuration and end-start >= self.minimalDuration 
+                           for start, end in zip(channelTime[startInd], channelTime[stopInd])]))
             
             newEvents = [DetectedClass(channel, start, end) for start, end in 
                                 zip(channelTime[startInd], channelTime[stopInd])]   
