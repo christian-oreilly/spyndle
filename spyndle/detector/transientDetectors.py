@@ -443,6 +443,7 @@ class ThresholdDetector(TransientDetector, metaclass=ABCMeta):
         # self.perStage.
         self.perCycle = True
         self.perStage = True
+        self.detectionCycles = None
 
         ###############################################################################
 
@@ -493,6 +494,8 @@ class ThresholdDetector(TransientDetector, metaclass=ABCMeta):
         detectStruct = []
         if self.perCycle :
             cycles = computeDreamCycles([e for e in self.reader.events if e.groupName.lower() == "stage"], self.aeschbachCycleDef)
+            if self.detectionCycles is not None:
+                cycles = [cycles[no_cycle] for no_cycle in self.detectionCycles]
             for i, cycle in enumerate(cycles) :
                 if verbose: print(("Sleep cycle ", i+1))
                 events = self.reader.getEventsByTime(cycle.timeStart(), cycle.timeEnd())               
